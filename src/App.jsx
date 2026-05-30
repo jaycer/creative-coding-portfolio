@@ -490,7 +490,7 @@ export default function ShaderCompositor() {
           <div id={`layer-${layer.id}`} key={layer.id} style={{
             marginBottom: 8, border: `1px solid ${layer.enabled ? meta.color + "44" : "#222"}`,
             borderRadius: 4, overflow: "hidden",
-            opacity: layer.enabled ? 1 : 0.75,
+            opacity: layer.enabled ? 1 : 0.35,
             transition: "opacity 0.2s, border-color 0.2s"
           }}>
             {/* Header */}
@@ -615,9 +615,9 @@ export default function ShaderCompositor() {
           onClick={() => setShowControls(v => !v)}
           style={{
             position: "absolute", top: 14, right: 14, pointerEvents: "all",
-            background: showControls ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.12)",
-            borderRadius: 4, color: showControls ? "#fff" : "rgba(255,255,255,0.4)",
+            background: "rgba(255,255,255,0.15)",
+            border: "1px solid rgba(255,255,255,0.4)",
+            borderRadius: 4, color: "#fff",
             cursor: "pointer", padding: "5px 8px", display: "flex", alignItems: "center",
             transition: "all 0.15s", fontSize: "0.65em", lineHeight: 1
           }}
@@ -633,7 +633,7 @@ export default function ShaderCompositor() {
         <div id="controls-modal" style={{
           position: "absolute", top: 14, right: 14,
           width: 280, maxHeight: "calc(100vh - 60px)", overflowY: "auto",
-          background: "rgba(10, 10, 14, 0.75)",
+          background: "rgba(10, 10, 14, 0.4)",
           backdropFilter: "blur(12px)",
           WebkitBackdropFilter: "blur(12px)",
           border: "1px solid rgba(255,255,255,0.1)",
@@ -642,17 +642,18 @@ export default function ShaderCompositor() {
         }}>
           <div id="modal-header" style={{
             padding: "14px 16px 10px", borderBottom: "1px solid rgba(255,255,255,0.08)",
-            fontSize: "0.65em", letterSpacing: "0.2em", color: "#888",
+            fontSize: "0.65em", letterSpacing: "0.2em", color: "#ccc",
             display: "flex", alignItems: "center", justifyContent: "space-between"
           }}>
-            SHADER LAYERS
+            BRICKS
             <button id="modal-close" onClick={() => setShowControls(false)} style={{
-              background: "none", border: "none", color: "#888", cursor: "pointer",
-              fontSize: "14px", lineHeight: 1, padding: "0 2px",
+              background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.3)",
+              borderRadius: 3, color: "#fff", cursor: "pointer",
+              fontSize: "14px", lineHeight: 1, padding: "2px 6px",
               display: "flex", alignItems: "center"
             }}
-            onMouseEnter={e => e.currentTarget.style.color = "#fff"}
-            onMouseLeave={e => e.currentTarget.style.color = "#888"}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
+            onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.1)"}
             >✕</button>
           </div>
           {layerPanel}
@@ -664,8 +665,8 @@ export default function ShaderCompositor() {
 
 const btnStyle = {
   width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
-  background: "transparent", border: "1px solid #333", borderRadius: 2,
-  color: "#888", fontSize: "0.65em", cursor: "pointer", padding: 0,
+  background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 2,
+  color: "#fff", fontSize: "0.65em", cursor: "pointer", padding: 0,
   lineHeight: 1
 };
 
