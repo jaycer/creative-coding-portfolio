@@ -602,7 +602,7 @@ export default function ShaderCompositor() {
 
   return (
     <div id="app" style={{
-      width: "100vw", height: "100vh", background: "#0a0a0c",
+      width: "100vw", height: "100dvh", background: "#0a0a0c",
       fontFamily: "system-ui, 'Segoe UI', Roboto, sans-serif",
       color: "#e0e0e0", overflow: "hidden", position: "relative",
       cursor: cursorHidden ? "none" : "default"
