@@ -225,6 +225,7 @@ export default function ShaderCompositor() {
   const mouseRef = useRef([0, 0]);
 
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showControls, setShowControls] = useState(false);
   const canvasWrapRef = useRef(null);
 
   const toggleFullscreen = useCallback(() => {
@@ -480,16 +481,118 @@ export default function ShaderCompositor() {
 
   const BLEND_MODES = ["normal", "add", "screen", "multiply"];
 
+  const layerPanel = (
+    <div id="layer-list" style={{ padding: "10px 12px" }}>
+      {layers.map((layer, idx) => {
+        const meta = SHADERS[layer.id];
+        if (!meta) return null;
+        return (
+          <div id={`layer-${layer.id}`} key={layer.id} style={{
+            marginBottom: 8, border: `1px solid ${layer.enabled ? meta.color + "44" : "#222"}`,
+            borderRadius: 4, overflow: "hidden",
+            opacity: layer.enabled ? 1 : 0.75,
+            transition: "opacity 0.2s, border-color 0.2s"
+          }}>
+            {/* Header */}
+            <div id={`layer-${layer.id}-header`} style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "8px 10px", background: layer.enabled ? meta.color + "18" : "#16161a",
+            }}>
+              <div id={`layer-${layer.id}-indicator`} onClick={() => updateLayer(layer.id, "enabled", !layer.enabled)} style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: layer.enabled ? meta.color : "#333",
+                boxShadow: layer.enabled ? `0 0 6px ${meta.color}` : "none",
+                transition: "all 0.2s", flexShrink: 0, cursor: "pointer"
+              }} />
+              <span id={`layer-${layer.id}-name`} style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb" }}>
+                {meta.name.toUpperCase()}
+                {meta.isComposite && <span style={{ marginLeft: 6, fontSize: 9, color: "#4ade80", opacity: 0.7 }}>FX</span>}
+              </span>
+              <div id={`layer-${layer.id}-move-btns`} style={{ display: "flex", gap: 2 }}>
+                <button id={`layer-${layer.id}-move-up`} onClick={() => moveLayer(idx, -1)} style={btnStyle}>↑</button>
+                <button id={`layer-${layer.id}-move-down`} onClick={() => moveLayer(idx, 1)} style={btnStyle}>↓</button>
+                <button id={`layer-${layer.id}-expand`} onClick={() => updateLayer(layer.id, "expanded", !layer.expanded)} style={btnStyle}>
+                  {layer.expanded ? "▲" : "▼"}
+                </button>
+              </div>
+            </div>
+
+            {layer.expanded && (
+              <div id={`layer-${layer.id}-controls`} style={{ padding: "8px 10px 10px", background: "rgba(10,10,14,0.6)" }}>
+                {/* Opacity */}
+                <label id={`layer-${layer.id}-opacity-label`} style={labelStyle}>OPACITY</label>
+                <div id={`layer-${layer.id}-opacity-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input id={`layer-${layer.id}-opacity-slider`} type="range" min={0} max={1} step={0.01}
+                    value={layer.opacity}
+                    onChange={e => updateLayer(layer.id, "opacity", parseFloat(e.target.value))}
+                    style={sliderStyle(meta.color)}
+                  />
+                  <span id={`layer-${layer.id}-opacity-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
+                    {Math.round(layer.opacity * 100)}
+                  </span>
+                </div>
+
+                {/* Speed */}
+                <label id={`layer-${layer.id}-speed-label`} style={{ ...labelStyle, marginTop: 8 }}>SPEED</label>
+                <div id={`layer-${layer.id}-speed-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input id={`layer-${layer.id}-speed-slider`} type="range" min={0} max={4} step={0.01}
+                    value={layer.speed}
+                    onChange={e => updateLayer(layer.id, "speed", parseFloat(e.target.value))}
+                    style={sliderStyle(meta.color)}
+                  />
+                  <span id={`layer-${layer.id}-speed-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
+                    {layer.speed.toFixed(1)}x
+                  </span>
+                </div>
+
+                {/* Zoom */}
+                <label id={`layer-${layer.id}-zoom-label`} style={{ ...labelStyle, marginTop: 8 }}>ZOOM</label>
+                <div id={`layer-${layer.id}-zoom-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input id={`layer-${layer.id}-zoom-slider`} type="range" min={0.1} max={4} step={0.01}
+                    value={layer.zoom}
+                    onChange={e => updateLayer(layer.id, "zoom", parseFloat(e.target.value))}
+                    style={sliderStyle(meta.color)}
+                  />
+                  <span id={`layer-${layer.id}-zoom-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
+                    {layer.zoom.toFixed(1)}x
+                  </span>
+                </div>
+
+                {/* Blend mode */}
+                <label id={`layer-${layer.id}-blend-label`} style={{ ...labelStyle, marginTop: 8 }}>BLEND</label>
+                <div id={`layer-${layer.id}-blend-btns`} style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {BLEND_MODES.map(mode => (
+                    <button id={`layer-${layer.id}-blend-${mode}`} key={mode}
+                      onClick={() => updateLayer(layer.id, "blendMode", mode)}
+                      style={{
+                        padding: "3px 7px", fontSize: 9, borderRadius: 2,
+                        border: `1px solid ${layer.blendMode === mode ? meta.color : "#333"}`,
+                        background: layer.blendMode === mode ? meta.color + "22" : "transparent",
+                        color: layer.blendMode === mode ? meta.color : "#aaa",
+                        cursor: "pointer", letterSpacing: "0.08em", textTransform: "uppercase",
+                        transition: "all 0.15s"
+                      }}>
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <div id="app" style={{
-      display: "flex", height: "100vh", background: "#0a0a0c",
+      width: "100vw", height: "100vh", background: "#0a0a0c",
       fontFamily: "'IBM Plex Mono', 'Courier New', monospace",
-      color: "#e0e0e0", overflow: "hidden"
+      color: "#e0e0e0", overflow: "hidden", position: "relative"
     }}>
-      {/* Canvas */}
+      {/* Canvas — always fills full screen */}
       <div id="canvas-wrap" ref={canvasWrapRef} style={{
-        flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
-        background: "#0a0a0c"
+        position: "absolute", inset: 0
       }}>
         <canvas
           id="gl-canvas"
@@ -497,6 +600,10 @@ export default function ShaderCompositor() {
           onMouseMove={handleMouseMove}
           style={{ width: "100%", height: "100%", display: "block" }}
         />
+      </div>
+
+      {/* HUD — title + controls button */}
+      <div id="hud" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
         <div id="title-bar" style={{
           position: "absolute", top: 14, left: 18,
           fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.6)", letterSpacing: "0.12em"
@@ -504,151 +611,44 @@ export default function ShaderCompositor() {
           BENT MACE BRICK LAYER — {fps} FPS
         </div>
         <button
-          id="fullscreen-btn"
-          onClick={toggleFullscreen}
-          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          id="controls-btn"
+          onClick={() => setShowControls(v => !v)}
           style={{
-            position: "absolute", top: 10, right: 14,
-            background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
-            borderRadius: 4, color: "rgba(255,255,255,0.4)", cursor: "pointer",
-            padding: "5px 8px", display: "flex", alignItems: "center", justifyContent: "center",
+            position: "absolute", top: 10, right: 14, pointerEvents: "all",
+            background: showControls ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.12)",
+            borderRadius: 4, color: showControls ? "#fff" : "rgba(255,255,255,0.4)",
+            cursor: "pointer", padding: "5px 8px", display: "flex", alignItems: "center",
             transition: "all 0.15s", fontSize: 13, lineHeight: 1
           }}
-          onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.12)"; e.currentTarget.style.color = "#fff"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.4)"; }}
+          onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.2)"; e.currentTarget.style.color = "#fff"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = showControls ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)"; e.currentTarget.style.color = showControls ? "#fff" : "rgba(255,255,255,0.4)"; }}
         >
-          {isFullscreen ? "✕" : "⤢"}
-          <span id="fullscreen-label" style={{ fontSize: 9, letterSpacing: "0.12em", marginLeft: 6 }}>
-            {isFullscreen ? "EXIT" : "FULLSCREEN"}
-          </span>
+          <span id="controls-label" style={{ fontSize: 9, letterSpacing: "0.12em" }}>CONTROLS</span>
         </button>
       </div>
 
-      {/* Panel */}
-      {!isFullscreen && <div id="panel" style={{
-        width: 280, background: "#111114", borderLeft: "1px solid #222228",
-        display: "flex", flexDirection: "column", overflowY: "auto"
-      }}>
-        <div id="panel-header" style={{
-          padding: "18px 20px 14px", borderBottom: "1px solid #1e1e26",
-          fontSize: 10, letterSpacing: "0.2em", color: "#888"
+      {/* Controls modal — transparent, floating */}
+      {showControls && (
+        <div id="controls-modal" style={{
+          position: "absolute", top: 44, right: 14,
+          width: 280, maxHeight: "calc(100vh - 60px)", overflowY: "auto",
+          background: "rgba(10, 10, 14, 0.75)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 8,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
         }}>
-          SHADER LAYERS
+          <div id="modal-header" style={{
+            padding: "14px 16px 10px", borderBottom: "1px solid rgba(255,255,255,0.08)",
+            fontSize: 10, letterSpacing: "0.2em", color: "#888"
+          }}>
+            SHADER LAYERS
+          </div>
+          {layerPanel}
         </div>
-
-        <div id="layer-list" style={{ padding: "10px 12px", flex: 1 }}>
-          {layers.map((layer, idx) => {
-            const meta = SHADERS[layer.id];
-            if (!meta) return null;
-            return (
-              <div id={`layer-${layer.id}`} key={layer.id} style={{
-                marginBottom: 8, border: `1px solid ${layer.enabled ? meta.color + "44" : "#222"}`,
-                borderRadius: 4, overflow: "hidden",
-                opacity: layer.enabled ? 1 : 0.75,
-                transition: "opacity 0.2s, border-color 0.2s"
-              }}>
-                {/* Header */}
-                <div id={`layer-${layer.id}-header`} style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  padding: "8px 10px", background: layer.enabled ? meta.color + "18" : "#16161a",
-                }}>
-                  <div id={`layer-${layer.id}-indicator`} onClick={() => updateLayer(layer.id, "enabled", !layer.enabled)} style={{
-                    width: 8, height: 8, borderRadius: "50%",
-                    background: layer.enabled ? meta.color : "#333",
-                    boxShadow: layer.enabled ? `0 0 6px ${meta.color}` : "none",
-                    transition: "all 0.2s", flexShrink: 0, cursor: "pointer"
-                  }} />
-                  <span id={`layer-${layer.id}-name`} style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb" }}>
-                    {meta.name.toUpperCase()}
-                    {meta.isComposite && <span style={{ marginLeft: 6, fontSize: 9, color: "#4ade80", opacity: 0.7 }}>FX</span>}
-                  </span>
-                  <div id={`layer-${layer.id}-move-btns`} style={{ display: "flex", gap: 2 }}>
-                    <button id={`layer-${layer.id}-move-up`} onClick={() => moveLayer(idx, -1)} style={btnStyle}>↑</button>
-                    <button id={`layer-${layer.id}-move-down`} onClick={() => moveLayer(idx, 1)} style={btnStyle}>↓</button>
-                    <button id={`layer-${layer.id}-expand`} onClick={() => updateLayer(layer.id, "expanded", !layer.expanded)} style={btnStyle}>
-                      {layer.expanded ? "▲" : "▼"}
-                    </button>
-                  </div>
-                </div>
-
-                {layer.expanded && (
-                  <div id={`layer-${layer.id}-controls`} style={{ padding: "8px 10px 10px", background: "#0e0e12" }}>
-                    {/* Opacity */}
-                    <label id={`layer-${layer.id}-opacity-label`} style={labelStyle}>OPACITY</label>
-                    <div id={`layer-${layer.id}-opacity-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input id={`layer-${layer.id}-opacity-slider`} type="range" min={0} max={1} step={0.01}
-                        value={layer.opacity}
-                        onChange={e => updateLayer(layer.id, "opacity", parseFloat(e.target.value))}
-                        style={sliderStyle(meta.color)}
-                      />
-                      <span id={`layer-${layer.id}-opacity-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
-                        {Math.round(layer.opacity * 100)}
-                      </span>
-                    </div>
-
-                    {/* Speed */}
-                    <label id={`layer-${layer.id}-speed-label`} style={{ ...labelStyle, marginTop: 8 }}>SPEED</label>
-                    <div id={`layer-${layer.id}-speed-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input id={`layer-${layer.id}-speed-slider`} type="range" min={0} max={4} step={0.01}
-                        value={layer.speed}
-                        onChange={e => updateLayer(layer.id, "speed", parseFloat(e.target.value))}
-                        style={sliderStyle(meta.color)}
-                      />
-                      <span id={`layer-${layer.id}-speed-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
-                        {layer.speed.toFixed(1)}x
-                      </span>
-                    </div>
-
-                    {/* Zoom */}
-                    <label id={`layer-${layer.id}-zoom-label`} style={{ ...labelStyle, marginTop: 8 }}>ZOOM</label>
-                    <div id={`layer-${layer.id}-zoom-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input id={`layer-${layer.id}-zoom-slider`} type="range" min={0.1} max={4} step={0.01}
-                        value={layer.zoom}
-                        onChange={e => updateLayer(layer.id, "zoom", parseFloat(e.target.value))}
-                        style={sliderStyle(meta.color)}
-                      />
-                      <span id={`layer-${layer.id}-zoom-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
-                        {layer.zoom.toFixed(1)}x
-                      </span>
-                    </div>
-
-                    {/* Blend mode */}
-                    <label id={`layer-${layer.id}-blend-label`} style={{ ...labelStyle, marginTop: 8 }}>BLEND</label>
-                    <div id={`layer-${layer.id}-blend-btns`} style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      {BLEND_MODES.map(mode => (
-                        <button id={`layer-${layer.id}-blend-${mode}`} key={mode}
-                          onClick={() => updateLayer(layer.id, "blendMode", mode)}
-                          style={{
-                            padding: "3px 7px", fontSize: 9, borderRadius: 2,
-                            border: `1px solid ${layer.blendMode === mode ? meta.color : "#333"}`,
-                            background: layer.blendMode === mode ? meta.color + "22" : "transparent",
-                            color: layer.blendMode === mode ? meta.color : "#aaa",
-                            cursor: "pointer", letterSpacing: "0.08em", textTransform: "uppercase",
-                            transition: "all 0.15s"
-                          }}>
-                          {mode}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Footer */}
-        <div id="panel-footer" style={{
-          padding: "12px 16px", borderTop: "1px solid #1a1a20",
-          fontSize: 9, color: "#888", lineHeight: 1.8, letterSpacing: "0.08em"
-        }}>
-          <div id="panel-footer-title" style={{ color: "#aaa", marginBottom: 4, fontSize: 10 }}>HOW IT WORKS</div>
-          Each layer renders to an FBO.<br />
-          Outputs chain as <span style={{ color: "#bbb" }}>uPrev</span> uniforms.<br />
-          Blend modes composite in screen space.<br />
-          Mouse → <span style={{ color: "#bbb" }}>iMouse</span> uniform.
-        </div>
-      </div>}
+      )}
     </div>
   );
 }
