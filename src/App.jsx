@@ -500,7 +500,7 @@ export default function ShaderCompositor() {
       }}>
         <div style={{
           padding: "18px 20px 14px", borderBottom: "1px solid #1e1e26",
-          fontSize: 10, letterSpacing: "0.2em", color: "#555"
+          fontSize: 10, letterSpacing: "0.2em", color: "#888"
         }}>
           SHADER LAYERS
         </div>
@@ -513,7 +513,7 @@ export default function ShaderCompositor() {
               <div key={layer.id} style={{
                 marginBottom: 8, border: `1px solid ${layer.enabled ? meta.color + "44" : "#222"}`,
                 borderRadius: 4, overflow: "hidden",
-                opacity: layer.enabled ? 1 : 0.45,
+                opacity: layer.enabled ? 1 : 0.75,
                 transition: "opacity 0.2s, border-color 0.2s"
               }}>
                 {/* Header */}
@@ -528,7 +528,7 @@ export default function ShaderCompositor() {
                     boxShadow: layer.enabled ? `0 0 6px ${meta.color}` : "none",
                     transition: "all 0.2s", flexShrink: 0
                   }} />
-                  <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#555" }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb" }}>
                     {meta.name.toUpperCase()}
                     {meta.isComposite && <span style={{ marginLeft: 6, fontSize: 9, color: "#4ade80", opacity: 0.7 }}>FX</span>}
                   </span>
@@ -548,7 +548,7 @@ export default function ShaderCompositor() {
                         onChange={e => updateLayer(layer.id, "opacity", parseFloat(e.target.value))}
                         style={sliderStyle(meta.color)}
                       />
-                      <span style={{ fontSize: 10, color: "#666", width: 30, textAlign: "right" }}>
+                      <span style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
                         {Math.round(layer.opacity * 100)}
                       </span>
                     </div>
@@ -563,7 +563,7 @@ export default function ShaderCompositor() {
                             padding: "3px 7px", fontSize: 9, borderRadius: 2,
                             border: `1px solid ${layer.blendMode === mode ? meta.color : "#333"}`,
                             background: layer.blendMode === mode ? meta.color + "22" : "transparent",
-                            color: layer.blendMode === mode ? meta.color : "#555",
+                            color: layer.blendMode === mode ? meta.color : "#aaa",
                             cursor: "pointer", letterSpacing: "0.08em", textTransform: "uppercase",
                             transition: "all 0.15s"
                           }}>
@@ -581,13 +581,13 @@ export default function ShaderCompositor() {
         {/* Footer */}
         <div style={{
           padding: "12px 16px", borderTop: "1px solid #1a1a20",
-          fontSize: 9, color: "#333", lineHeight: 1.8, letterSpacing: "0.08em"
+          fontSize: 9, color: "#888", lineHeight: 1.8, letterSpacing: "0.08em"
         }}>
-          <div style={{ color: "#444", marginBottom: 4, fontSize: 10 }}>HOW IT WORKS</div>
+          <div style={{ color: "#aaa", marginBottom: 4, fontSize: 10 }}>HOW IT WORKS</div>
           Each layer renders to an FBO.<br />
-          Outputs chain as <span style={{ color: "#666" }}>uPrev</span> uniforms.<br />
+          Outputs chain as <span style={{ color: "#bbb" }}>uPrev</span> uniforms.<br />
           Blend modes composite in screen space.<br />
-          Mouse → <span style={{ color: "#666" }}>iMouse</span> uniform.
+          Mouse → <span style={{ color: "#bbb" }}>iMouse</span> uniform.
         </div>
       </div>}
     </div>
@@ -597,13 +597,13 @@ export default function ShaderCompositor() {
 const btnStyle = {
   width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
   background: "transparent", border: "1px solid #333", borderRadius: 2,
-  color: "#555", fontSize: 11, cursor: "pointer", padding: 0,
+  color: "#888", fontSize: 11, cursor: "pointer", padding: 0,
   lineHeight: 1
 };
 
 const labelStyle = {
   display: "block", fontSize: 9, letterSpacing: "0.15em",
-  color: "#444", marginBottom: 4, marginTop: 2
+  color: "#aaa", marginBottom: 4, marginTop: 2
 };
 
 const sliderStyle = (color) => ({
