@@ -226,7 +226,23 @@ export default function ShaderCompositor() {
 
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const [cursorHidden, setCursorHidden] = useState(false);
+  const cursorTimerRef = useRef(null);
   const canvasWrapRef = useRef(null);
+
+  useEffect(() => {
+    const handleMouseMove = () => {
+      setCursorHidden(false);
+      clearTimeout(cursorTimerRef.current);
+      cursorTimerRef.current = setTimeout(() => setCursorHidden(true), 10000);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    cursorTimerRef.current = setTimeout(() => setCursorHidden(true), 10000);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      clearTimeout(cursorTimerRef.current);
+    };
+  }, []);
 
   const toggleFullscreen = useCallback(() => {
     const el = canvasWrapRef.current;
@@ -588,7 +604,8 @@ export default function ShaderCompositor() {
     <div id="app" style={{
       width: "100vw", height: "100vh", background: "#0a0a0c",
       fontFamily: "system-ui, 'Segoe UI', Roboto, sans-serif",
-      color: "#e0e0e0", overflow: "hidden", position: "relative"
+      color: "#e0e0e0", overflow: "hidden", position: "relative",
+      cursor: cursorHidden ? "none" : "default"
     }}>
       {/* Canvas — always fills full screen */}
       <div id="canvas-wrap" ref={canvasWrapRef} style={{
