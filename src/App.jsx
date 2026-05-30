@@ -247,10 +247,10 @@ export default function ShaderCompositor() {
   }, []);
 
   const [layers, setLayers] = useState([
-    { id: "plasma", opacity: 1.0, blendMode: "add", enabled: true },
-    { id: "voronoi", opacity: 0.6, blendMode: "screen", enabled: true },
-    { id: "warp", opacity: 0.5, blendMode: "multiply", enabled: false },
-    { id: "composite", opacity: 1.0, blendMode: "normal", enabled: false },
+    { id: "plasma", opacity: 1.0, blendMode: "add", enabled: true, speed: 1.0, zoom: 1.0 },
+    { id: "voronoi", opacity: 0.6, blendMode: "screen", enabled: true, speed: 1.0, zoom: 1.0 },
+    { id: "warp", opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0 },
+    { id: "composite", opacity: 1.0, blendMode: "normal", enabled: false, speed: 1.0, zoom: 1.0 },
   ]);
   const [fps, setFps] = useState(0);
   const layersRef = useRef(layers);
@@ -259,6 +259,7 @@ export default function ShaderCompositor() {
   // Init WebGL
   useEffect(() => {
     const canvas = canvasRef.current;
+    const wrap = canvasWrapRef.current;
     const gl = canvas.getContext("webgl", { antialias: false, alpha: false });
     if (!gl) return;
 
@@ -273,11 +274,62 @@ export default function ShaderCompositor() {
       programs[key] = createProgram(gl, shader.frag);
     }
 
-    // FBOs (double-buffered: ping-pong)
-    const w = canvas.width, h = canvas.height;
-    const fbos = [createFBO(gl, w, h), createFBO(gl, w, h)];
+    // Final blit to screen with opacity + blendmode
+    const blitFrag = `
+      precision highp float;
+      uniform sampler2D uTex;
+      uniform sampler2D uBase;
+      uniform float uOpacity;
+      uniform int uBlend;
+      uniform float uZoom;
+      varying vec2 vUv;
+      void main() {
+        vec2 uv = (vUv - 0.5) / uZoom + 0.5;
+        vec4 src = texture2D(uTex, uv);
+        vec4 dst = texture2D(uBase, vUv);
+        vec3 col;
+        if (uBlend == 0) col = src.rgb;
+        else if (uBlend == 1) col = clamp(dst.rgb + src.rgb, 0.0, 1.0);
+        else if (uBlend == 2) col = 1.0 - (1.0-dst.rgb)*(1.0-src.rgb);
+        else if (uBlend == 3) col = dst.rgb * src.rgb;
+        else col = src.rgb;
+        gl_FragColor = vec4(mix(dst.rgb, col, uOpacity), 1.0);
+      }
+    `;
+    const blitProg = createProgram(gl, blitFrag);
 
-    stateRef.current = { gl, programs, fbos, buf, w, h };
+    // Build/rebuild FBOs at current canvas size
+    function buildFBOs(w, h) {
+      return {
+        fbos: [createFBO(gl, w, h), createFBO(gl, w, h)],
+        accFBOs: [createFBO(gl, w, h), createFBO(gl, w, h)],
+      };
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    let w = Math.round(wrap.clientWidth * dpr);
+    let h = Math.round(wrap.clientHeight * dpr);
+    canvas.width = w;
+    canvas.height = h;
+    let { fbos, accFBOs } = buildFBOs(w, h);
+
+    stateRef.current = { gl, programs, buf, w, h };
+
+    // Resize observer — rebuilds FBOs whenever the container changes size
+    const ro = new ResizeObserver(entries => {
+      const entry = entries[0];
+      const dpr = window.devicePixelRatio || 1;
+      const newW = Math.round(entry.contentRect.width * dpr);
+      const newH = Math.round(entry.contentRect.height * dpr);
+      if (newW === w && newH === h) return;
+      w = newW; h = newH;
+      canvas.width = w;
+      canvas.height = h;
+      ({ fbos, accFBOs } = buildFBOs(w, h));
+      stateRef.current.w = w;
+      stateRef.current.h = h;
+    });
+    ro.observe(wrap);
 
     const startTime = performance.now();
     let lastFpsTime = startTime;
@@ -310,31 +362,6 @@ export default function ShaderCompositor() {
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
-    // Final blit to screen with opacity + blendmode
-    const blitFrag = `
-      precision highp float;
-      uniform sampler2D uTex;
-      uniform sampler2D uBase;
-      uniform float uOpacity;
-      uniform int uBlend;
-      varying vec2 vUv;
-      void main() {
-        vec4 src = texture2D(uTex, vUv);
-        vec4 dst = texture2D(uBase, vUv);
-        vec3 col;
-        if (uBlend == 0) col = src.rgb; // normal
-        else if (uBlend == 1) col = clamp(dst.rgb + src.rgb, 0.0, 1.0); // add
-        else if (uBlend == 2) col = 1.0 - (1.0-dst.rgb)*(1.0-src.rgb); // screen
-        else if (uBlend == 3) col = dst.rgb * src.rgb; // multiply
-        else col = src.rgb;
-        gl_FragColor = vec4(mix(dst.rgb, col, uOpacity), 1.0);
-      }
-    `;
-    const blitProg = createProgram(gl, blitFrag);
-
-    // Accumulation FBO
-    const accFBOs = [createFBO(gl, w, h), createFBO(gl, w, h)];
-
     function render() {
       const now = performance.now();
       const time = (now - startTime) / 1000;
@@ -345,6 +372,8 @@ export default function ShaderCompositor() {
         lastFpsTime = now;
       }
 
+      const cw = stateRef.current.w;
+      const ch = stateRef.current.h;
       const activeLayers = layersRef.current.filter(l => l.enabled);
       let ping = 0;
 
@@ -360,17 +389,15 @@ export default function ShaderCompositor() {
         const prog = programs[layer.id];
         if (!prog) continue;
 
-        // Render layer to fbo
-        drawLayer(prog, fbos[ping].fb, prevLayerTex, time, mouseRef.current, w, h);
+        drawLayer(prog, fbos[ping].fb, prevLayerTex, time * (layer.speed ?? 1.0), mouseRef.current, cw, ch);
         prevLayerTex = fbos[ping].tex;
         ping = 1 - ping;
 
-        // Blit into accumulation buffer with blend+opacity
         const blendMap = { normal: 0, add: 1, screen: 2, multiply: 3 };
         const blendInt = blendMap[layer.blendMode] ?? 0;
 
         gl.bindFramebuffer(gl.FRAMEBUFFER, accFBOs[1].fb);
-        gl.viewport(0, 0, w, h);
+        gl.viewport(0, 0, cw, ch);
         gl.useProgram(blitProg);
 
         const posLoc = gl.getAttribLocation(blitProg, "aPosition");
@@ -388,16 +415,16 @@ export default function ShaderCompositor() {
 
         gl.uniform1f(gl.getUniformLocation(blitProg, "uOpacity"), layer.opacity);
         gl.uniform1i(gl.getUniformLocation(blitProg, "uBlend"), blendInt);
+        gl.uniform1f(gl.getUniformLocation(blitProg, "uZoom"), layer.zoom ?? 1.0);
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-        // Swap acc
         [accFBOs[0], accFBOs[1]] = [accFBOs[1], accFBOs[0]];
       }
 
       // Final blit to canvas
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, w, h);
+      gl.viewport(0, 0, cw, ch);
       gl.useProgram(blitProg);
 
       const posLoc = gl.getAttribLocation(blitProg, "aPosition");
@@ -409,12 +436,12 @@ export default function ShaderCompositor() {
       gl.bindTexture(gl.TEXTURE_2D, accFBOs[0].tex);
       gl.uniform1i(gl.getUniformLocation(blitProg, "uTex"), 0);
 
-      // blank base for final
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, accFBOs[0].tex);
       gl.uniform1i(gl.getUniformLocation(blitProg, "uBase"), 1);
       gl.uniform1f(gl.getUniformLocation(blitProg, "uOpacity"), 1.0);
       gl.uniform1i(gl.getUniformLocation(blitProg, "uBlend"), 0);
+      gl.uniform1f(gl.getUniformLocation(blitProg, "uZoom"), 1.0);
 
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
@@ -422,7 +449,10 @@ export default function ShaderCompositor() {
     }
 
     animRef.current = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(animRef.current);
+    return () => {
+      cancelAnimationFrame(animRef.current);
+      ro.disconnect();
+    };
   }, []);
 
   // Mouse tracking
@@ -451,29 +481,30 @@ export default function ShaderCompositor() {
   const BLEND_MODES = ["normal", "add", "screen", "multiply"];
 
   return (
-    <div style={{
+    <div id="app" style={{
       display: "flex", height: "100vh", background: "#0a0a0c",
       fontFamily: "'IBM Plex Mono', 'Courier New', monospace",
       color: "#e0e0e0", overflow: "hidden"
     }}>
       {/* Canvas */}
-      <div ref={canvasWrapRef} style={{
+      <div id="canvas-wrap" ref={canvasWrapRef} style={{
         flex: 1, position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
         background: "#0a0a0c"
       }}>
         <canvas
+          id="gl-canvas"
           ref={canvasRef}
-          width={800} height={600}
           onMouseMove={handleMouseMove}
-          style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
+          style={{ width: "100%", height: "100%", display: "block" }}
         />
-        <div style={{
+        <div id="title-bar" style={{
           position: "absolute", top: 14, left: 18,
-          fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: "0.12em"
+          fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.6)", letterSpacing: "0.12em"
         }}>
-          COMPOSITOR — {fps} FPS
+          BENT MACE BRICK LAYER — {fps} FPS
         </div>
         <button
+          id="fullscreen-btn"
           onClick={toggleFullscreen}
           title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
           style={{
@@ -487,77 +518,103 @@ export default function ShaderCompositor() {
           onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "rgba(255,255,255,0.4)"; }}
         >
           {isFullscreen ? "✕" : "⤢"}
-          <span style={{ fontSize: 9, letterSpacing: "0.12em", marginLeft: 6 }}>
+          <span id="fullscreen-label" style={{ fontSize: 9, letterSpacing: "0.12em", marginLeft: 6 }}>
             {isFullscreen ? "EXIT" : "FULLSCREEN"}
           </span>
         </button>
       </div>
 
       {/* Panel */}
-      {!isFullscreen && <div style={{
+      {!isFullscreen && <div id="panel" style={{
         width: 280, background: "#111114", borderLeft: "1px solid #222228",
         display: "flex", flexDirection: "column", overflowY: "auto"
       }}>
-        <div style={{
+        <div id="panel-header" style={{
           padding: "18px 20px 14px", borderBottom: "1px solid #1e1e26",
           fontSize: 10, letterSpacing: "0.2em", color: "#888"
         }}>
           SHADER LAYERS
         </div>
 
-        <div style={{ padding: "10px 12px", flex: 1 }}>
+        <div id="layer-list" style={{ padding: "10px 12px", flex: 1 }}>
           {layers.map((layer, idx) => {
             const meta = SHADERS[layer.id];
             if (!meta) return null;
             return (
-              <div key={layer.id} style={{
+              <div id={`layer-${layer.id}`} key={layer.id} style={{
                 marginBottom: 8, border: `1px solid ${layer.enabled ? meta.color + "44" : "#222"}`,
                 borderRadius: 4, overflow: "hidden",
                 opacity: layer.enabled ? 1 : 0.75,
                 transition: "opacity 0.2s, border-color 0.2s"
               }}>
                 {/* Header */}
-                <div style={{
+                <div id={`layer-${layer.id}-header`} style={{
                   display: "flex", alignItems: "center", gap: 8,
                   padding: "8px 10px", background: layer.enabled ? meta.color + "18" : "#16161a",
                   cursor: "pointer"
                 }} onClick={() => updateLayer(layer.id, "enabled", !layer.enabled)}>
-                  <div style={{
+                  <div id={`layer-${layer.id}-indicator`} style={{
                     width: 8, height: 8, borderRadius: "50%",
                     background: layer.enabled ? meta.color : "#333",
                     boxShadow: layer.enabled ? `0 0 6px ${meta.color}` : "none",
                     transition: "all 0.2s", flexShrink: 0
                   }} />
-                  <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb" }}>
+                  <span id={`layer-${layer.id}-name`} style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb" }}>
                     {meta.name.toUpperCase()}
                     {meta.isComposite && <span style={{ marginLeft: 6, fontSize: 9, color: "#4ade80", opacity: 0.7 }}>FX</span>}
                   </span>
-                  <div style={{ display: "flex", gap: 2 }}>
-                    <button onClick={e => { e.stopPropagation(); moveLayer(idx, -1); }} style={btnStyle}>↑</button>
-                    <button onClick={e => { e.stopPropagation(); moveLayer(idx, 1); }} style={btnStyle}>↓</button>
+                  <div id={`layer-${layer.id}-move-btns`} style={{ display: "flex", gap: 2 }}>
+                    <button id={`layer-${layer.id}-move-up`} onClick={e => { e.stopPropagation(); moveLayer(idx, -1); }} style={btnStyle}>↑</button>
+                    <button id={`layer-${layer.id}-move-down`} onClick={e => { e.stopPropagation(); moveLayer(idx, 1); }} style={btnStyle}>↓</button>
                   </div>
                 </div>
 
                 {layer.enabled && (
-                  <div style={{ padding: "8px 10px 10px", background: "#0e0e12" }}>
+                  <div id={`layer-${layer.id}-controls`} style={{ padding: "8px 10px 10px", background: "#0e0e12" }}>
                     {/* Opacity */}
-                    <label style={labelStyle}>OPACITY</label>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <input type="range" min={0} max={1} step={0.01}
+                    <label id={`layer-${layer.id}-opacity-label`} style={labelStyle}>OPACITY</label>
+                    <div id={`layer-${layer.id}-opacity-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input id={`layer-${layer.id}-opacity-slider`} type="range" min={0} max={1} step={0.01}
                         value={layer.opacity}
                         onChange={e => updateLayer(layer.id, "opacity", parseFloat(e.target.value))}
                         style={sliderStyle(meta.color)}
                       />
-                      <span style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
+                      <span id={`layer-${layer.id}-opacity-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
                         {Math.round(layer.opacity * 100)}
                       </span>
                     </div>
 
+                    {/* Speed */}
+                    <label id={`layer-${layer.id}-speed-label`} style={{ ...labelStyle, marginTop: 8 }}>SPEED</label>
+                    <div id={`layer-${layer.id}-speed-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input id={`layer-${layer.id}-speed-slider`} type="range" min={0} max={4} step={0.01}
+                        value={layer.speed}
+                        onChange={e => updateLayer(layer.id, "speed", parseFloat(e.target.value))}
+                        style={sliderStyle(meta.color)}
+                      />
+                      <span id={`layer-${layer.id}-speed-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
+                        {layer.speed.toFixed(1)}x
+                      </span>
+                    </div>
+
+                    {/* Zoom */}
+                    <label id={`layer-${layer.id}-zoom-label`} style={{ ...labelStyle, marginTop: 8 }}>ZOOM</label>
+                    <div id={`layer-${layer.id}-zoom-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <input id={`layer-${layer.id}-zoom-slider`} type="range" min={0.1} max={4} step={0.01}
+                        value={layer.zoom}
+                        onChange={e => updateLayer(layer.id, "zoom", parseFloat(e.target.value))}
+                        style={sliderStyle(meta.color)}
+                      />
+                      <span id={`layer-${layer.id}-zoom-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
+                        {layer.zoom.toFixed(1)}x
+                      </span>
+                    </div>
+
                     {/* Blend mode */}
-                    <label style={{ ...labelStyle, marginTop: 8 }}>BLEND</label>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    <label id={`layer-${layer.id}-blend-label`} style={{ ...labelStyle, marginTop: 8 }}>BLEND</label>
+                    <div id={`layer-${layer.id}-blend-btns`} style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                       {BLEND_MODES.map(mode => (
-                        <button key={mode}
+                        <button id={`layer-${layer.id}-blend-${mode}`} key={mode}
                           onClick={() => updateLayer(layer.id, "blendMode", mode)}
                           style={{
                             padding: "3px 7px", fontSize: 9, borderRadius: 2,
@@ -579,11 +636,11 @@ export default function ShaderCompositor() {
         </div>
 
         {/* Footer */}
-        <div style={{
+        <div id="panel-footer" style={{
           padding: "12px 16px", borderTop: "1px solid #1a1a20",
           fontSize: 9, color: "#888", lineHeight: 1.8, letterSpacing: "0.08em"
         }}>
-          <div style={{ color: "#aaa", marginBottom: 4, fontSize: 10 }}>HOW IT WORKS</div>
+          <div id="panel-footer-title" style={{ color: "#aaa", marginBottom: 4, fontSize: 10 }}>HOW IT WORKS</div>
           Each layer renders to an FBO.<br />
           Outputs chain as <span style={{ color: "#bbb" }}>uPrev</span> uniforms.<br />
           Blend modes composite in screen space.<br />
