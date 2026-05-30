@@ -247,10 +247,10 @@ export default function ShaderCompositor() {
   }, []);
 
   const [layers, setLayers] = useState([
-    { id: "plasma", opacity: 1.0, blendMode: "add", enabled: true, speed: 1.0, zoom: 1.0 },
-    { id: "voronoi", opacity: 0.6, blendMode: "screen", enabled: true, speed: 1.0, zoom: 1.0 },
-    { id: "warp", opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0 },
-    { id: "composite", opacity: 1.0, blendMode: "normal", enabled: false, speed: 1.0, zoom: 1.0 },
+    { id: "plasma", opacity: 1.0, blendMode: "add", enabled: true, speed: 1.0, zoom: 1.0, expanded: true },
+    { id: "voronoi", opacity: 0.6, blendMode: "screen", enabled: true, speed: 1.0, zoom: 1.0, expanded: true },
+    { id: "warp", opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
+    { id: "composite", opacity: 1.0, blendMode: "normal", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
   ]);
   const [fps, setFps] = useState(0);
   const layersRef = useRef(layers);
@@ -551,25 +551,27 @@ export default function ShaderCompositor() {
                 <div id={`layer-${layer.id}-header`} style={{
                   display: "flex", alignItems: "center", gap: 8,
                   padding: "8px 10px", background: layer.enabled ? meta.color + "18" : "#16161a",
-                  cursor: "pointer"
-                }} onClick={() => updateLayer(layer.id, "enabled", !layer.enabled)}>
-                  <div id={`layer-${layer.id}-indicator`} style={{
+                }}>
+                  <div id={`layer-${layer.id}-indicator`} onClick={() => updateLayer(layer.id, "enabled", !layer.enabled)} style={{
                     width: 8, height: 8, borderRadius: "50%",
                     background: layer.enabled ? meta.color : "#333",
                     boxShadow: layer.enabled ? `0 0 6px ${meta.color}` : "none",
-                    transition: "all 0.2s", flexShrink: 0
+                    transition: "all 0.2s", flexShrink: 0, cursor: "pointer"
                   }} />
                   <span id={`layer-${layer.id}-name`} style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb" }}>
                     {meta.name.toUpperCase()}
                     {meta.isComposite && <span style={{ marginLeft: 6, fontSize: 9, color: "#4ade80", opacity: 0.7 }}>FX</span>}
                   </span>
                   <div id={`layer-${layer.id}-move-btns`} style={{ display: "flex", gap: 2 }}>
-                    <button id={`layer-${layer.id}-move-up`} onClick={e => { e.stopPropagation(); moveLayer(idx, -1); }} style={btnStyle}>↑</button>
-                    <button id={`layer-${layer.id}-move-down`} onClick={e => { e.stopPropagation(); moveLayer(idx, 1); }} style={btnStyle}>↓</button>
+                    <button id={`layer-${layer.id}-move-up`} onClick={() => moveLayer(idx, -1)} style={btnStyle}>↑</button>
+                    <button id={`layer-${layer.id}-move-down`} onClick={() => moveLayer(idx, 1)} style={btnStyle}>↓</button>
+                    <button id={`layer-${layer.id}-expand`} onClick={() => updateLayer(layer.id, "expanded", !layer.expanded)} style={btnStyle}>
+                      {layer.expanded ? "▲" : "▼"}
+                    </button>
                   </div>
                 </div>
 
-                {layer.enabled && (
+                {layer.expanded && (
                   <div id={`layer-${layer.id}-controls`} style={{ padding: "8px 10px 10px", background: "#0e0e12" }}>
                     {/* Opacity */}
                     <label id={`layer-${layer.id}-opacity-label`} style={labelStyle}>OPACITY</label>
