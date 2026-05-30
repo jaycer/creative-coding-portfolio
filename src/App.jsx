@@ -504,9 +504,9 @@ export default function ShaderCompositor() {
                 boxShadow: layer.enabled ? `0 0 6px ${meta.color}` : "none",
                 transition: "all 0.2s", flexShrink: 0, cursor: "pointer"
               }} />
-              <span id={`layer-${layer.id}-name`} style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb" }}>
+              <span id={`layer-${layer.id}-name`} style={{ fontSize: "0.65em", fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb" }}>
                 {meta.name.toUpperCase()}
-                {meta.isComposite && <span style={{ marginLeft: 6, fontSize: 9, color: "#4ade80", opacity: 0.7 }}>FX</span>}
+                {meta.isComposite && <span style={{ marginLeft: 6, fontSize: "0.65em", color: "#4ade80", opacity: 0.7 }}>FX</span>}
               </span>
               <div id={`layer-${layer.id}-move-btns`} style={{ display: "flex", gap: 2 }}>
                 <button id={`layer-${layer.id}-move-up`} onClick={() => moveLayer(idx, -1)} style={btnStyle}>↑</button>
@@ -527,7 +527,7 @@ export default function ShaderCompositor() {
                     onChange={e => updateLayer(layer.id, "opacity", parseFloat(e.target.value))}
                     style={sliderStyle(meta.color)}
                   />
-                  <span id={`layer-${layer.id}-opacity-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
+                  <span id={`layer-${layer.id}-opacity-value`} style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
                     {Math.round(layer.opacity * 100)}
                   </span>
                 </div>
@@ -540,7 +540,7 @@ export default function ShaderCompositor() {
                     onChange={e => updateLayer(layer.id, "speed", parseFloat(e.target.value))}
                     style={sliderStyle(meta.color)}
                   />
-                  <span id={`layer-${layer.id}-speed-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
+                  <span id={`layer-${layer.id}-speed-value`} style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
                     {layer.speed.toFixed(1)}x
                   </span>
                 </div>
@@ -553,7 +553,7 @@ export default function ShaderCompositor() {
                     onChange={e => updateLayer(layer.id, "zoom", parseFloat(e.target.value))}
                     style={sliderStyle(meta.color)}
                   />
-                  <span id={`layer-${layer.id}-zoom-value`} style={{ fontSize: 10, color: "#999", width: 30, textAlign: "right" }}>
+                  <span id={`layer-${layer.id}-zoom-value`} style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
                     {layer.zoom.toFixed(1)}x
                   </span>
                 </div>
@@ -565,7 +565,7 @@ export default function ShaderCompositor() {
                     <button id={`layer-${layer.id}-blend-${mode}`} key={mode}
                       onClick={() => updateLayer(layer.id, "blendMode", mode)}
                       style={{
-                        padding: "3px 7px", fontSize: 9, borderRadius: 2,
+                        padding: "3px 7px", fontSize: "0.65em", borderRadius: 2,
                         border: `1px solid ${layer.blendMode === mode ? meta.color : "#333"}`,
                         background: layer.blendMode === mode ? meta.color + "22" : "transparent",
                         color: layer.blendMode === mode ? meta.color : "#aaa",
@@ -587,7 +587,7 @@ export default function ShaderCompositor() {
   return (
     <div id="app" style={{
       width: "100vw", height: "100vh", background: "#0a0a0c",
-      fontFamily: "'IBM Plex Mono', 'Courier New', monospace",
+      fontFamily: "system-ui, 'Segoe UI', Roboto, sans-serif",
       color: "#e0e0e0", overflow: "hidden", position: "relative"
     }}>
       {/* Canvas — always fills full screen */}
@@ -606,32 +606,32 @@ export default function ShaderCompositor() {
       <div id="hud" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
         <div id="title-bar" style={{
           position: "absolute", top: 14, left: 18,
-          fontSize: 15, fontWeight: 700, color: "rgba(255,255,255,0.6)", letterSpacing: "0.12em"
+          fontSize: "0.65em", fontWeight: 700, color: "rgba(255,255,255,0.6)", letterSpacing: "0.12em"
         }}>
           BENT MACE BRICK LAYER — {fps} FPS
         </div>
-        <button
+        {!showControls && <button
           id="controls-btn"
           onClick={() => setShowControls(v => !v)}
           style={{
-            position: "absolute", top: 10, right: 14, pointerEvents: "all",
+            position: "absolute", top: 14, right: 14, pointerEvents: "all",
             background: showControls ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)",
             border: "1px solid rgba(255,255,255,0.12)",
             borderRadius: 4, color: showControls ? "#fff" : "rgba(255,255,255,0.4)",
             cursor: "pointer", padding: "5px 8px", display: "flex", alignItems: "center",
-            transition: "all 0.15s", fontSize: 13, lineHeight: 1
+            transition: "all 0.15s", fontSize: "0.65em", lineHeight: 1
           }}
           onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.2)"; e.currentTarget.style.color = "#fff"; }}
           onMouseLeave={e => { e.currentTarget.style.background = showControls ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)"; e.currentTarget.style.color = showControls ? "#fff" : "rgba(255,255,255,0.4)"; }}
         >
-          <span id="controls-label" style={{ fontSize: 9, letterSpacing: "0.12em" }}>CONTROLS</span>
-        </button>
+          <span id="controls-label" style={{ fontSize: "12px", letterSpacing: "0.12em" }}>CONTROLS</span>
+        </button>}
       </div>
 
       {/* Controls modal — transparent, floating */}
       {showControls && (
         <div id="controls-modal" style={{
-          position: "absolute", top: 44, right: 14,
+          position: "absolute", top: 14, right: 14,
           width: 280, maxHeight: "calc(100vh - 60px)", overflowY: "auto",
           background: "rgba(10, 10, 14, 0.75)",
           backdropFilter: "blur(12px)",
@@ -642,9 +642,18 @@ export default function ShaderCompositor() {
         }}>
           <div id="modal-header" style={{
             padding: "14px 16px 10px", borderBottom: "1px solid rgba(255,255,255,0.08)",
-            fontSize: 10, letterSpacing: "0.2em", color: "#888"
+            fontSize: "0.65em", letterSpacing: "0.2em", color: "#888",
+            display: "flex", alignItems: "center", justifyContent: "space-between"
           }}>
             SHADER LAYERS
+            <button id="modal-close" onClick={() => setShowControls(false)} style={{
+              background: "none", border: "none", color: "#888", cursor: "pointer",
+              fontSize: "14px", lineHeight: 1, padding: "0 2px",
+              display: "flex", alignItems: "center"
+            }}
+            onMouseEnter={e => e.currentTarget.style.color = "#fff"}
+            onMouseLeave={e => e.currentTarget.style.color = "#888"}
+            >✕</button>
           </div>
           {layerPanel}
         </div>
@@ -656,12 +665,12 @@ export default function ShaderCompositor() {
 const btnStyle = {
   width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
   background: "transparent", border: "1px solid #333", borderRadius: 2,
-  color: "#888", fontSize: 11, cursor: "pointer", padding: 0,
+  color: "#888", fontSize: "0.65em", cursor: "pointer", padding: 0,
   lineHeight: 1
 };
 
 const labelStyle = {
-  display: "block", fontSize: 9, letterSpacing: "0.15em",
+  display: "block", fontSize: "0.65em", letterSpacing: "0.15em",
   color: "#aaa", marginBottom: 4, marginTop: 2
 };
 
