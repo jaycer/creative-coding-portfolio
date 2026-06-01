@@ -157,6 +157,95 @@ const SHADERS = {
       }
     `,
   },
+
+  crt: {
+    name: "CRT Static",
+    color: "#b0b0b0",
+    frag: `
+      precision highp float;
+      uniform float iTime;
+      uniform vec2 iResolution;
+      varying vec2 vUv;
+
+      float hash(vec2 p) {
+        p = fract(p * vec2(234.34, 435.345));
+        p += dot(p, p + 34.23);
+        return fract(p.x * p.y);
+      }
+
+      void main() {
+        vec2 uv = vUv;
+
+        // Roll the noise frame every ~3 frames for that chunky CRT feel
+        float frame = floor(iTime * 24.0);
+        float noise = hash(uv * iResolution + frame * 17.3);
+
+        // Scanlines — thin dark bands scrolling downward
+        float scan = sin((uv.y + iTime * 0.12) * iResolution.y * 0.6) * 0.5 + 0.5;
+        scan = pow(scan, 6.0) * 0.35;
+
+        // Occasional horizontal interference bands
+        float bandY = fract(uv.y * 8.0 - iTime * 0.4);
+        float band = smoothstep(0.92, 1.0, bandY) * 0.5;
+
+        // Horizontal smear: blur noise along x slightly
+        float smear = hash(vec2(floor(uv.x * iResolution.x * 0.25), uv.y * iResolution.y) + frame * 3.1);
+
+        float val = mix(noise, smear, 0.3) + scan + band;
+        val = clamp(val, 0.0, 1.0);
+
+        // Slight green tint like old phosphor screens
+        vec3 col = val * vec3(0.82, 0.95, 0.78);
+
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  },
+
+  hlines: {
+    name: "H Lines",
+    color: "#f0e040",
+    frag: `
+      precision highp float;
+      uniform float iTime;
+      uniform vec2 iResolution;
+      varying vec2 vUv;
+
+      float rand(float n) {
+        return fract(sin(n * 127.1) * 43758.5453);
+      }
+
+      void main() {
+        float y = vUv.y;
+        float t = iTime * 0.18;
+
+        vec3 col = vec3(0.0);
+        float NUM_LINES = 24.0;
+
+        for (float i = 0.0; i < 24.0; i++) {
+          float seed = i + 0.5;
+          // Each line drifts vertically at its own speed
+          float center = fract(rand(seed) + rand(seed * 3.7) * t);
+          // Thickness varies per line: thin to chunky
+          float thickness = 0.004 + rand(seed * 1.3) * 0.06;
+          float dist = abs(y - center);
+          float line = smoothstep(thickness, thickness * 0.3, dist);
+
+          // Color per line — cycle through hues with time offset
+          float hue = fract(rand(seed * 2.1) + iTime * rand(seed * 0.5) * 0.08);
+          float sat = 0.5 + rand(seed * 5.3) * 0.5;
+          // HSV to RGB
+          vec3 c = clamp(abs(mod(hue * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+          c = mix(vec3(1.0), c, sat);
+
+          col += line * c;
+        }
+
+        col = clamp(col, 0.0, 1.0);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  },
 };
 
 // ============================================================
@@ -266,6 +355,8 @@ export default function ShaderCompositor() {
   const [layers, setLayers] = useState([
     { id: "plasma", opacity: 1.0, blendMode: "add", enabled: true, speed: 1.0, zoom: 1.0, expanded: true },
     { id: "voronoi", opacity: 0.6, blendMode: "screen", enabled: true, speed: 1.0, zoom: 1.0, expanded: true },
+    { id: "crt", opacity: 0.6, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
+    { id: "hlines", opacity: 0.8, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
     { id: "warp", opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
     { id: "composite", opacity: 1.0, blendMode: "normal", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
   ]);
