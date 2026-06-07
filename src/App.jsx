@@ -158,6 +158,83 @@ const SHADERS = {
     `,
   },
 
+  underwater: {
+    name: "Underwater",
+    color: "#00aaff",
+    frag: `
+      precision highp float;
+      uniform float iTime;
+      uniform vec2 iResolution;
+      varying vec2 vUv;
+
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5);
+        float b = fract(sin(dot(i + vec2(1,0), vec2(127.1, 311.7))) * 43758.5);
+        float c = fract(sin(dot(i + vec2(0,1), vec2(127.1, 311.7))) * 43758.5);
+        float d = fract(sin(dot(i + vec2(1,1), vec2(127.1, 311.7))) * 43758.5);
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
+
+      void main() {
+        vec2 uv = vUv;
+        float t = iTime * 0.25;
+
+        // Caustic light ripples on the surface
+        vec2 wuv = uv * 6.0;
+        float w1 = noise(wuv + vec2(t, t * 0.7));
+        float w2 = noise(wuv * 1.4 - vec2(t * 0.8, t * 0.5));
+        float w3 = noise(wuv * 0.7 + vec2(-t * 0.4, t * 0.9));
+        float caustic = pow(w1 * w2 * w3, 0.4) * 2.5;
+
+        // Depth gradient — darker toward bottom
+        float depth = 1.0 - uv.y * 0.7;
+
+        // Slow horizontal sway distortion
+        float sway = sin(uv.y * 8.0 + t * 1.2) * 0.012
+                   + sin(uv.y * 3.5 - t * 0.7) * 0.008;
+        float swayNoise = noise(vec2(uv.y * 4.0, t)) * 0.015;
+        vec2 swayUv = vec2(uv.x + sway + swayNoise, uv.y);
+
+        // Soft volumetric light rays from above
+        float ray = abs(fract((swayUv.x + sin(t * 0.3) * 0.05) * 7.0) - 0.5);
+        ray = pow(max(0.0, 1.0 - ray * 6.0), 3.0);
+        ray *= (1.0 - uv.y) * 0.6;
+
+        // Floating particle motes
+        float motes = 0.0;
+        for (float i = 0.0; i < 6.0; i++) {
+          float seed = i * 3.7;
+          float px = fract(sin(seed * 127.1) * 43758.5);
+          float py = fract(cos(seed * 311.7) * 43758.5);
+          float speed = 0.03 + fract(sin(seed * 7.3) * 4375.5) * 0.05;
+          vec2 motePos = vec2(
+            fract(px + sin(t * 0.3 + seed) * 0.04),
+            fract(py - t * speed)
+          );
+          float d = length(uv - motePos);
+          motes += smoothstep(0.012, 0.0, d);
+        }
+
+        // Base underwater blue-green palette
+        vec3 deep  = vec3(0.0, 0.08, 0.22);
+        vec3 mid   = vec3(0.0, 0.28, 0.52);
+        vec3 light = vec3(0.1, 0.65, 0.75);
+
+        vec3 col = mix(deep, mid, depth);
+        col = mix(col, light, caustic * 0.35);
+        col += ray * vec3(0.15, 0.35, 0.4);
+        col += caustic * 0.12 * vec3(0.4, 0.9, 1.0);
+        col += motes * vec3(0.8, 0.95, 1.0);
+        col = clamp(col, 0.0, 1.0);
+
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  },
+
   crt: {
     name: "CRT Static",
     color: "#b0b0b0",
@@ -355,6 +432,7 @@ export default function ShaderCompositor() {
   const [layers, setLayers] = useState([
     { id: "plasma", opacity: 1.0, blendMode: "add", enabled: true, speed: 1.0, zoom: 1.0, expanded: true },
     { id: "voronoi", opacity: 0.6, blendMode: "screen", enabled: true, speed: 1.0, zoom: 1.0, expanded: true },
+    { id: "underwater", opacity: 0.9, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
     { id: "crt", opacity: 0.6, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
     { id: "hlines", opacity: 0.8, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
     { id: "warp", opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
