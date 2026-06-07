@@ -165,6 +165,8 @@ const SHADERS = {
       precision highp float;
       uniform float iTime;
       uniform vec2 iResolution;
+      uniform float uRays;
+      uniform float uRayCount;
       varying vec2 vUv;
 
       float noise(vec2 p) {
@@ -199,7 +201,7 @@ const SHADERS = {
         vec2 swayUv = vec2(uv.x + sway + swayNoise, uv.y);
 
         // Soft volumetric light rays from above
-        float ray = abs(fract((swayUv.x + sin(t * 0.3) * 0.05) * 7.0) - 0.5);
+        float ray = abs(fract((swayUv.x + sin(t * 0.3) * 0.05) * uRayCount) - 0.5);
         ray = pow(max(0.0, 1.0 - ray * 6.0), 3.0);
         ray *= (1.0 - uv.y) * 0.6;
 
@@ -225,7 +227,7 @@ const SHADERS = {
 
         vec3 col = mix(deep, mid, depth);
         col = mix(col, light, caustic * 0.35);
-        col += ray * vec3(0.15, 0.35, 0.4);
+        col += ray * uRays * vec3(0.15, 0.35, 0.4);
         col += caustic * 0.12 * vec3(0.4, 0.9, 1.0);
         col += motes * vec3(0.8, 0.95, 1.0);
         col = clamp(col, 0.0, 1.0);
@@ -432,7 +434,7 @@ export default function ShaderCompositor() {
   const [layers, setLayers] = useState([
     { id: "plasma", opacity: 1.0, blendMode: "add", enabled: true, speed: 1.0, zoom: 1.0, expanded: true },
     { id: "voronoi", opacity: 0.6, blendMode: "screen", enabled: true, speed: 1.0, zoom: 1.0, expanded: true },
-    { id: "underwater", opacity: 0.9, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
+    { id: "underwater", opacity: 0.9, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false, raysIntensity: 1.0, rayCount: 7.0 },
     { id: "crt", opacity: 0.6, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
     { id: "hlines", opacity: 0.8, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
     { id: "warp", opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
@@ -521,7 +523,7 @@ export default function ShaderCompositor() {
     let lastFpsTime = startTime;
     let frames = 0;
 
-    function drawLayer(prog, fboTarget, prevTex, time, mouse, w, h) {
+    function drawLayer(prog, fboTarget, prevTex, time, mouse, w, h, extraUniforms = {}) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, fboTarget);
       gl.viewport(0, 0, w, h);
       gl.useProgram(prog);
@@ -543,6 +545,11 @@ export default function ShaderCompositor() {
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, prevTex);
         gl.uniform1i(pLoc, 0);
+      }
+
+      for (const [name, val] of Object.entries(extraUniforms)) {
+        const loc = gl.getUniformLocation(prog, name);
+        if (loc !== null) gl.uniform1f(loc, val);
       }
 
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -575,7 +582,8 @@ export default function ShaderCompositor() {
         const prog = programs[layer.id];
         if (!prog) continue;
 
-        drawLayer(prog, fbos[ping].fb, prevLayerTex, time * (layer.speed ?? 1.0), mouseRef.current, cw, ch);
+        const extraUniforms = layer.id === "underwater" ? { uRays: layer.raysIntensity ?? 1.0, uRayCount: layer.rayCount ?? 7.0 } : {};
+        drawLayer(prog, fbos[ping].fb, prevLayerTex, time * (layer.speed ?? 1.0), mouseRef.current, cw, ch, extraUniforms);
         prevLayerTex = fbos[ping].tex;
         ping = 1 - ping;
 
@@ -742,6 +750,32 @@ export default function ShaderCompositor() {
                     {layer.zoom.toFixed(1)}x
                   </span>
                 </div>
+
+                {/* Layer-specific controls */}
+                {layer.id === "underwater" && <>
+                  <label id="layer-underwater-rays-label" style={{ ...labelStyle, marginTop: 8 }}>RAYS</label>
+                  <div id="layer-underwater-rays-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input id="layer-underwater-rays-slider" type="range" min={0} max={3} step={0.01}
+                      value={layer.raysIntensity}
+                      onChange={e => updateLayer(layer.id, "raysIntensity", parseFloat(e.target.value))}
+                      style={sliderStyle(meta.color)}
+                    />
+                    <span id="layer-underwater-rays-value" style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
+                      {(layer.raysIntensity ?? 1).toFixed(1)}x
+                    </span>
+                  </div>
+                  <label id="layer-underwater-raycount-label" style={{ ...labelStyle, marginTop: 8 }}>RAY COUNT</label>
+                  <div id="layer-underwater-raycount-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input id="layer-underwater-raycount-slider" type="range" min={1} max={40} step={1}
+                      value={layer.rayCount}
+                      onChange={e => updateLayer(layer.id, "rayCount", parseFloat(e.target.value))}
+                      style={sliderStyle(meta.color)}
+                    />
+                    <span id="layer-underwater-raycount-value" style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
+                      {Math.round(layer.rayCount ?? 7)}
+                    </span>
+                  </div>
+                </>}
 
                 {/* Blend mode */}
                 <label id={`layer-${layer.id}-blend-label`} style={{ ...labelStyle, marginTop: 8 }}>BLEND</label>
