@@ -52,32 +52,34 @@ const SHADERS = {
       varying vec2 vUv;
 
       vec2 hash2(vec2 p) {
-        p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-        return fract(sin(p) * 43758.5453);
+        p = mod(p, 289.0);
+        vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+        p3 += dot(p3, p3.yzx + 19.19);
+        return fract((p3.xx + p3.yz) * p3.zy);
       }
 
       void main() {
         vec2 uv = vUv * 5.0;
-        vec2 p = floor(uv);
-        vec2 f = fract(uv);
-        float minDist = 9.0;
-        vec2 minPoint = vec2(0.0);
+        vec2 i_uv = floor(uv);
+        vec2 f_uv = fract(uv);
+        float minDist = 8.0;
 
-        for (int j = -1; j <= 1; j++) {
-          for (int i = -1; i <= 1; i++) {
-            vec2 b = vec2(float(i), float(j));
-            vec2 r = b + hash2(p + b) * 0.5 + 0.5 * sin(iTime * 0.5 + 6.28 * hash2(p + b));
-            r -= f;
-            float d = dot(r, r);
-            if (d < minDist) { minDist = d; minPoint = b + p; }
+        for (int y = -1; y <= 1; y++) {
+          for (int x = -1; x <= 1; x++) {
+            vec2 neighbor = vec2(float(x), float(y));
+            // hash gives base position, then animate — always stays in [0,1]
+            vec2 h = hash2(i_uv + neighbor);
+            vec2 point = 0.5 + 0.45 * sin(iTime * 0.5 + 6.28318 * h);
+            vec2 diff = neighbor + point - f_uv;
+            float dist = length(diff);
+            minDist = min(minDist, dist);
           }
         }
 
-        float dist = sqrt(minDist);
         vec3 col = vec3(
-          0.1 + 0.9 * dist,
-          0.3 + 0.7 * (1.0 - dist),
-          0.6 + 0.4 * sin(dist * 6.28 + iTime)
+          0.1 + 0.9 * minDist,
+          0.3 + 0.7 * (1.0 - minDist),
+          0.6 + 0.4 * sin(minDist * 6.28 + iTime)
         );
         gl_FragColor = vec4(col, 1.0);
       }
@@ -668,6 +670,14 @@ export default function ShaderCompositor() {
     setLayers(prev => prev.map(l => l.id === id ? { ...l, [key]: val } : l));
   };
 
+  const toggleEnabled = (id) => {
+    setLayers(prev => prev.map(l => {
+      if (l.id !== id) return l;
+      const newEnabled = !l.enabled;
+      return { ...l, enabled: newEnabled, expanded: newEnabled ? true : l.expanded };
+    }));
+  };
+
   const moveLayer = (idx, dir) => {
     setLayers(prev => {
       const next = [...prev];
@@ -698,7 +708,7 @@ export default function ShaderCompositor() {
               display: "flex", alignItems: "center", gap: 8,
               padding: "8px 10px", background: layer.enabled ? meta.color + "18" : "#16161a",
             }}>
-              <div id={`layer-${layer.id}-indicator`} onClick={() => updateLayer(layer.id, "enabled", !layer.enabled)} style={{
+              <div id={`layer-${layer.id}-indicator`} onClick={() => toggleEnabled(layer.id)} style={{
                 width: 28, height: 28, borderRadius: "50%", flexShrink: 0, cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
                 margin: "-10px -6px",
@@ -710,7 +720,7 @@ export default function ShaderCompositor() {
                   transition: "all 0.2s", pointerEvents: "none"
                 }} />
               </div>
-              <span id={`layer-${layer.id}-name`} onClick={() => updateLayer(layer.id, "enabled", !layer.enabled)} style={{ fontSize: "0.65em", fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb", cursor: "pointer" }}>
+              <span id={`layer-${layer.id}-name`} onClick={() => toggleEnabled(layer.id)} style={{ fontSize: "0.65em", fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb", cursor: "pointer" }}>
                 {meta.name.toUpperCase()}
                 {meta.isComposite && <span style={{ marginLeft: 6, fontSize: "0.65em", color: "#4ade80", opacity: 0.7 }}>FX</span>}
               </span>
