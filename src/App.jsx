@@ -432,13 +432,13 @@ export default function ShaderCompositor() {
   }, []);
 
   const [layers, setLayers] = useState([
-    { id: "plasma", opacity: 1.0, blendMode: "add", enabled: true, speed: 1.0, zoom: 1.0, expanded: true },
-    { id: "voronoi", opacity: 0.6, blendMode: "screen", enabled: true, speed: 1.0, zoom: 1.0, expanded: true },
+    { id: "plasma", opacity: 1.0, blendMode: "add", enabled: true, speed: 1.0, zoom: 1.0, rotation: 0, expanded: true },
+    { id: "voronoi", opacity: 0.6, blendMode: "screen", enabled: true, speed: 1.0, zoom: 1.0, rotation: 0, expanded: true },
     { id: "underwater", opacity: 0.9, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false, raysIntensity: 1.0, rayCount: 7.0 },
-    { id: "crt", opacity: 0.6, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
-    { id: "hlines", opacity: 0.8, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
-    { id: "warp", opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
-    { id: "composite", opacity: 1.0, blendMode: "normal", enabled: false, speed: 1.0, zoom: 1.0, expanded: false },
+    { id: "crt", opacity: 0.6, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+    { id: "hlines", opacity: 0.8, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+    { id: "warp", opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+    { id: "composite", opacity: 1.0, blendMode: "normal", enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
   ]);
   const [fps, setFps] = useState(0);
   const layersRef = useRef(layers);
@@ -470,9 +470,13 @@ export default function ShaderCompositor() {
       uniform float uOpacity;
       uniform int uBlend;
       uniform float uZoom;
+      uniform float uRotation;
       varying vec2 vUv;
       void main() {
-        vec2 uv = (vUv - 0.5) / uZoom + 0.5;
+        float angle = uRotation * 3.14159265 / 180.0;
+        float s = sin(angle); float c = cos(angle);
+        vec2 uv = (vUv - 0.5) / uZoom;
+        uv = vec2(c * uv.x - s * uv.y, s * uv.x + c * uv.y) + 0.5;
         vec4 src = texture2D(uTex, uv);
         vec4 dst = texture2D(uBase, vUv);
         vec3 col;
@@ -610,6 +614,7 @@ export default function ShaderCompositor() {
         gl.uniform1f(gl.getUniformLocation(blitProg, "uOpacity"), layer.opacity);
         gl.uniform1i(gl.getUniformLocation(blitProg, "uBlend"), blendInt);
         gl.uniform1f(gl.getUniformLocation(blitProg, "uZoom"), layer.zoom ?? 1.0);
+        gl.uniform1f(gl.getUniformLocation(blitProg, "uRotation"), layer.rotation ?? 0.0);
 
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
@@ -636,6 +641,7 @@ export default function ShaderCompositor() {
       gl.uniform1f(gl.getUniformLocation(blitProg, "uOpacity"), 1.0);
       gl.uniform1i(gl.getUniformLocation(blitProg, "uBlend"), 0);
       gl.uniform1f(gl.getUniformLocation(blitProg, "uZoom"), 1.0);
+      gl.uniform1f(gl.getUniformLocation(blitProg, "uRotation"), 0.0);
 
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
@@ -748,13 +754,26 @@ export default function ShaderCompositor() {
                 {/* Zoom */}
                 <label id={`layer-${layer.id}-zoom-label`} style={{ ...labelStyle, marginTop: 8 }}>ZOOM</label>
                 <div id={`layer-${layer.id}-zoom-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input id={`layer-${layer.id}-zoom-slider`} type="range" min={0.1} max={4} step={0.01}
+                  <input id={`layer-${layer.id}-zoom-slider`} type="range" min={1} max={4} step={0.01}
                     value={layer.zoom}
                     onChange={e => updateLayer(layer.id, "zoom", parseFloat(e.target.value))}
                     style={sliderStyle(meta.color)}
                   />
                   <span id={`layer-${layer.id}-zoom-value`} style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
                     {layer.zoom.toFixed(1)}x
+                  </span>
+                </div>
+
+                {/* Rotation */}
+                <label id={`layer-${layer.id}-rotation-label`} style={{ ...labelStyle, marginTop: 8 }}>ROTATE</label>
+                <div id={`layer-${layer.id}-rotation-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input id={`layer-${layer.id}-rotation-slider`} type="range" min={0} max={360} step={1}
+                    value={layer.rotation}
+                    onChange={e => updateLayer(layer.id, "rotation", parseFloat(e.target.value))}
+                    style={sliderStyle(meta.color)}
+                  />
+                  <span id={`layer-${layer.id}-rotation-value`} style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
+                    {Math.round(layer.rotation)}°
                   </span>
                 </div>
 
