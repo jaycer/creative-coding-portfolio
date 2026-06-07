@@ -675,13 +675,14 @@ export default function ShaderCompositor() {
   const BLEND_MODES = ["normal", "add", "screen", "multiply"];
 
   const layerPanel = (
-    <div id="layer-list" style={{ padding: "10px 12px" }}>
+    <div id="layer-list" style={{ padding: "10px 12px", display: "flex", flexDirection: "row", gap: 10, flexWrap: "wrap", alignItems: "flex-start", overflowY: "auto", flex: 1 }}>
       {layers.map((layer, idx) => {
         const meta = SHADERS[layer.id];
         if (!meta) return null;
         return (
           <div id={`layer-${layer.id}`} key={layer.id} style={{
-            marginBottom: 8, border: `1px solid ${layer.enabled ? meta.color + "44" : "#222"}`,
+            flex: "1 1 180px", minWidth: 180, maxWidth: 260,
+            border: `1px solid ${layer.enabled ? meta.color + "44" : "#222"}`,
             borderRadius: 4, overflow: "hidden",
             opacity: layer.enabled ? 1 : 0.35,
             transition: "opacity 0.2s, border-color 0.2s"
@@ -692,12 +693,18 @@ export default function ShaderCompositor() {
               padding: "8px 10px", background: layer.enabled ? meta.color + "18" : "#16161a",
             }}>
               <div id={`layer-${layer.id}-indicator`} onClick={() => updateLayer(layer.id, "enabled", !layer.enabled)} style={{
-                width: 8, height: 8, borderRadius: "50%",
-                background: layer.enabled ? meta.color : "#333",
-                boxShadow: layer.enabled ? `0 0 6px ${meta.color}` : "none",
-                transition: "all 0.2s", flexShrink: 0, cursor: "pointer"
-              }} />
-              <span id={`layer-${layer.id}-name`} style={{ fontSize: "0.65em", fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb" }}>
+                width: 28, height: 28, borderRadius: "50%", flexShrink: 0, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "-10px -6px",
+              }}>
+                <div style={{
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: layer.enabled ? meta.color : "#333",
+                  boxShadow: layer.enabled ? `0 0 6px ${meta.color}` : "none",
+                  transition: "all 0.2s", pointerEvents: "none"
+                }} />
+              </div>
+              <span id={`layer-${layer.id}-name`} onClick={() => updateLayer(layer.id, "enabled", !layer.enabled)} style={{ fontSize: "0.65em", fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb", cursor: "pointer" }}>
                 {meta.name.toUpperCase()}
                 {meta.isComposite && <span style={{ marginLeft: 6, fontSize: "0.65em", color: "#4ade80", opacity: 0.7 }}>FX</span>}
               </span>
@@ -844,21 +851,23 @@ export default function ShaderCompositor() {
           onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.2)"; e.currentTarget.style.color = "#fff"; }}
           onMouseLeave={e => { e.currentTarget.style.background = showControls ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)"; e.currentTarget.style.color = showControls ? "#fff" : "rgba(255,255,255,0.4)"; }}
         >
-          <span id="controls-label" style={{ fontSize: "12px", letterSpacing: "0.12em" }}>CONTROLS</span>
+          <span id="controls-label" style={{ fontSize: "12px", letterSpacing: "0.12em" }}>BRICKS</span>
         </button>}
       </div>
 
       {/* Controls modal — transparent, floating */}
       {showControls && (
         <div id="controls-modal" style={{
-          position: "absolute", top: 14, right: 14,
-          width: 280, maxHeight: "calc(100vh - 60px)", overflowY: "auto",
+          position: "absolute",
+          top: "5%", left: "5%", right: "5%", bottom: "5%",
           background: "rgba(10, 10, 14, 0.4)",
           backdropFilter: "blur(12px)",
           WebkitBackdropFilter: "blur(12px)",
           border: "1px solid rgba(255,255,255,0.1)",
-          borderRadius: 8,
+          borderRadius: 12,
           boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+          display: "flex", flexDirection: "column",
+          overflow: "hidden",
         }}>
           <div id="modal-header" style={{
             padding: "14px 16px 10px", borderBottom: "1px solid rgba(255,255,255,0.08)",
