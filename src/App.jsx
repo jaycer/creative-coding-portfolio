@@ -433,18 +433,67 @@ export default function ShaderCompositor() {
     };
   }, []);
 
-  const [layers, setLayers] = useState([
-    { id: "plasma", opacity: 1.0, blendMode: "add", enabled: true, speed: 1.0, zoom: 1.0, rotation: 0, expanded: true },
-    { id: "voronoi", opacity: 0.6, blendMode: "screen", enabled: true, speed: 1.0, zoom: 1.0, rotation: 0, expanded: true },
-    { id: "underwater", opacity: 0.9, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, expanded: false, raysIntensity: 1.0, rayCount: 7.0 },
-    { id: "crt", opacity: 0.6, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
-    { id: "hlines", opacity: 0.8, blendMode: "screen", enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
-    { id: "warp", opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
-    { id: "composite", opacity: 1.0, blendMode: "normal", enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
-  ]);
+  // Default layer state — used as the base when loading saved files.
+  // New properties added here will automatically get their defaults when
+  // loading older save files that don't include them.
+  const DEFAULT_LAYERS = [
+    { id: "plasma",    opacity: 1.0, blendMode: "add",      enabled: true,  speed: 1.0, zoom: 1.0, rotation: 0, expanded: true  },
+    { id: "voronoi",   opacity: 0.6, blendMode: "screen",   enabled: true,  speed: 1.0, zoom: 1.0, rotation: 0, expanded: true  },
+    { id: "underwater",opacity: 0.9, blendMode: "screen",   enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false, raysIntensity: 1.0, rayCount: 7.0 },
+    { id: "crt",       opacity: 0.6, blendMode: "screen",   enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+    { id: "hlines",    opacity: 0.8, blendMode: "screen",   enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+    { id: "warp",      opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+    { id: "composite", opacity: 1.0, blendMode: "normal",   enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+  ];
+
+  const [layers, setLayers] = useState(DEFAULT_LAYERS);
   const [fps, setFps] = useState(0);
   const layersRef = useRef(layers);
   layersRef.current = layers;
+  const fileInputRef = useRef(null);
+
+  const saveState = () => {
+    const state = {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      layers: layers.map(l => ({ ...l })),
+    };
+    const json = JSON.stringify(state, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bricks-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const loadState = (json) => {
+    try {
+      const data = JSON.parse(json);
+      if (!Array.isArray(data.layers)) throw new Error("Invalid format: missing layers array");
+      // Merge each saved layer over its defaults — unknown keys in save files
+      // are preserved, missing keys fall back to defaults. Unknown layer IDs
+      // in the save file are ignored; new layers not in the file get defaults.
+      const savedById = Object.fromEntries(data.layers.map(l => [l.id, l]));
+      const merged = DEFAULT_LAYERS.map(def => ({
+        ...def,
+        ...(savedById[def.id] ?? {}),
+      }));
+      setLayers(merged);
+    } catch (e) {
+      alert(`Could not load file: ${e.message}`);
+    }
+  };
+
+  const onFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => loadState(ev.target.result);
+    reader.readAsText(file);
+    e.target.value = "";
+  };
 
   // Init WebGL
   useEffect(() => {
@@ -866,22 +915,33 @@ export default function ShaderCompositor() {
         }}>
           BENT MACE BRICK LAYER — {fps} FPS
         </div>
-        {!showControls && <button
-          id="controls-btn"
-          onClick={() => setShowControls(v => !v)}
-          style={{
+        {!showControls && !cursorHidden && <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            onChange={onFileChange}
+            style={{ display: "none" }}
+          />
+          {/* Button row — flex so buttons never overlap */}
+          <div id="hud-btn-row" style={{
             position: "absolute", top: 14, right: 14, pointerEvents: "all",
-            background: "rgba(255,255,255,0.15)",
-            border: "1px solid rgba(255,255,255,0.4)",
-            borderRadius: 4, color: "#fff",
-            cursor: "pointer", padding: "5px 8px", display: "flex", alignItems: "center",
-            transition: "all 0.15s", fontSize: "0.65em", lineHeight: 1
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.2)"; e.currentTarget.style.color = "#fff"; }}
-          onMouseLeave={e => { e.currentTarget.style.background = showControls ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.05)"; e.currentTarget.style.color = showControls ? "#fff" : "rgba(255,255,255,0.4)"; }}
-        >
-          <span id="controls-label" style={{ fontSize: "12px", letterSpacing: "0.12em" }}>BRICKS</span>
-        </button>}
+            display: "flex", gap: 6, alignItems: "center"
+          }}>
+            <button id="load-btn" onClick={() => fileInputRef.current.click()} style={hudBtnStyle}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.15)"}
+            >⬆ LOAD</button>
+            <button id="save-btn" onClick={saveState} style={hudBtnStyle}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.15)"}
+            >⬇ SAVE</button>
+            <button id="controls-btn" onClick={() => setShowControls(v => !v)} style={hudBtnStyle}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.15)"}
+            >🧱 BRICKS</button>
+          </div>
+        </>}
       </div>
 
       {/* Controls modal — transparent, floating */}
@@ -926,6 +986,13 @@ const btnStyle = {
   background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 2,
   color: "#fff", fontSize: "0.65em", cursor: "pointer", padding: 0,
   lineHeight: 1
+};
+
+const hudBtnStyle = {
+  background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.4)",
+  borderRadius: 4, color: "#fff", cursor: "pointer", padding: "5px 10px",
+  fontSize: "12px", letterSpacing: "0.1em", lineHeight: 1,
+  transition: "background 0.15s", whiteSpace: "nowrap"
 };
 
 const labelStyle = {
