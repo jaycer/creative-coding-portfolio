@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Browse Egyptian hieroglyphs one at a time — favorite the ones you like. By Jayce Renner." />
+    <title>Hieroglyph Viewer ~ Jayce Renner</title>
+    <link rel="stylesheet" href="./vapor.min.css" />
+    <link rel="stylesheet" href="./main.css" />
+    <style>
+      body { min-height: 100vh; }
+      .glyph-stage {
+        font-size: clamp(7rem, 28vw, 16rem);
+        line-height: 1;
+        user-select: none;
+      }
+      .glyph-stage .no-touch-zoom { display: inline-block; }
+      #likeddisplay { font-size: 1.8rem; word-break: break-word; min-height: 2.4rem; }
+      .info-table th { white-space: nowrap; width: 1%; opacity: 0.7; font-weight: 600; }
+      .nav-btn { min-width: 4.5rem; }
+    </style>
+  </head>
+  <body class="bg-dark text-light">
+    <!-- Top bar -->
+    <nav class="navbar navbar-expand bg-dark-gray border-bottom border-secondary px-3">
+      <a class="btn btn-outline-light btn-sm rounded-pill" href="../../">← Gallery</a>
+      <span class="navbar-brand mx-3 mb-0 h1 fs-6">Hieroglyph Viewer</span>
+      <div class="ms-auto d-flex gap-2">
+        <button class="btn btn-outline-info btn-sm" type="button"
+                data-bs-toggle="modal" data-bs-target="#infoModal" title="Glyph details">
+          <i class="bi bi-info-circle"></i> Info
+        </button>
+        <button class="btn btn-outline-light btn-sm" type="button"
+                onclick="return hvModule.copyLink()" title="Copy link to this glyph">
+          <i class="bi bi-link-45deg"></i> Share
+        </button>
+      </div>
+    </nav>
+
+    <main class="container text-center py-4">
+      <!-- The glyph -->
+      <div class="glyph-stage my-3">
+        <span id="maindisplay" class="no-touch-zoom">𓀀</span>
+      </div>
+
+      <h2 id="nameheading" class="h4 fw-light mb-1 text-light-gray">&nbsp;</h2>
+      <p id="indexdisplay" class="text-muted small mb-4">— / —</p>
+
+      <!-- Controls -->
+      <div class="btn-group mb-4" role="group" aria-label="glyph navigation">
+        <button class="btn btn-outline-light nav-btn" type="button" onclick="return hvModule.decrement()" title="Previous (←)">
+          <i class="bi bi-arrow-left"></i> Prev
+        </button>
+        <button class="btn btn-primary nav-btn" type="button" onclick="return hvModule.like()" title="Favorite (↑)">
+          <i class="bi bi-heart-fill"></i> Like
+        </button>
+        <button class="btn btn-outline-light nav-btn" type="button" onclick="return hvModule.increment()" title="Next (→ / Enter)">
+          Next <i class="bi bi-arrow-right"></i>
+        </button>
+      </div>
+
+      <!-- Page-level details -->
+      <div class="row justify-content-center">
+        <div class="col-12 col-md-8 col-lg-6">
+          <table class="table table-sm table-dark text-start info-table mb-0">
+            <tbody>
+              <tr><th>Gardiner</th><td id="pgardinercode">—</td></tr>
+              <tr><th>Phonetic</th><td id="pphonetic">—</td></tr>
+              <tr><th>Transliteration</th><td id="ptransliteration">—</td></tr>
+              <tr><th>Notes</th><td id="pnotes">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Favorites -->
+      <div class="mt-5">
+        <div class="d-flex align-items-center justify-content-center gap-2 mb-2">
+          <span class="text-uppercase small text-muted">Favorites</span>
+          <button class="btn btn-outline-secondary btn-sm" type="button" onclick="return hvModule.copyLikes()" title="Copy favorites (↓)">
+            <i class="bi bi-clipboard"></i> Copy
+          </button>
+        </div>
+        <div id="likeddisplay"></div>
+      </div>
+
+      <p class="text-muted small mt-5">
+        Keys: <kbd>←</kbd> prev · <kbd>→</kbd>/<kbd>Enter</kbd> next · <kbd>↑</kbd> like · <kbd>↓</kbd> copy favorites
+      </p>
+
+      <!-- Share anchors (hrefs populated at runtime) -->
+      <div class="mb-3">
+        <a id="afaceborkshare" class="btn btn-sm btn-outline-info me-2" target="_blank" rel="noopener" href="#" title="Share on Facebook">
+          <i class="bi bi-facebook"></i>
+        </a>
+        <a id="atittershare" class="btn btn-sm btn-outline-info" target="_blank" rel="noopener" href="#" title="Share on X / Twitter">
+          <i class="bi bi-twitter"></i>
+        </a>
+      </div>
+    </main>
+
+    <!-- Info modal -->
+    <div class="modal fade" id="infoModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-gray text-light">
+          <div class="modal-header border-secondary">
+            <h5 class="modal-title">
+              <span id="smodaltitleglyph" style="font-size:2rem">𓀀</span>
+              <span id="mpdescription" class="ms-2 fs-6 text-light-gray"></span>
+            </h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <table class="table table-sm table-dark info-table mb-0">
+              <tbody>
+                <tr><th>Gardiner</th><td id="mpgardinercode">—</td></tr>
+                <tr><th>Phonetic</th><td id="mpphonetic">—</td></tr>
+                <tr><th>Transliteration</th><td id="mptransliteration">—</td></tr>
+                <tr><th>Notes</th><td id="mpnotes">—</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toasts -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+      <div class="toastcopyurl toast align-items-center text-bg-info border-0" role="status" aria-live="polite" aria-atomic="true">
+        <div class="d-flex">
+          <div class="toast-body">Link copied to clipboard.</div>
+        </div>
+      </div>
+      <div class="toastcopyglyphs toast align-items-center text-bg-primary border-0" role="status" aria-live="polite" aria-atomic="true">
+        <div class="d-flex">
+          <div class="toast-body">Favorites copied to clipboard.</div>
+        </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="./hieroglyph-viewer.js"></script>
+  </body>
+</html>

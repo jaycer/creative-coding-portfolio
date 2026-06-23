@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
+  <defs>
+    <radialGradient id="b1" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="hsl(190, 95%, 75%)" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="hsl(190, 95%, 60%)" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="b2" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="hsl(320, 95%, 72%)" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="hsl(320, 95%, 60%)" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="b3" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="hsl(45, 95%, 70%)" stop-opacity="0.95"/>
+      <stop offset="1" stop-color="hsl(45, 95%, 60%)" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="600" height="400" fill="#0a0c12"/>
+  <g style="mix-blend-mode: screen">
+    <circle cx="220" cy="180" r="150" fill="url(#b1)"/>
+    <circle cx="380" cy="230" r="170" fill="url(#b2)"/>
+    <circle cx="330" cy="120" r="100" fill="url(#b3)"/>
+    <circle cx="470" cy="150" r="80" fill="url(#b1)"/>
+  </g>
+  <text x="40" y="80" font-family="ui-monospace, Menlo, monospace" font-size="34" fill="hsl(190, 90%, 78%)" fill-opacity="0.9">11</text>
+  <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="32" font-weight="600" fill="#fff">Shader Particle System</text>
+</svg>

@@ -20,6 +20,11 @@ export default defineConfig({
   // Project page lives under /<repo>/ on github.io. Relative asset links keep
   // dev (/) and prod (/creative-coding-portfolio/) both working.
   base: '/creative-coding-portfolio/',
+  // This is a true multi-page site: the gallery links to real sub-app pages.
+  // 'mpa' disables Vite's SPA index.html fallback so a directory request like
+  // /apps/<slug>/ resolves to that folder's index.html (including the static
+  // apps under /public/apps/) instead of silently serving the gallery.
+  appType: 'mpa',
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },

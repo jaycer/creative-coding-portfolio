@@ -18,7 +18,7 @@ const grid = document.getElementById('grid');
 grid.innerHTML = apps
   .map(
     (app, i) => `
-    <a class="tile" href="./apps/${app.slug}/" aria-label="${app.title}">
+    <a class="tile" href="./apps/${app.slug}/${app.entry ?? ''}" aria-label="${app.title}">
       <span class="tile__media">
         <img src="thumbs/${String(i + 1).padStart(2, '0')}.svg" alt="" loading="lazy" width="600" height="400" />
       </span>
