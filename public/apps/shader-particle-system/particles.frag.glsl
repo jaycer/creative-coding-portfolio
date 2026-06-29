@@ -23,9 +23,10 @@ precision highp float;
 
 uniform vec2 resolution;
 uniform int  uCount;
-uniform vec3 uParticles[MAX]; // xy = position (0..1, gl_FragCoord space), z = radius (height-normalised)
-uniform vec4 uColors[MAX];    // rgb = colour, a = intensity
-uniform vec3 uBg;             // background colour
+uniform vec4  uParticles[MAX]; // xy = position (0..1, gl_FragCoord space), z = radius (height-normalised), w = elongation
+uniform vec2  uRot[MAX];       // (cos, sin) of each particle's rotation, precomputed in JS
+uniform vec4  uColors[MAX];    // rgb = colour, a = intensity
+uniform vec3  uBg;             // background colour
 
 // Tunables -----------------------------------------------------------------
 const float INFLUENCE = 3.5;  // influence radius as a multiple of a particle's radius (bigger = more reach/merging)
@@ -44,14 +45,25 @@ void main() {
   for (int i = 0; i < MAX; i++) {
     if (i >= uCount) break;
 
-    vec3 p = uParticles[i];
+    vec4 p = uParticles[i];
     vec4 c = uColors[i];
 
     vec2 d = uv - p.xy;
-    d.x *= aspect;                       // keep the field circular regardless of canvas ratio
+    d.x *= aspect;                       // into a square (height-normalised) space, so rotation is uniform
 
-    float R = max(p.z, 0.0001) * INFLUENCE;
-    float qq = dot(d, d) / (R * R);      // (dist / R)^2, no sqrt needed
+    // Rotate into the particle's local frame, then scale each axis by its own
+    // radius so the field is an oval. elong > 1 stretches one axis and squeezes
+    // the other (area roughly preserved); the rotation makes it spin slowly.
+    float ca = uRot[i].x;
+    float sa = uRot[i].y;
+    vec2 rd = vec2(ca * d.x + sa * d.y, -sa * d.x + ca * d.y);
+
+    float base  = max(p.z, 0.0001) * INFLUENCE;
+    float elong = max(p.w, 0.0001);
+    vec2 radii  = vec2(base * elong, base / elong);
+    rd /= radii;
+
+    float qq = dot(rd, rd);              // squared distance in the oval's own space
     if (qq < 1.0) {
       float w = 1.0 - qq;
       w = w * w * w;                     // smooth (1 - q^2)^3 falloff, 0 at the influence edge

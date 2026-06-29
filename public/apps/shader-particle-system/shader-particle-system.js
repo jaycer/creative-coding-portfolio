@@ -24,6 +24,10 @@ let isExiting = false;
 const maxSpeed = 1;
 const greenHuePercentage = 0.075;
 
+// --- per-particle shape ---
+const maxElongation = 1.8;          // how oval a metaball can get (1 = circle); each gets a random value in [1, this]
+const maxRotSpeed = 0.006;          // radians/frame for the slow spin (±); ~one turn every 15-20s
+
 // --- background colour drift ---
 const backgroundLerpAmount = 0.004;
 const backgroundLerpMod = 25;       // lerp the background once every N frames
@@ -36,8 +40,9 @@ let theShader;
 let vertSrc;                        // raw shader sources, loaded as text in preload()
 let fragSrc;
 // Pre-sized uniform buffers (padded to MAX so p5 always sees the same length).
-const uParticles = new Float32Array(MAX_PARTICLES * 3);
+const uParticles = new Float32Array(MAX_PARTICLES * 4); // xy = pos, z = radius, w = elongation
 const uColors = new Float32Array(MAX_PARTICLES * 4);
+const uRot = new Float32Array(MAX_PARTICLES * 2);       // (cos, sin) of each particle's rotation, precomputed in JS
 
 function preload() {
   // Load the shaders as text (rather than loadShader) so we can substitute the
@@ -81,12 +86,15 @@ function draw() {
   // Pack the live particles into the uniform buffers (height-normalised).
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
-    const o3 = i * 3;
-    uParticles[o3]     = p.x / width;            // 0..1, matches gl_FragCoord.x / resolution.x
-    uParticles[o3 + 1] = 1 - p.y / height;       // flip: canvas y is top-down, gl_FragCoord is bottom-up
-    uParticles[o3 + 2] = (p.size * 0.5) / height; // radius, normalised by height
-
     const o4 = i * 4;
+    uParticles[o4]     = p.x / width;            // 0..1, matches gl_FragCoord.x / resolution.x
+    uParticles[o4 + 1] = 1 - p.y / height;       // flip: canvas y is top-down, gl_FragCoord is bottom-up
+    uParticles[o4 + 2] = (p.size * 0.5) / height; // radius, normalised by height
+    uParticles[o4 + 3] = p.elong;                // oval-ness (1 = circle)
+
+    uRot[i * 2]     = Math.cos(p.angle);          // precompute rotation once per particle here
+    uRot[i * 2 + 1] = Math.sin(p.angle);          // instead of cos/sin per-pixel in the shader
+
     uColors[o4]     = p.r;
     uColors[o4 + 1] = p.g;
     uColors[o4 + 2] = p.b;
@@ -97,6 +105,7 @@ function draw() {
   theShader.setUniform('resolution', [width, height]);
   theShader.setUniform('uCount', particles.length);
   theShader.setUniform('uParticles', uParticles);
+  theShader.setUniform('uRot', uRot);
   theShader.setUniform('uColors', uColors);
   theShader.setUniform('uBg', bgColor);
 
@@ -164,6 +173,9 @@ function makeParticle() {
     period: random(500, defaultMaxPeriod),
     frameCountOffset: frameCount,
     amp: -1,
+    elong: random(1.0, maxElongation),     // fixed oval-ness for this particle
+    angle: random(TWO_PI),                  // random starting orientation
+    rotSpeed: random(-maxRotSpeed, maxRotSpeed), // slow, signed spin
     isExiting: false,
     hasExited: false,
   };
@@ -204,6 +216,7 @@ function moveParticle(p) {
   if (p.y > height || p.y < 0) p.vy *= -1;
   p.x += p.vx;
   p.y += p.vy;
+  p.angle += p.rotSpeed; // slowly rotate the oval
 }
 
 // ---------------------------------------------------------------------------
