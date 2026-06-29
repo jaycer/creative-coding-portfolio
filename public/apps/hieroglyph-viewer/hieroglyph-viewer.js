@@ -95,10 +95,6 @@ var hvModule = {
         url.searchParams.set('h', glyph.UrlEncoded)
         window.history.pushState({}, '', url)
 
-        // share button population has to happen after url population
-        this.afaceborkshare.href = `https://facebook.com/sharer/sharer.php?u=${window.location.href}`
-        this.atittershare.href = `https://twitter.com/intent/tweet/?text=check%20out%20this%20%22${desc}%22%20${glyph.Hieroglyph}%20Egyptian%20hieroglyph&url=${window.location.href}`
-
         return false
     },
     copyLikes: function() {
@@ -151,7 +147,7 @@ var hvModule = {
             this.glyphSet[j] = k
         }
         
-        let els = ['atittershare','afaceborkshare','smodaltitleglyph','mpdescription','mpgardinercode','mpnotes','mpphonetic','mptransliteration','pphonetic','ptransliteration','maindisplay','nameheading','indexdisplay','likeddisplay','pgardinercode','pnotes']
+        let els = ['smodaltitleglyph','mpdescription','mpgardinercode','mpnotes','mpphonetic','mptransliteration','pphonetic','ptransliteration','maindisplay','nameheading','indexdisplay','likeddisplay','pgardinercode','pnotes']
         this.populateProperties(els)
 
         document.addEventListener("keydown", this.keyPressHandler)
