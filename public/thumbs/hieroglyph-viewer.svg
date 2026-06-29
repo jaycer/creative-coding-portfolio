@@ -7,6 +7,5 @@
   </defs>
   <rect width="600" height="400" fill="url(#g)"/>
   <text x="300" y="250" font-family="'Noto Sans Egyptian Hieroglyphs', serif" font-size="200" text-anchor="middle" fill="hsl(45, 80%, 78%)" fill-opacity="0.92">&#x13000;</text>
-  <text x="40" y="80" font-family="ui-monospace, Menlo, monospace" font-size="34" fill="hsl(45, 80%, 80%)" fill-opacity="0.85">12</text>
   <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="34" font-weight="600" fill="#fff">Hieroglyph Viewer</text>
 </svg>

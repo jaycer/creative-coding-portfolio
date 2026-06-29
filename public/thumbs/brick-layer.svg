@@ -24,6 +24,5 @@
     <rect x="378" y="258" width="116" height="44"/>
     <rect x="504" y="258" width="116" height="44"/>
   </g>
-  <text x="40" y="80" font-family="ui-monospace, Menlo, monospace" font-size="34" fill="hsl(22, 85%, 70%)" fill-opacity="0.85">14</text>
   <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="34" font-weight="600" fill="#fff">Brick Layer</text>
 </svg>
