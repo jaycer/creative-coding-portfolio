@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Jayce Renner — Creative Coding portfolio. Generative art, simulations, and interactive sketches." />
     <title>Jayce Renner — Creative Coding</title>
+    <!-- Critical base styles so the page paints its real background on the first
+         frame. The full stylesheet is imported by /src/main.js, which Vite
+         injects via JS in dev — without this the page flashes unstyled (white)
+         before that runs. Values mirror --bg / --ink in src/style.css. -->
+    <style>
+      html, body { margin: 0; padding: 0; background: #9a9ba0; color: #1d1f24; }
+    </style>
   </head>
   <body>
     <header class="site-header">

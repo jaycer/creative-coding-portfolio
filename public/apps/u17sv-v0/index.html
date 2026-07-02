@@ -36,15 +36,179 @@
         transition: background 0.15s ease;
       }
       .bar .back:hover { background: rgba(255,255,255,0.15); }
-      .bar .hint { margin-left: auto; font-size: 0.8rem; opacity: 0.7; }
+      .bar .info-btn {
+        pointer-events: auto;
+        color: #fff;
+        background: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        padding: 6px 12px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .bar .info-btn:hover { background: rgba(255,255,255,0.15); }
+      .bar .info-btn.push { margin-left: auto; } /* first of the right-hand cluster */
+      .bar .hint { font-size: 0.8rem; opacity: 0.7; }
+
+      /* Transient save/load feedback. */
+      .toast {
+        position: fixed;
+        bottom: 22px;
+        left: 50%;
+        z-index: 60;
+        transform: translateX(-50%) translateY(10px);
+        padding: 10px 18px;
+        border-radius: 999px;
+        background: rgba(18, 20, 18, 0.92);
+        border: 1px solid rgba(46, 204, 64, 0.4);
+        color: #d8f5dc;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 0.9rem;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      /* Intro modal, shown over the running visual until dismissed. */
+      .intro-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: rgba(8, 12, 8, 0.72);
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+        transition: opacity 0.25s ease;
+      }
+      .intro-overlay.hidden { opacity: 0; pointer-events: none; }
+      .intro-panel {
+        position: relative;
+        width: 100%;
+        max-width: 540px;
+        max-height: 100%;
+        overflow: auto;
+        padding: 28px 30px;
+        border-radius: 14px;
+        background: #141614;
+        border: 1px solid rgba(46, 204, 64, 0.35);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+        color: #e8f5e9;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+      .intro-title { margin: 0; font-size: 2.4rem; font-weight: 700; letter-spacing: -0.02em; color: #2ecc40; }
+      .intro-title .v { font-size: 1rem; color: #12b41a; vertical-align: super; margin-left: 4px; }
+      .intro-sub { margin: 4px 0 18px; color: #cfe8d2; }
+      .intro-warn {
+        margin: 0 0 18px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        color: #f4ffd6;
+        background: rgba(46, 204, 64, 0.08);
+        border: 1px solid rgba(46, 204, 64, 0.28);
+      }
+      .intro-panel h3 { margin: 0 0 8px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: #9fdfa6; }
+      .intro-panel ul { margin: 0; padding-left: 18px; line-height: 1.65; font-size: 0.92rem; }
+      .intro-panel b { color: #7cff88; font-weight: 600; }
+      .intro-panel .param-list {
+        list-style: none;
+        padding: 0;
+        margin: 4px 0 0;
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 2px 20px;
+        font-size: 0.86rem;
+      }
+      .intro-panel .param-list li { line-height: 1.55; }
+      .intro-panel .param-list b {
+        display: inline-block;
+        width: 1.3em;
+        font-family: ui-monospace, Menlo, monospace;
+      }
+      .intro-begin {
+        margin-top: 22px;
+        width: 100%;
+        padding: 12px;
+        font-size: 1rem;
+        font-weight: 600;
+        color: #06210a;
+        background: #2ecc40;
+        border: none;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .intro-begin:hover { background: #43e055; }
+      .intro-close {
+        position: absolute;
+        top: 10px;
+        right: 14px;
+        background: none;
+        border: none;
+        color: #8fbf96;
+        font-size: 1.7rem;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .intro-close:hover { color: #fff; }
     </style>
   </head>
   <body>
     <header class="bar">
       <a class="back" href="../../">← Gallery</a>
       <h1>U17SV</h1>
-      <span class="hint">click to begin · flash warning</span>
+      <button class="info-btn push" id="saveState" type="button">Save</button>
+      <button class="info-btn" id="loadState" type="button">Load</button>
+      <button class="info-btn" id="introOpen" type="button">Controls</button>
+      <span class="hint">⚠ flash warning</span>
     </header>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <!-- Intro / controls modal. The visual runs behind it from load. -->
+    <div class="intro-overlay" id="intro">
+      <div class="intro-panel" role="dialog" aria-modal="true" aria-labelledby="introTitle">
+        <button class="intro-close" type="button" data-intro-close aria-label="Close">×</button>
+        <h2 class="intro-title" id="introTitle">U17SV<span class="v">v0</span></h2>
+        <p class="intro-sub">shader visual — Jayce Renner</p>
+        <p class="intro-warn">⚠ Flash warning — some modes flash rapidly. Desktop use recommended.</p>
+        <h3>Controls</h3>
+        <ul>
+          <li><b>Click</b> — soft reset. <b>Shift + Click</b> — hard reset.</li>
+          <li><b>Shift + D</b> — toggle Demo Mode (hard-resets the visual every <span id="introTimer">10</span>s).</li>
+          <li>Hold a <b>parameter key</b> (below) + <b>←</b> / <b>→</b> to decrease / increase it; <b>key + 0</b> stops it changing.</li>
+          <li><b>Save</b> / <b>Load</b> (top bar) — download &amp; restore the current visual as a <code>.json</code> file (Load turns Demo off).</li>
+        </ul>
+        <h3>Parameters</h3>
+        <ul class="param-list">
+          <li><b>a</b> flow speed</li>
+          <li><b>b</b> horizontal density</li>
+          <li><b>c</b> detail scale</li>
+          <li><b>d</b> base colour (hue)</li>
+          <li><b>e</b> lateral waves</li>
+          <li><b>f</b> ripple / springiness</li>
+          <li><b>g</b> vertical frequency</li>
+          <li><b>h</b> background radius</li>
+          <li><b>i</b> foreground tint</li>
+          <li><b>j</b> brightness / contrast</li>
+          <li><b>r</b> rotation</li>
+          <li><b>t</b> time / phase</li>
+          <li><b>v</b> glitch amount</li>
+          <li><b>w</b> warp / mouse offset</li>
+          <li><b>x</b> horizontal pan</li>
+          <li><b>y</b> vertical pan</li>
+          <li><b>z</b> zoom</li>
+        </ul>
+        <button class="intro-begin" type="button" data-intro-close>Enter ↵</button>
+      </div>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
     <script src="./u17sv.v0.js"></script>

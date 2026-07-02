@@ -21,6 +21,7 @@ uniform float factorJ; //  0.5
 uniform float fRotation;
 uniform float fPositionDividend; // 4.0
 uniform float fGlitch;
+uniform float uHueSpread; // hue arc width: small = analogous, ~1 = wide/complementary
 
 mat2 rotate(float angle) {
   angle /= 2.0;
@@ -67,9 +68,25 @@ vec3 hueShift(vec3 color, float hueAdjustRadians) {
 
 }
 
+// RGB <-> HSV (Sam Hocevar). Used to recolour with an adjustable hue spread.
+vec3 rgb2hsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  float e = 1.0e-10;
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+
+vec3 hsv2rgb(vec3 c) {
+  vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
 void main() {
 
-  vec2 position = (gl_FragCoord.xy / resolution.xy) + mouse / fPositionDividend; 
+  vec2 position = (gl_FragCoord.xy / resolution.xy) + mouse / fPositionDividend;
   position = rotate(fRotation) * position;
   
   // origin: https://glslsandbox.com/e
@@ -94,9 +111,18 @@ void main() {
   vec3 colorVec = vec3(color * factorI, color, sin(color + time / factorH) * 0.75);
   
   colorVec = glitch(fGlitch, colorVec);
-  
-  colorVec = hueShift(colorVec, fGlitch);
-  
+
+  // Recolour in HSV so the palette's hue spread is adjustable. Compress each
+  // pixel's hue toward a base hue (factorD) by uHueSpread: small values give an
+  // analogous palette (neighbouring hues, e.g. pink/violet/blue), ~1 keeps the
+  // natural wide/complementary range. Saturation is floored to stay vivid.
+  colorVec = clamp(colorVec, 0.0, 1.0);
+  vec3 hsv = rgb2hsv(colorVec);
+  float baseHue = fract(factorD / 6.28318530718);
+  hsv.x = fract(baseHue + (hsv.x - 0.5) * uHueSpread);
+  hsv.y = clamp(hsv.y + 0.2, 0.4, 1.0);
+  colorVec = hsv2rgb(hsv);
+
   gl_FragColor = vec4(colorVec, 1.0);
 
 }

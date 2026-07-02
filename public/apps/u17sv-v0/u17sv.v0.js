@@ -1,8 +1,8 @@
 let eShader; // The shader
 let timerSeconds = 10.0;
 let efs; // a collection of shader properties
-let firstMouseClick = 0;
-let fontObjectivityMedium;
+let introOpen = true; // the intro modal is shown over the running visual until closed
+let demoTimer; // the Demo Mode countdown; reset on each click so it restarts
 let demoMode = 1;
 let versionLabel = 'v0';
 
@@ -22,125 +22,190 @@ function preload() {
   }
   
   eShader = loadShader('./u17sv.v0.vert.glsl', './u17sv.v0.frag.glsl');
-  fontObjectivityMedium = loadFont('./Objectivity-Medium.otf');
+}
+
+// Load a random preset and calm its flash-prone parameters before use.
+function freshFactors() {
+  let e = new ShaderEFactors(JSON.parse(getFav()));
+  e.calm();
+  e.broadenColor();
+  return e;
 }
 
 function setup() {
-  
+
   let cnv = createCanvas(windowWidth, windowHeight, WEBGL);
   cnv.position(0, 0, 'fixed');
-  createCanvas(windowWidth, windowHeight, WEBGL);
-  
+
   // uncomment for high-pixel density displays
   //pixelDensity(1);
-  
-  shader(eShader);
-  
-  efs = new ShaderEFactors(JSON.parse(getFav()));
 
+  shader(eShader);
+
+  // Start a default preset running right away, behind the intro modal.
+  efs = freshFactors();
+  beginTimer();
+
+  initIntro();
+  initStateButtons();
 }
 
 function draw() {
 
-  if (firstMouseClick === 1) {
-    // auto-update factors according to deltas
-    //factorA.update();
+  // manually update factors via keyboard
+  efs.handleControl();
 
-    // manually update factors via keyboard
-
-    efs.handleControl();
-
-    if (efs.useNoise === undefined || efs.useNoise === 1) {
-      efs.updateWithNoise();
-      efs.useNoise = 1;
-    }
-
-    // Update the region inside the shader;
-    eShader.setUniform("factorA", efs.factorA.f);
-    eShader.setUniform("factorB", efs.factorB.f);
-    eShader.setUniform("factorC", efs.factorC.f);
-    eShader.setUniform("factorD", efs.factorD.f);
-    eShader.setUniform("factorE", efs.factorE.f);
-    eShader.setUniform("factorF", efs.factorF.f);
-    eShader.setUniform("factorG", efs.factorG.f);
-    eShader.setUniform("factorH", efs.factorH.f);
-    eShader.setUniform("factorI", efs.factorI.f);
-    eShader.setUniform("factorJ", efs.factorJ.f);
-    eShader.setUniform("fRotation", efs.factorR.f);
-    eShader.setUniform("fPositionDividend", efs.fPositionDividend.f);
-    eShader.setUniform("fGlitch", radians(efs.fGlitch.f));
-    eShader.setUniform("mouse", [efs.factorX.f/2.0, efs.factorY.f/2.0]);
-    eShader.setUniform("resolution", [width/efs.factorW.f, height/efs.factorW.f]);
-    eShader.setUniform("time", efs.factorT.f);
-
-    // Give the shader a surface to draw on
-    rect(-width/2, -height/2, width, height);
-  } else {
-    
-    showInfoText();
-    // Demo mode on by default;
+  if (efs.useNoise === undefined || efs.useNoise === 1) {
+    efs.updateWithNoise();
+    efs.useNoise = 1;
   }
 
+  // Update the region inside the shader;
+  eShader.setUniform("factorA", efs.factorA.f);
+  eShader.setUniform("factorB", efs.factorB.f);
+  eShader.setUniform("factorC", efs.factorC.f);
+  eShader.setUniform("factorD", efs.factorD.f);
+  eShader.setUniform("factorE", efs.factorE.f);
+  eShader.setUniform("factorF", efs.factorF.f);
+  eShader.setUniform("factorG", efs.factorG.f);
+  eShader.setUniform("factorH", efs.factorH.f);
+  eShader.setUniform("factorI", efs.factorI.f);
+  eShader.setUniform("factorJ", efs.factorJ.f);
+  eShader.setUniform("fRotation", efs.factorR.f);
+  eShader.setUniform("fPositionDividend", efs.fPositionDividend.f);
+  eShader.setUniform("fGlitch", radians(efs.fGlitch.f));
+  eShader.setUniform("uHueSpread", efs.hueSpread !== undefined ? efs.hueSpread : 1.0);
+  eShader.setUniform("mouse", [efs.factorX.f/2.0, efs.factorY.f/2.0]);
+  eShader.setUniform("resolution", [width/efs.factorW.f, height/efs.factorW.f]);
+  eShader.setUniform("time", efs.factorT.f);
+
+  // Give the shader a surface to draw on
+  rect(-width/2, -height/2, width, height);
 }
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
 }
 
-function showInfoText() {
-  
-  let xCoord = -width/2 + 50;
-  let yCoord = -height/2 + 100;
+// Wire up the HTML intro modal: fill in the dynamic bits from the running
+// factor set, then handle close (button / backdrop / Esc) and reopen.
+function initIntro() {
+  const intro = document.getElementById('intro');
+  const openBtn = document.getElementById('introOpen');
+  const secEl = document.getElementById('introTimer');
 
-  background(25);
-  textFont(fontObjectivityMedium);
+  if (secEl) secEl.textContent = timerSeconds;
 
-  fill(30, 200, 40);
-  textSize(75);
-  text('U17SV', xCoord, yCoord);
+  function closeIntro() {
+    introOpen = false;
+    if (intro) intro.classList.add('hidden');
+  }
+  function openIntro() {
+    introOpen = true;
+    if (intro) intro.classList.remove('hidden');
+  }
 
-  fill(10, 180, 20);
-  textSize(20);
-  text(versionLabel, xCoord + 240, yCoord);
+  document.querySelectorAll('[data-intro-close]').forEach(function (el) {
+    el.addEventListener('click', closeIntro);
+  });
+  // Swallow every click inside the modal so it never reaches the p5 canvas
+  // (otherwise closing via a button would also register as a canvas reset,
+  // since p5 listens for clicks at the window level).
+  if (intro) intro.addEventListener('click', function (e) {
+    e.stopPropagation();
+    if (e.target === intro) closeIntro(); // click on the dimmed backdrop closes
+  });
+  if (openBtn) openBtn.addEventListener('click', function (e) {
+    e.preventDefault();
+    openIntro();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeIntro();
+  });
+}
 
-  fill(20, 190, 30);
-  textSize(34);
-  text('shader visual', xCoord, yCoord += 45);
+// --- Save / load state ------------------------------------------------------
+let fileInput; // hidden <input type="file"> driving the Load button
 
-  fill(230);
-  textSize(25);
-  text('Jayce Renner', xCoord, yCoord += 40);
+// Serialize the live factor set the same way the Ctrl+L logger does — drop the
+// shaderFactors array (it just duplicates the named factors as references).
+function serializeFactors(e) {
+  return JSON.stringify(e, function (key, value) {
+    return key === 'shaderFactors' ? undefined : value;
+  }, 2);
+}
 
+function fileStamp() {
+  const d = new Date();
+  const p = function (n) { return String(n).padStart(2, '0'); };
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+         '-' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+}
 
-  textSize(20);
-  text('! Flash Warning ! some modes flash rapidly', xCoord, yCoord += 70);
+// Save: download the current state as a .json file.
+function saveState() {
+  try {
+    const blob = new Blob([serializeFactors(efs)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'u17sv-state-' + fileStamp() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('State downloaded');
+  } catch (err) {
+    showToast('Could not save');
+  }
+}
 
-  text('Desktop use recommended', xCoord, yCoord += 40);
+// Load: read an uploaded .json file and restore it.
+function handleStateFile(e) {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function () {
+    try {
+      efs = new ShaderEFactors(JSON.parse(reader.result));
+      // Turn Demo Mode off so the restored state isn't overwritten on the next tick.
+      demoMode = 0;
+      if (demoTimer) demoTimer.reset();
+      showToast('State loaded · Demo off');
+    } catch (err) {
+      showToast('Invalid state file');
+    }
+  };
+  reader.onerror = function () { showToast('Could not read file'); };
+  reader.readAsText(file);
+  e.target.value = ''; // let the same file be chosen again
+}
 
-  text('Click anywhere to begin', xCoord, yCoord += 40);
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () { t.classList.remove('show'); }, 1600);
+}
 
-  textSize(20);
-  fill(190);
-  text('Controls', xCoord, yCoord += 60);
+function initStateButtons() {
+  const saveBtn = document.getElementById('saveState');
+  const loadBtn = document.getElementById('loadState');
 
-  textSize(16);
-  text('Click = soft reset. [Shift]+Click = hard reset.', xCoord, yCoord += 40);
+  if (saveBtn) saveBtn.addEventListener('click', saveState);
 
-  text('[Shift]+d = toggle Demo Mode off/on. Demo Mode hard resets visual every ' + timerSeconds + ' seconds.', xCoord, yCoord += 40);
+  // A hidden file input backs the Load button's upload dialog.
+  fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'application/json,.json';
+  fileInput.style.display = 'none';
+  fileInput.addEventListener('change', handleStateFile);
+  document.body.appendChild(fileInput);
 
-  text('To decrease or increase parameters of the visual, combine the left and right arrow keys with the parameter keys.', xCoord, yCoord += 40);
-
-  text(String.format('The parameter keys are: {0}.', efs.getControlKeysText()), xCoord, yCoord += 40);
-
-  text('For example, x+[right arrow] increases the x parameter and causes the visual to pan left along the x axis.', xCoord, yCoord += 40);
-
-  text('To stop a parameter from changing, press the [parameter key]+0 (zero).', xCoord, yCoord += 40);
-
-  text('For example, r+0 stops the rotation of the visual.', xCoord, yCoord += 40);
-
-  fill(230);
-  textSize(20);
-  text('Enjoy!', xCoord, yCoord += 60);
+  if (loadBtn) loadBtn.addEventListener('click', function () { fileInput.click(); });
 }
 
 // keypress handler
@@ -157,48 +222,48 @@ function keyPressed() {
   return false;
 }
 
-function mouseClicked() {
-  // begin timer on the first click
-  if (firstMouseClick === 0) {
-    firstMouseClick = 1;
-    efs = new ShaderEFactors(JSON.parse(getFav()));
-    beginTimer();
-  } else {
-    if (isKeyDown('Shift')) {
-      // hard refresh
-      efs = new ShaderEFactors(JSON.parse(getFav()));
-    } else {
-      // soft refresh
-      efs.updateRandom();
-    }
-  }
-}
+// Reset on click/tap. Only mouseClicked is used (not touchStarted): p5 fires
+// both for a single mouse interaction — touchStarted on press and mouseClicked
+// on release — which was resetting the visual twice per click. p5 synthesizes
+// a click from touch taps, so touch still triggers a single reset here.
+function mouseClicked(event) {
+  // Only respond to clicks that actually land on the canvas — not the header
+  // buttons/links or the modal. p5 receives the click at the window level, so
+  // checking the target is what reliably keeps UI clicks from resetting the
+  // visual. Return nothing (not false) for those so p5 does NOT preventDefault
+  // the event — otherwise the Gallery link won't navigate and the Save/Load
+  // buttons stop working.
+  if (event && event.target && event.target.nodeName !== 'CANVAS') return;
 
-function touchStarted() {
-  if (firstMouseClick === 0) {
-    firstMouseClick = 1;
-    efs = new ShaderEFactors(JSON.parse(getFav()));
-    beginTimer();
-  } else {
+  // Ignore canvas clicks while the intro modal is up.
+  if (introOpen) return;
+
+  if (isKeyDown('Shift')) {
     // hard refresh
-    efs = new ShaderEFactors(JSON.parse(getFav()));
+    efs = freshFactors();
+  } else {
+    // soft refresh
+    efs.updateRandom();
   }
+  // Restart the Demo Mode countdown so an auto-reset doesn't fire right after.
+  if (demoTimer) demoTimer.reset();
+  return false; // prevent default only for handled canvas clicks
 }
 
 function beginTimer() {
-    var timer = new DeltaTimer(function(time) {
+    demoTimer = new DeltaTimer(function(time) {
 
       if (demoMode === 1) {
-        efs = new ShaderEFactors(JSON.parse(getFav()));
+        efs = freshFactors();
         efs.updateRandom();
       }
     //efs.expandMinMax();
     //efs.updateRandom();
     efs.isLogLocked = 0;
-    
+
   }, timerSeconds * 1000);
-  
-  timer.start();
+
+  demoTimer.start();
 }
 
 // an attempt to describe how these factors affect the visual
@@ -240,7 +305,12 @@ class ShaderEFactors {
       this.factorY = new ShaderFactor(this.factorY);
       this.fGlitch = new ShaderFactor(this.fGlitch);
       this.fPositionDividend = new ShaderFactor(this.fPositionDividend);
-      
+
+      // Swap the 'w' and 'z' controls from the presets: w now steers the
+      // position warp (fPositionDividend), z steers the zoom (factorW).
+      if (this.factorW) this.factorW.controlKey = 'z';
+      if (this.fPositionDividend) this.fPositionDividend.controlKey = 'w';
+
     } else {
 /*this.factorA = new ShaderFactor(JSON.parse('{"defaultValue":54.984,"f":54.984,"delta":0.01,"fmin":17,"fmax":160,"controlDelta":0.001,"controlKey":"a","isIncreasing":0,"isDecreasing":0}'));
 this.factorC = new ShaderFactor(JSON.parse('{"defaultValue":33,"f":138.55521038394454,"delta":0.001,"fmin":-140,"fmax":140,"controlDelta":0.001,"controlKey":"c","isIncreasing":0,"isDecreasing":0}'));
@@ -332,11 +402,47 @@ this.fPositionDividend = new ShaderFactor(JSON.parse('{"defaultValue":4,"f":7.70
     let keys = [];
     this.shaderFactors.forEach(function(x) { keys.push(x.controlKey) });
     let keyString =  keys.sort().join(', ');
-    
+
     //keyString += String.format(', {0}', x.controlKey);
     return keyString;
   }
-  
+
+  // Rein in the parameters most responsible for harsh strobing/flashing so a
+  // random preset is far less likely to land on a full-frame flicker:
+  //   fGlitch  — hue rotation + channel-swap glitch (the biggest offender)
+  //   factorJ  — brightness/contrast multiplier (blows out to black/white)
+  //   factorI  — red-channel multiplier (hard colour swings)
+  // Tightens each factor's random range and clamps its current value into it.
+  calm() {
+    this._tame(this.fGlitch, 1.5, 3.5);
+    this._tame(this.factorJ, -6, 6);
+    this._tame(this.factorI, -6, 6);
+  }
+
+  // factorD is unused by the geometry and now drives the shader's hue rotation.
+  // Give it the full colour wheel and a random starting hue so presets spread
+  // across all colours rather than landing on blue/yellow.
+  broadenColor() {
+    if (this.factorD) {
+      this.factorD.fmin = 0;
+      this.factorD.fmax = TAU;
+      this.factorD.f = random(0, TAU);
+      this.factorD.defaultValue = this.factorD.f;
+    }
+    // Pick a colour harmony for this preset: often analogous (narrow hue arc,
+    // like a pink/violet/blue scheme), sometimes the full complementary range.
+    this.hueSpread = random() < 0.5 ? random(0.12, 0.4) : random(0.5, 1.15);
+  }
+
+  _tame(factor, lo, hi) {
+    if (!factor) return;
+    factor.fmin = Math.max(factor.fmin, lo);
+    factor.fmax = Math.min(factor.fmax, hi);
+    let clamp = function (v) { return Math.min(Math.max(v, factor.fmin), factor.fmax); };
+    factor.f = clamp(factor.f);
+    if (factor.defaultValue !== undefined) factor.defaultValue = clamp(factor.defaultValue);
+  }
+
 }
 
 String.format = function() {
@@ -477,6 +583,7 @@ function DeltaTimer(render, interval) {
 
   this.start = start;
   this.stop = stop;
+  this.reset = reset;
 
   function start() {
     timeout = setTimeout(loop, 0);
@@ -486,6 +593,15 @@ function DeltaTimer(render, interval) {
 
   function stop() {
     clearTimeout(timeout);
+    return lastTime;
+  }
+
+  // Restart the countdown: schedule the next tick a full interval from now,
+  // without the immediate render that start() does.
+  function reset() {
+    clearTimeout(timeout);
+    lastTime = (+new Date()) + interval;
+    timeout = setTimeout(loop, interval);
     return lastTime;
   }
 
