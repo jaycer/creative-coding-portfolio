@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="hsl(18, 55%, 26%)"/>
+      <stop offset="1" stop-color="hsl(8, 45%, 13%)"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="400" fill="url(#g)"/>
+  <g fill="hsl(20, 65%, 52%)" fill-opacity="0.55">
+    <rect x="0"   y="150" width="116" height="44"/>
+    <rect x="126" y="150" width="116" height="44"/>
+    <rect x="252" y="150" width="116" height="44"/>
+    <rect x="378" y="150" width="116" height="44"/>
+    <rect x="504" y="150" width="116" height="44"/>
+    <rect x="-58" y="204" width="116" height="44"/>
+    <rect x="68"  y="204" width="116" height="44"/>
+    <rect x="194" y="204" width="116" height="44"/>
+    <rect x="320" y="204" width="116" height="44"/>
+    <rect x="446" y="204" width="116" height="44"/>
+    <rect x="572" y="204" width="116" height="44"/>
+    <rect x="0"   y="258" width="116" height="44"/>
+    <rect x="126" y="258" width="116" height="44"/>
+    <rect x="252" y="258" width="116" height="44"/>
+    <rect x="378" y="258" width="116" height="44"/>
+    <rect x="504" y="258" width="116" height="44"/>
+  </g>
+  <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="34" font-weight="600" fill="#fff">Brick Layer</text>
+</svg>
