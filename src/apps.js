@@ -8,8 +8,8 @@
 // for static folders under /public. To add work: drop a folder in either place
 // and add a row here.
 export const apps = [
-  { slug: 'app-01', title: 'Flow Field',     blurb: 'Particles steered by a Perlin-noise vector field.' },
-  { slug: 'app-02', title: 'Particle Swarm',  blurb: 'Boids-style flocking with mouse attraction.' },
+  // Flow Field (app-01) and Particle Swarm (app-02) are intentionally unlisted —
+  // still reachable by direct URL, just not shown in the gallery grid.
   { slug: 'particle-system',        title: 'Particle System',        blurb: 'Color-shifting orbs that breathe in and out across an HSB field.',           entry: 'index.html' },
   { slug: 'shader-particle-system', title: 'Shader Particle System', blurb: 'The particle system reborn on the GPU — soft additive blobs in a fragment shader.', entry: 'index.html' },
   { slug: 'hieroglyph-viewer',      title: 'Hieroglyph Viewer',      blurb: 'Browse Egyptian hieroglyphs one at a time — favorite the ones you like.',   entry: 'index.html' },

@@ -11,9 +11,13 @@
          before that runs. Values mirror --bg / --ink in src/style.css. -->
     <style>
       html, body { margin: 0; padding: 0; background: #9a9ba0; color: #1d1f24; }
+      /* Keep content hidden until main.js has applied the stylesheet and built
+         the grid, then it reveals all at once — no flash of the unstyled title.
+         The gray background still shows via <html> above. */
+      body.preload { visibility: hidden; }
     </style>
   </head>
-  <body>
+  <body class="preload">
     <header class="site-header">
       <div class="site-header__inner">
         <div class="site-header__titles">

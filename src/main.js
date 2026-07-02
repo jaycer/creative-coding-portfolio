@@ -29,3 +29,7 @@ grid.innerHTML = apps
     </a>`
   )
   .join('');
+
+// Reveal the page now that the stylesheet is imported (applied above) and the
+// grid is built — prevents a flash of unstyled header/title on first paint.
+document.body.classList.remove('preload');
