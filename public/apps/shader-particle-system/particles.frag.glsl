@@ -2,7 +2,7 @@
 //
 // All particle *physics* still runs in JS (faithfully ported from the original
 // p5 sketch). Each frame the JS uploads every particle's position, radius,
-// colour and intensity as uniform arrays; this fragment shader then draws the
+// color and intensity as uniform arrays; this fragment shader then draws the
 // whole field on the GPU in a single full-screen pass.
 //
 // Unlike a plain additive blend, this is a real metaball field: every particle
@@ -25,8 +25,8 @@ uniform vec2 resolution;
 uniform int  uCount;
 uniform vec4  uParticles[MAX]; // xy = position (0..1, gl_FragCoord space), z = radius (height-normalised), w = elongation
 uniform vec2  uRot[MAX];       // (cos, sin) of each particle's rotation, precomputed in JS
-uniform vec4  uColors[MAX];    // rgb = colour, a = intensity
-uniform vec3  uBg;             // background colour
+uniform vec4  uColors[MAX];    // rgb = color, a = intensity
+uniform vec3  uBg;             // background color
 
 // Tunables -----------------------------------------------------------------
 const float INFLUENCE = 3.5;  // influence radius as a multiple of a particle's radius (bigger = more reach/merging)
@@ -40,7 +40,7 @@ void main() {
   float aspect = resolution.x / resolution.y;
 
   float field = 0.0;       // summed metaball field at this pixel
-  vec3  colAccum = vec3(0.0); // field-weighted colour
+  vec3  colAccum = vec3(0.0); // field-weighted color
 
   for (int i = 0; i < MAX; i++) {
     if (i >= uCount) break;
@@ -68,7 +68,7 @@ void main() {
       float w = 1.0 - qq;
       w = w * w * w;                     // smooth (1 - q^2)^3 falloff, 0 at the influence edge
       field += w;
-      colAccum += c.rgb * c.a * w;       // intensity-weighted colour contribution
+      colAccum += c.rgb * c.a * w;       // intensity-weighted color contribution
     }
   }
 

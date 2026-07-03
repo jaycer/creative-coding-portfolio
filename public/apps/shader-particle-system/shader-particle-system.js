@@ -3,8 +3,8 @@
 // A GPU adaptation of the original p5 "Particle System" sketch. The particle
 // *simulation* is the same hand-tuned logic ported verbatim — particles drift,
 // bounce off the edges, breathe in and out on a cosine-eased size wave, lerp
-// their colour while growing, and live out a birth/decay lifespan in waves;
-// the background slowly drifts toward a fresh target colour. The difference is
+// their color while growing, and live out a birth/decay lifespan in waves;
+// the background slowly drifts toward a fresh target color. The difference is
 // rendering: instead of drawing each particle with p5's ellipse(), every
 // particle's state is uploaded to a fragment shader (particles.frag.glsl) that
 // draws the whole field on the GPU as additive soft blobs.
@@ -28,7 +28,7 @@ const greenHuePercentage = 0.075;
 const maxElongation = 1.8;          // how oval a metaball can get (1 = circle); each gets a random value in [1, this]
 const maxRotSpeed = 0.006;          // radians/frame for the slow spin (±); ~one turn every 15-20s
 
-// --- background colour drift ---
+// --- background color drift ---
 const backgroundLerpAmount = 0.004;
 const backgroundLerpMod = 25;       // lerp the background once every N frames
 const newTargetBgFrames = 60 * 60;  // pick a new target roughly once a minute (@60fps)
@@ -220,7 +220,7 @@ function moveParticle(p) {
 }
 
 // ---------------------------------------------------------------------------
-// Colour helpers — same hue distribution / ranges as the original, but the
+// Color helpers — same hue distribution / ranges as the original, but the
 // HSB→RGB conversion is done in JS so we can hand normalised RGB to the shader.
 // ---------------------------------------------------------------------------
 function getBackgroundColor() {

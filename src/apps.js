@@ -12,6 +12,7 @@ export const apps = [
   // still reachable by direct URL, just not shown in the gallery grid.
   { slug: 'particle-system',        title: 'Particle System',        blurb: 'Color-shifting orbs that breathe in and out across an HSB field.',           entry: 'index.html' },
   { slug: 'shader-particle-system', title: 'Shader Particle System', blurb: 'The particle system reborn on the GPU — soft additive blobs in a fragment shader.', entry: 'index.html' },
+  { slug: 'ambient-lumina',         title: 'Ambient Lumina',         blurb: 'Ten lumina that sing — pitch from color, pan from motion, contrast where they meet.', entry: 'index.html' },
   { slug: 'hieroglyph-viewer',      title: 'Hieroglyph Viewer',      blurb: 'Browse Egyptian hieroglyphs one at a time — favorite the ones you like.',   entry: 'index.html' },
   { slug: 'u17sv-v0',               title: 'U17SV',                  blurb: 'An interactive WebGL shader visual driven by the keyboard. (flash warning)', entry: 'index.html' },
   { slug: 'brick-layer',            title: 'Brick Layer',            blurb: 'A React shader compositor — stack, rotate, and blend generative visual layers.', entry: 'index.html' },
