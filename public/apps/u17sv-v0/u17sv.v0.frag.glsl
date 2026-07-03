@@ -68,7 +68,7 @@ vec3 hueShift(vec3 color, float hueAdjustRadians) {
 
 }
 
-// RGB <-> HSV (Sam Hocevar). Used to recolour with an adjustable hue spread.
+// RGB <-> HSV (Sam Hocevar). Used to recolor with an adjustable hue spread.
 vec3 rgb2hsv(vec3 c) {
   vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
   vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
@@ -112,7 +112,7 @@ void main() {
   
   colorVec = glitch(fGlitch, colorVec);
 
-  // Recolour in HSV so the palette's hue spread is adjustable. Compress each
+  // Recolor in HSV so the palette's hue spread is adjustable. Compress each
   // pixel's hue toward a base hue (factorD) by uHueSpread: small values give an
   // analogous palette (neighbouring hues, e.g. pink/violet/blue), ~1 keeps the
   // natural wide/complementary range. Saturation is floored to stay vivid.

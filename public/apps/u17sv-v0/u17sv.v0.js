@@ -411,7 +411,7 @@ this.fPositionDividend = new ShaderFactor(JSON.parse('{"defaultValue":4,"f":7.70
   // random preset is far less likely to land on a full-frame flicker:
   //   fGlitch  — hue rotation + channel-swap glitch (the biggest offender)
   //   factorJ  — brightness/contrast multiplier (blows out to black/white)
-  //   factorI  — red-channel multiplier (hard colour swings)
+  //   factorI  — red-channel multiplier (hard color swings)
   // Tightens each factor's random range and clamps its current value into it.
   calm() {
     this._tame(this.fGlitch, 1.5, 3.5);
@@ -420,8 +420,8 @@ this.fPositionDividend = new ShaderFactor(JSON.parse('{"defaultValue":4,"f":7.70
   }
 
   // factorD is unused by the geometry and now drives the shader's hue rotation.
-  // Give it the full colour wheel and a random starting hue so presets spread
-  // across all colours rather than landing on blue/yellow.
+  // Give it the full color wheel and a random starting hue so presets spread
+  // across all colors rather than landing on blue/yellow.
   broadenColor() {
     if (this.factorD) {
       this.factorD.fmin = 0;
@@ -429,7 +429,7 @@ this.fPositionDividend = new ShaderFactor(JSON.parse('{"defaultValue":4,"f":7.70
       this.factorD.f = random(0, TAU);
       this.factorD.defaultValue = this.factorD.f;
     }
-    // Pick a colour harmony for this preset: often analogous (narrow hue arc,
+    // Pick a color harmony for this preset: often analogous (narrow hue arc,
     // like a pink/violet/blue scheme), sometimes the full complementary range.
     this.hueSpread = random() < 0.5 ? random(0.12, 0.4) : random(0.5, 1.15);
   }
