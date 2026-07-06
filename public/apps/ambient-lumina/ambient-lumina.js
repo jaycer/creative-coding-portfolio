@@ -212,23 +212,70 @@ function setHint(text) {
   if (el) el.textContent = text;
 }
 
-window.addEventListener('pointerdown', (e) => {
+// "tap" on touch devices, "click" on pointer devices — used across the copy.
+const POINTER_WORD =
+  (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 'tap' : 'click';
+
+// The overlay's default copy (in index.html) says "click"; match the device.
+{
+  const ov = document.querySelector('#sound-overlay span');
+  if (ov) ov.textContent = `🔊 ${POINTER_WORD} anywhere to begin the sound`;
+}
+
+// iOS 16.4+: route audio to the media channel (loud speaker) so the hardware
+// ringer/mute switch doesn't silence us (WebKit bug 237322 otherwise mutes Web
+// Audio when the switch is on). No-op on browsers without navigator.audioSession.
+function setAudioSession(type) {
+  try { if (navigator.audioSession) navigator.audioSession.type = type; }
+  catch (_) {}
+}
+
+// Drive the context to 'running'. iOS routinely needs several resume() attempts
+// after the unlocking gesture — a single call often leaves it 'suspended',
+// which is exactly the "hint says sounding but nothing is heard" symptom.
+async function resumeCtx() {
+  for (let i = 0; i < 6 && audioCtx.state !== 'running'; i++) {
+    try { await audioCtx.resume(); } catch (_) {}
+    if (audioCtx.state !== 'running') await new Promise((r) => setTimeout(r, 60));
+  }
+  return audioCtx.state === 'running';
+}
+
+async function startAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  // iOS suspends/interrupts the context on calls, Siri, or route changes; pull
+  // it back to running whenever that happens while we're meant to be sounding.
+  audioCtx.addEventListener('statechange', () => {
+    if (audioStarted && !document.hidden &&
+        (audioCtx.state === 'suspended' || audioCtx.state === 'interrupted')) {
+      audioCtx.resume().catch(() => {});
+    }
+  });
+  buildAudioGraph();
+  setAudioSession('playback');     // iOS: media channel, so the ringer switch doesn't mute us
+  audioStarted = true;
+  // Dismiss the overlay immediately on the gesture — not gated behind the async
+  // resume retries below, or a failed resume would leave it stuck on screen.
+  const overlay = document.getElementById('sound-overlay');
+  if (overlay) {
+    overlay.classList.add('gone');
+    overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
+  }
+  const ok = await resumeCtx();
+  setHint(ok ? `♪ sounding · ${POINTER_WORD} to mute` : `⚠ audio blocked — ${POINTER_WORD} again`);
+}
+
+// Use pointerup, not pointerdown: iOS grants audio activation only when a
+// gesture *completes* (pointerdown could still become a scroll), so resume()
+// silently no-ops from a pointerdown handler and the context stays suspended.
+window.addEventListener('pointerup', (e) => {
   if (e.target.closest('a')) return; // let the back link be just a link
   if (!audioStarted) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    buildAudioGraph();
-    audioCtx.resume();
-    audioStarted = true;
-    const overlay = document.getElementById('sound-overlay');
-    if (overlay) {
-      overlay.classList.add('gone');
-      overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
-    }
-    setHint('♪ sounding · click to mute');
+    startAudio();
   } else {
     muted = !muted;
     masterGain.gain.setTargetAtTime(muted ? 0 : MASTER_LEVEL, audioCtx.currentTime, 0.2);
-    setHint(muted ? '🔇 muted · click to unmute' : '♪ sounding · click to mute');
+    setHint(muted ? `🔇 muted · ${POINTER_WORD} to unmute` : `♪ sounding · ${POINTER_WORD} to mute`);
   }
 });
 
@@ -236,7 +283,7 @@ window.addEventListener('pointerdown', (e) => {
 document.addEventListener('visibilitychange', () => {
   if (!audioStarted) return;
   if (document.hidden) audioCtx.suspend();
-  else audioCtx.resume();
+  else resumeCtx();
 });
 
 // ---------------------------------------------------------------------------
@@ -271,7 +318,12 @@ function factorSetup() {
   // With only ~10 lumina the field would feel empty at the original size, so
   // each one is a little larger than in shader-particle-system.
   defaultMaxSize = wscale * 0.62;
-  particleAmount = Math.min(MAX_PARTICLES, Math.max(3, Math.round((width * height) / 150000)));
+  // Population target. Lumen *size* scales with the smaller screen dimension
+  // (above), so a phone already shows proportionally larger lumina; counting by
+  // pixel area on top of that made phones sparse (a ~330k-px² phone landed on
+  // the old floor of 3 while desktop hit the cap of 10). Scale far more gently
+  // so phones reach a near-full population too — the field is tuned around ~10.
+  particleAmount = Math.min(MAX_PARTICLES, Math.max(6, Math.round((width * height) / 32000)));
   defaultMaxPeriod = random(minMaxPeriod, maxMaxPeriod);
 }
 
