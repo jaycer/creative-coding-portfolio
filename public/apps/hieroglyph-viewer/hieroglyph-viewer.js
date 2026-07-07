@@ -53,17 +53,41 @@ var hvModule = {
         return false
     },
     copyLink: function () {
-        // find the url for this page 
-        // put the url on the clipboard
-        // display toast
-        navigator.clipboard.writeText(window.location.href)
-        // toast
-        var toastElList = [].slice.call(document.querySelectorAll('.toastcopyurl'))
-        var toastList = toastElList.map(function(toastEl) {
-          return new bootstrap.Toast(toastEl, {animation: true, autohide: true, delay: 800})
-        })
-        toastList.forEach(toast => toast.show())
-
+        this.copyText(window.location.href)
+        this.showToast('.toastcopyurl')
+        return false
+    },
+    copyText: function (text) {
+        // navigator.clipboard needs a secure context (https or localhost); it's
+        // undefined over plain http (e.g. a LAN IP), so fall back to execCommand.
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).catch(() => this.legacyCopy(text))
+        } else {
+            this.legacyCopy(text)
+        }
+        return false
+    },
+    legacyCopy: function (text) {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.contentEditable = 'true'
+        ta.style.position = 'fixed'
+        ta.style.top = '-9999px'
+        document.body.appendChild(ta)
+        const range = document.createRange()
+        range.selectNodeContents(ta)
+        const sel = window.getSelection()
+        sel.removeAllRanges()
+        sel.addRange(range)
+        ta.setSelectionRange(0, text.length)   // iOS needs an explicit selection range
+        try { document.execCommand('copy') } catch (e) {}
+        document.body.removeChild(ta)
+        return false
+    },
+    showToast: function (selector) {
+        [].slice.call(document.querySelectorAll(selector))
+            .map(el => new bootstrap.Toast(el, {animation: true, autohide: true, delay: 1400}))
+            .forEach(t => t.show())
         return false
     },
     updateDisplay: function () {
@@ -71,20 +95,25 @@ var hvModule = {
         const nSlasha = "n/a"
         document.title = `${glyph.Hieroglyph} ~ hieroglyph viewer ~ Jayce Renner`
 
-        // Swap + fade. Hide the glyph instantly (transition off), swap content and
-        // run the ghost-clearing repaint WHILE it's invisible, then fade the
-        // finished glyph in on the next frame. Painting at full opacity would let
-        // you watch iOS's heavy repaint happen bottom-to-top; this hides it so
-        // only the smooth fade shows.
-        const md = this.maindisplay
-        md.style.transition = 'none'
-        md.style.opacity = '0'
-        md.innerHTML = glyph.Hieroglyph
-        this.forceRedraw(this.glyphstage)
+        // Render each glyph as a FRESH element and crossfade to it. A brand-new
+        // element has no stale overflow ink, so iOS WebKit can't leave a ghost of a
+        // taller previous glyph (the bug was an in-place content swap not repainting
+        // the overflow) — and there's no forced repaint to watch draw. The outgoing
+        // element fades out (opacity carries its overflow away) and is removed once
+        // hidden.
+        const prev = this._glyphEl
+        const el = document.createElement('span')
+        el.className = 'no-touch-zoom glyph'
+        el.innerHTML = glyph.Hieroglyph
+        this.glyphstage.appendChild(el)
         requestAnimationFrame(() => {
-            md.style.transition = ''
-            md.style.opacity = '1'
+            el.classList.add('shown')
+            if (prev) {
+                prev.classList.remove('shown')
+                setTimeout(() => { if (prev.parentNode) prev.parentNode.removeChild(prev) }, 250)
+            }
         })
+        this._glyphEl = el
         this.indexdisplay.innerHTML = (this.index+1) + " / " + this.glyphSet.length
         const desc = glyph.Description || `Gardiner code ${glyph.Gardiner}`
         // >=md info population
@@ -113,13 +142,8 @@ var hvModule = {
         return false
     },
     copyLikes: function() {
-        navigator.clipboard.writeText(this.likeddisplay.innerHTML);
-        // toast
-        var toastElList = [].slice.call(document.querySelectorAll('.toastcopyglyphs'))
-        var toastList = toastElList.map(function(toastEl) {
-          return new bootstrap.Toast(toastEl, {animation: true, autohide: true, delay: 800})
-        })
-        toastList.forEach(toast => toast.show())
+        this.copyText(this.likeddisplay.textContent.trim())
+        this.showToast('.toastcopyglyphs')
         return false
     },
     keyPressHandler: function (e) {
@@ -162,7 +186,7 @@ var hvModule = {
             this.glyphSet[j] = k
         }
         
-        let els = ['smodaltitleglyph','mpdescription','mpgardinercode','mpnotes','mpphonetic','mptransliteration','pphonetic','ptransliteration','maindisplay','glyphstage','nameheading','indexdisplay','likeddisplay','pgardinercode','pnotes']
+        let els = ['smodaltitleglyph','mpdescription','mpgardinercode','mpnotes','mpphonetic','mptransliteration','pphonetic','ptransliteration','glyphstage','nameheading','indexdisplay','likeddisplay','pgardinercode','pnotes']
         this.populateProperties(els)
 
         document.addEventListener("keydown", this.keyPressHandler)
@@ -197,18 +221,6 @@ var hvModule = {
         }
         this.updateDisplay()
 
-        return false
-    },
-
-    forceRedraw: function(el) {
-        // iOS WebKit only repaints a changed element's own box, leaving ghost
-        // ink from a taller previous glyph's overflow. Toggling display off/on
-        // (with a reflow in between) invalidates the element's whole region so it
-        // repaints clean. Synchronous, so there's no visible flicker.
-        if (!el) return
-        el.style.display = 'none'
-        void el.offsetHeight
-        el.style.display = ''
         return false
     },
 
