@@ -40,6 +40,11 @@ export default defineConfig({
   // /apps/<slug>/ resolves to that folder's index.html (including the static
   // apps under /public/apps/) instead of silently serving the gallery.
   appType: 'mpa',
+  // Dev only: never let the browser cache, so on-device testing always gets the
+  // latest edit (no stale HTML/JS/CSS while iterating on the phone).
+  server: {
+    headers: { 'Cache-Control': 'no-store' },
+  },
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
   },
