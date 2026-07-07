@@ -23,7 +23,6 @@ grid.innerHTML = apps
         <img src="thumbs/${app.slug}.svg" alt="" loading="lazy" width="600" height="400" />
       </span>
       <span class="tile__meta">
-        <span class="tile__title">${app.title}</span>
         <span class="tile__blurb">${app.blurb}</span>
       </span>
     </a>`
