@@ -72,6 +72,7 @@ var hvModule = {
         document.title = `${glyph.Hieroglyph} ~ hieroglyph viewer ~ Jayce Renner`
 
         this.maindisplay.innerHTML = glyph.Hieroglyph
+        this.forceRedraw(this.glyphstage)
         this.indexdisplay.innerHTML = (this.index+1) + " / " + this.glyphSet.length
         const desc = glyph.Description || `Gardiner code ${glyph.Gardiner}`
         // >=md info population
@@ -89,10 +90,12 @@ var hvModule = {
         this.mpphonetic.innerHTML = glyph.Phonetic || nSlasha
         this.mptransliteration.innerHTML = glyph.Transliteration || nSlasha
 
-        // put the hieroglyph in the url
-        // and put the url in the browser history
+        // put the hieroglyph in the url and into browser history. Use the glyph
+        // itself — URLSearchParams percent-encodes it once (e.g. %F0%93%85%B0).
+        // Setting the already-encoded UrlEncoded here would re-encode the % signs
+        // and produce a double-encoded, ugly share link (%25F0%2593...).
         const url = new URL(window.location)
-        url.searchParams.set('h', glyph.UrlEncoded)
+        url.searchParams.set('h', glyph.Hieroglyph)
         window.history.pushState({}, '', url)
 
         return false
@@ -147,7 +150,7 @@ var hvModule = {
             this.glyphSet[j] = k
         }
         
-        let els = ['smodaltitleglyph','mpdescription','mpgardinercode','mpnotes','mpphonetic','mptransliteration','pphonetic','ptransliteration','maindisplay','nameheading','indexdisplay','likeddisplay','pgardinercode','pnotes']
+        let els = ['smodaltitleglyph','mpdescription','mpgardinercode','mpnotes','mpphonetic','mptransliteration','pphonetic','ptransliteration','maindisplay','glyphstage','nameheading','indexdisplay','likeddisplay','pgardinercode','pnotes']
         this.populateProperties(els)
 
         document.addEventListener("keydown", this.keyPressHandler)
@@ -172,6 +175,18 @@ var hvModule = {
         }
         this.updateDisplay()
 
+        return false
+    },
+
+    forceRedraw: function(el) {
+        // iOS WebKit only repaints a changed element's own box, leaving ghost
+        // ink from a taller previous glyph's overflow. Toggling display off/on
+        // (with a reflow in between) invalidates the element's whole region so it
+        // repaints clean. Synchronous, so there's no visible flicker.
+        if (!el) return
+        el.style.display = 'none'
+        void el.offsetHeight
+        el.style.display = ''
         return false
     },
 

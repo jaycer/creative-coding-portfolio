@@ -21,12 +21,34 @@
     <link rel="stylesheet" href="./main.css" />
     <style>
       body { min-height: 100vh; }
+      /* Fixed height + centering: the glyph is vertically centered with headroom,
+         so tall signs aren't clipped at the top, and the stage never changes size
+         as you flip — keeping everything below it perfectly still. */
       .glyph-stage {
-        font-size: clamp(7rem, 28vw, 16rem);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: clamp(10rem, 34vw, 19rem);
+        font-size: clamp(7rem, 27vw, 15rem);
         line-height: 1;
         user-select: none;
+        /* Own compositing layer + clip: keeps a glyph's overflow from bleeding
+           outside the stage. Paired with the JS force-redraw (see updateDisplay),
+           this stops iOS WebKit from leaving ghost ink from a taller previous glyph. */
+        transform: translateZ(0);
+        overflow: hidden;
       }
       .glyph-stage .no-touch-zoom { display: inline-block; }
+      /* Reserve two lines for the name and clamp longer ones, so the counter and
+         buttons don't jump when a short name follows a long one. */
+      #nameheading {
+        margin-top: 1.25rem;
+        min-height: 3.5rem;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+      }
       #likeddisplay { font-size: 1.8rem; word-break: break-word; min-height: 2.4rem; }
       .info-table th { white-space: nowrap; width: 1%; opacity: 0.7; font-weight: 600; }
       .nav-btn { min-width: 4.5rem; }
@@ -39,23 +61,23 @@
       <span class="navbar-brand mx-3 mb-0 h1 fs-6 text-light">Hieroglyph Viewer</span>
       <div class="ms-auto d-flex gap-2">
         <button class="btn btn-outline-info btn-sm" type="button"
-                data-bs-toggle="modal" data-bs-target="#infoModal" title="Glyph details">
-          <i class="bi bi-info-circle"></i> Info
+                data-bs-toggle="modal" data-bs-target="#infoModal" title="Glyph details" aria-label="Glyph details">
+          <i class="bi bi-info-circle"></i> <span class="d-none d-sm-inline">Info</span>
         </button>
         <button class="btn btn-outline-light btn-sm" type="button"
-                onclick="return hvModule.copyLink()" title="Copy link to this glyph">
-          <i class="bi bi-link-45deg"></i> Share
+                onclick="return hvModule.copyLink()" title="Copy link to this glyph" aria-label="Copy link to this glyph">
+          <i class="bi bi-link-45deg"></i> <span class="d-none d-sm-inline">Share</span>
         </button>
       </div>
     </nav>
 
     <main class="container text-center py-5">
       <!-- The glyph -->
-      <div class="glyph-stage my-4">
-        <span id="maindisplay" class="no-touch-zoom">𓀀</span>
+      <div class="glyph-stage my-4" id="glyphstage">
+        <span id="maindisplay" class="no-touch-zoom"></span>
       </div>
 
-      <h2 id="nameheading" class="h4 fw-light mb-2 text-light-gray" style="padding-top: 2rem">&nbsp;</h2>
+      <h2 id="nameheading" class="h4 fw-light mb-2 text-light-gray">&nbsp;</h2>
       <p id="indexdisplay" class="text-muted small mb-5">— / —</p>
 
       <!-- Controls -->
