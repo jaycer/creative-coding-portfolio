@@ -73,6 +73,11 @@ var hvModule = {
 
         this.maindisplay.innerHTML = glyph.Hieroglyph
         this.forceRedraw(this.glyphstage)
+        // quick fade-in so navigation feels smooth rather than abrupt: start the
+        // new glyph transparent, then let CSS ease it to full on the next frame.
+        const md = this.maindisplay
+        md.style.opacity = '0'
+        requestAnimationFrame(() => { md.style.opacity = '1' })
         this.indexdisplay.innerHTML = (this.index+1) + " / " + this.glyphSet.length
         const desc = glyph.Description || `Gardiner code ${glyph.Gardiner}`
         // >=md info population
@@ -154,6 +159,16 @@ var hvModule = {
         this.populateProperties(els)
 
         document.addEventListener("keydown", this.keyPressHandler)
+
+        // Flash the nav buttons when tapped/clicked so interactions are visible
+        // (e.g. in a screen recording). Re-trigger the animation on each tap.
+        document.querySelectorAll('.nav-btn').forEach((btn) => {
+            btn.addEventListener('click', function () {
+                this.classList.remove('flash')
+                void this.offsetWidth   // reflow so a rapid re-tap restarts the animation
+                this.classList.add('flash')
+            })
+        })
 
         let params = (new URL(document.location)).searchParams
         let h = params.get('h')

@@ -52,6 +52,33 @@
       #likeddisplay { font-size: 1.8rem; word-break: break-word; min-height: 2.4rem; }
       .info-table th { white-space: nowrap; width: 1%; opacity: 0.7; font-weight: 600; }
       .nav-btn { min-width: 4.5rem; }
+
+      /* Quick fade-in on each new glyph — fast, but softer than an instant swap. */
+      #maindisplay { transition: opacity 0.16s ease; }
+
+      /* Tap/click flash on the nav buttons: a brief sage ripple + press-bounce,
+         so interactions read clearly on a screen recording. */
+      @keyframes navflash {
+        0%   { box-shadow: 0 0 0 0 rgba(125, 148, 104, 0.5); transform: scale(0.96); }
+        50%  { transform: scale(1); }
+        100% { box-shadow: 0 0 0 14px rgba(125, 148, 104, 0); transform: scale(1); }
+      }
+      .nav-btn.flash { animation: navflash 0.4s ease-out; }
+
+      /* Keyboard shortcuts: a centered two-column grid of key → action pairs. */
+      .key-help__grid {
+        display: inline-grid;
+        grid-template-columns: repeat(2, auto);
+        gap: 0.5rem 1.5rem;
+        justify-content: center;
+        text-align: left;
+      }
+      .key-help__grid span { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+
+      @media (prefers-reduced-motion: reduce) {
+        #maindisplay { transition: none; }
+        .nav-btn.flash { animation: none; }
+      }
     </style>
   </head>
   <body class="bg-dark text-light">
@@ -118,9 +145,15 @@
         <div id="likeddisplay"></div>
       </div>
 
-      <p class="text-muted small mt-5">
-        Keys: <kbd>←</kbd> prev · <kbd>→</kbd>/<kbd>Enter</kbd> next · <kbd>↑</kbd> like · <kbd>↓</kbd> copy favorites
-      </p>
+      <div class="mt-5">
+        <div class="text-uppercase small text-muted mb-2" style="letter-spacing: 0.1em">Keyboard shortcuts</div>
+        <div class="key-help__grid text-muted small">
+          <span><kbd>←</kbd> Previous</span>
+          <span><kbd>→</kbd> <kbd>Enter</kbd> Next</span>
+          <span><kbd>↑</kbd> Like</span>
+          <span><kbd>↓</kbd> Copy favorites</span>
+        </div>
+      </div>
     </main>
 
     <!-- Info modal -->
