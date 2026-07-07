@@ -71,13 +71,20 @@ var hvModule = {
         const nSlasha = "n/a"
         document.title = `${glyph.Hieroglyph} ~ hieroglyph viewer ~ Jayce Renner`
 
-        this.maindisplay.innerHTML = glyph.Hieroglyph
-        this.forceRedraw(this.glyphstage)
-        // quick fade-in so navigation feels smooth rather than abrupt: start the
-        // new glyph transparent, then let CSS ease it to full on the next frame.
+        // Swap + fade. Hide the glyph instantly (transition off), swap content and
+        // run the ghost-clearing repaint WHILE it's invisible, then fade the
+        // finished glyph in on the next frame. Painting at full opacity would let
+        // you watch iOS's heavy repaint happen bottom-to-top; this hides it so
+        // only the smooth fade shows.
         const md = this.maindisplay
+        md.style.transition = 'none'
         md.style.opacity = '0'
-        requestAnimationFrame(() => { md.style.opacity = '1' })
+        md.innerHTML = glyph.Hieroglyph
+        this.forceRedraw(this.glyphstage)
+        requestAnimationFrame(() => {
+            md.style.transition = ''
+            md.style.opacity = '1'
+        })
         this.indexdisplay.innerHTML = (this.index+1) + " / " + this.glyphSet.length
         const desc = glyph.Description || `Gardiner code ${glyph.Gardiner}`
         // >=md info population
