@@ -53,17 +53,41 @@ var hvModule = {
         return false
     },
     copyLink: function () {
-        // find the url for this page 
-        // put the url on the clipboard
-        // display toast
-        navigator.clipboard.writeText(window.location.href)
-        // toast
-        var toastElList = [].slice.call(document.querySelectorAll('.toastcopyurl'))
-        var toastList = toastElList.map(function(toastEl) {
-          return new bootstrap.Toast(toastEl, {animation: true, autohide: true, delay: 800})
-        })
-        toastList.forEach(toast => toast.show())
-
+        this.copyText(window.location.href)
+        this.showToast('.toastcopyurl')
+        return false
+    },
+    copyText: function (text) {
+        // navigator.clipboard needs a secure context (https or localhost); it's
+        // undefined over plain http (e.g. a LAN IP), so fall back to execCommand.
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).catch(() => this.legacyCopy(text))
+        } else {
+            this.legacyCopy(text)
+        }
+        return false
+    },
+    legacyCopy: function (text) {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.contentEditable = 'true'
+        ta.style.position = 'fixed'
+        ta.style.top = '-9999px'
+        document.body.appendChild(ta)
+        const range = document.createRange()
+        range.selectNodeContents(ta)
+        const sel = window.getSelection()
+        sel.removeAllRanges()
+        sel.addRange(range)
+        ta.setSelectionRange(0, text.length)   // iOS needs an explicit selection range
+        try { document.execCommand('copy') } catch (e) {}
+        document.body.removeChild(ta)
+        return false
+    },
+    showToast: function (selector) {
+        [].slice.call(document.querySelectorAll(selector))
+            .map(el => new bootstrap.Toast(el, {animation: true, autohide: true, delay: 1400}))
+            .forEach(t => t.show())
         return false
     },
     updateDisplay: function () {
@@ -71,7 +95,25 @@ var hvModule = {
         const nSlasha = "n/a"
         document.title = `${glyph.Hieroglyph} ~ hieroglyph viewer ~ Jayce Renner`
 
-        this.maindisplay.innerHTML = glyph.Hieroglyph
+        // Render each glyph as a FRESH element and crossfade to it. A brand-new
+        // element has no stale overflow ink, so iOS WebKit can't leave a ghost of a
+        // taller previous glyph (the bug was an in-place content swap not repainting
+        // the overflow) — and there's no forced repaint to watch draw. The outgoing
+        // element fades out (opacity carries its overflow away) and is removed once
+        // hidden.
+        // Instant swap into a fresh element, then force iOS to repaint the stage.
+        // (No fade: on iOS it exposed this forced repaint as a visible bottom-to-top
+        // draw, and promoting the glyph to a layer for a GPU fade clipped tall signs.
+        // A fresh element each time — no in-place content swap — plus the forced
+        // repaint is what actually keeps it ghost-free AND uncut.)
+        const prev = this._glyphEl
+        const el = document.createElement('span')
+        el.className = 'no-touch-zoom glyph'
+        el.innerHTML = glyph.Hieroglyph
+        if (prev) prev.remove()
+        this.glyphstage.appendChild(el)
+        this.forceRedraw(this.glyphstage)
+        this._glyphEl = el
         this.indexdisplay.innerHTML = (this.index+1) + " / " + this.glyphSet.length
         const desc = glyph.Description || `Gardiner code ${glyph.Gardiner}`
         // >=md info population
@@ -89,22 +131,19 @@ var hvModule = {
         this.mpphonetic.innerHTML = glyph.Phonetic || nSlasha
         this.mptransliteration.innerHTML = glyph.Transliteration || nSlasha
 
-        // put the hieroglyph in the url
-        // and put the url in the browser history
+        // put the hieroglyph in the url and into browser history. Use the glyph
+        // itself — URLSearchParams percent-encodes it once (e.g. %F0%93%85%B0).
+        // Setting the already-encoded UrlEncoded here would re-encode the % signs
+        // and produce a double-encoded, ugly share link (%25F0%2593...).
         const url = new URL(window.location)
-        url.searchParams.set('h', glyph.UrlEncoded)
+        url.searchParams.set('h', glyph.Hieroglyph)
         window.history.pushState({}, '', url)
 
         return false
     },
     copyLikes: function() {
-        navigator.clipboard.writeText(this.likeddisplay.innerHTML);
-        // toast
-        var toastElList = [].slice.call(document.querySelectorAll('.toastcopyglyphs'))
-        var toastList = toastElList.map(function(toastEl) {
-          return new bootstrap.Toast(toastEl, {animation: true, autohide: true, delay: 800})
-        })
-        toastList.forEach(toast => toast.show())
+        this.copyText(this.likeddisplay.textContent.trim())
+        this.showToast('.toastcopyglyphs')
         return false
     },
     keyPressHandler: function (e) {
@@ -147,10 +186,20 @@ var hvModule = {
             this.glyphSet[j] = k
         }
         
-        let els = ['smodaltitleglyph','mpdescription','mpgardinercode','mpnotes','mpphonetic','mptransliteration','pphonetic','ptransliteration','maindisplay','nameheading','indexdisplay','likeddisplay','pgardinercode','pnotes']
+        let els = ['smodaltitleglyph','mpdescription','mpgardinercode','mpnotes','mpphonetic','mptransliteration','pphonetic','ptransliteration','glyphstage','nameheading','indexdisplay','likeddisplay','pgardinercode','pnotes']
         this.populateProperties(els)
 
         document.addEventListener("keydown", this.keyPressHandler)
+
+        // Flash the nav buttons when tapped/clicked so interactions are visible
+        // (e.g. in a screen recording). Re-trigger the animation on each tap.
+        document.querySelectorAll('.nav-btn').forEach((btn) => {
+            btn.addEventListener('click', function () {
+                this.classList.remove('flash')
+                void this.offsetWidth   // reflow so a rapid re-tap restarts the animation
+                this.classList.add('flash')
+            })
+        })
 
         let params = (new URL(document.location)).searchParams
         let h = params.get('h')
@@ -172,6 +221,17 @@ var hvModule = {
         }
         this.updateDisplay()
 
+        return false
+    },
+
+    forceRedraw: function (el) {
+        // Synchronous display off/on invalidates the element's whole region so
+        // iOS repaints it (clearing stale ink and rendering tall glyphs in full).
+        // No visible flicker: it runs in one frame and the new glyph is at
+        // opacity 0 while it happens.
+        el.style.display = 'none'
+        void el.offsetHeight
+        el.style.display = ''
         return false
     },
 
