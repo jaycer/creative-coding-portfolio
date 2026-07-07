@@ -101,23 +101,18 @@ var hvModule = {
         // the overflow) — and there's no forced repaint to watch draw. The outgoing
         // element fades out (opacity carries its overflow away) and is removed once
         // hidden.
+        // Instant swap into a fresh element, then force iOS to repaint the stage.
+        // (No fade: on iOS it exposed this forced repaint as a visible bottom-to-top
+        // draw, and promoting the glyph to a layer for a GPU fade clipped tall signs.
+        // A fresh element each time — no in-place content swap — plus the forced
+        // repaint is what actually keeps it ghost-free AND uncut.)
         const prev = this._glyphEl
         const el = document.createElement('span')
         el.className = 'no-touch-zoom glyph'
         el.innerHTML = glyph.Hieroglyph
+        if (prev) prev.remove()
         this.glyphstage.appendChild(el)
-        // iOS won't reliably paint the new glyph on its own (the tell: tapping
-        // Share animates a toast, which forces a repaint and fixes it) — so force
-        // the repaint ourselves. The new element is still at opacity 0 here, so
-        // this paints it invisibly; the GPU crossfade below then reveals it.
         this.forceRedraw(this.glyphstage)
-        requestAnimationFrame(() => {
-            el.classList.add('shown')
-            if (prev) {
-                prev.classList.remove('shown')
-                setTimeout(() => { if (prev.parentNode) prev.parentNode.removeChild(prev) }, 250)
-            }
-        })
         this._glyphEl = el
         this.indexdisplay.innerHTML = (this.index+1) + " / " + this.glyphSet.length
         const desc = glyph.Description || `Gardiner code ${glyph.Gardiner}`

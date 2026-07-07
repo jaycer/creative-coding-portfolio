@@ -36,13 +36,7 @@
         line-height: 1;
         user-select: none;
       }
-      .glyph-stage .glyph {
-        grid-area: 1 / 1;              /* every glyph occupies the same cell → they stack */
-        opacity: 0;
-        transition: opacity 0.16s ease;
-        will-change: opacity;          /* keep the crossfade on the GPU, not a re-raster */
-      }
-      .glyph-stage .glyph.shown { opacity: 1; }
+      .glyph-stage .glyph { grid-area: 1 / 1; }
       /* Reserve two lines for the name and clamp longer ones, so the counter and
          buttons don't jump when a short name follows a long one. */
       #nameheading {
@@ -77,7 +71,6 @@
       .key-help__grid span { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
 
       @media (prefers-reduced-motion: reduce) {
-        .glyph-stage .glyph { transition: none; }
         .nav-btn.flash { animation: none; }
       }
     </style>
