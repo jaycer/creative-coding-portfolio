@@ -40,6 +40,7 @@
         grid-area: 1 / 1;              /* every glyph occupies the same cell → they stack */
         opacity: 0;
         transition: opacity 0.16s ease;
+        will-change: opacity;          /* keep the crossfade on the GPU, not a re-raster */
       }
       .glyph-stage .glyph.shown { opacity: 1; }
       /* Reserve two lines for the name and clamp longer ones, so the counter and

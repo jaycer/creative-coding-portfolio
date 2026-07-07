@@ -106,6 +106,11 @@ var hvModule = {
         el.className = 'no-touch-zoom glyph'
         el.innerHTML = glyph.Hieroglyph
         this.glyphstage.appendChild(el)
+        // iOS won't reliably paint the new glyph on its own (the tell: tapping
+        // Share animates a toast, which forces a repaint and fixes it) — so force
+        // the repaint ourselves. The new element is still at opacity 0 here, so
+        // this paints it invisibly; the GPU crossfade below then reveals it.
+        this.forceRedraw(this.glyphstage)
         requestAnimationFrame(() => {
             el.classList.add('shown')
             if (prev) {
@@ -221,6 +226,17 @@ var hvModule = {
         }
         this.updateDisplay()
 
+        return false
+    },
+
+    forceRedraw: function (el) {
+        // Synchronous display off/on invalidates the element's whole region so
+        // iOS repaints it (clearing stale ink and rendering tall glyphs in full).
+        // No visible flicker: it runs in one frame and the new glyph is at
+        // opacity 0 while it happens.
+        el.style.display = 'none'
+        void el.offsetHeight
+        el.style.display = ''
         return false
     },
 
