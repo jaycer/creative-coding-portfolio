@@ -73,7 +73,7 @@ let pVX = 0, pVY = 0;        // smoothed pointer velocity (px/s)
 
 // DOM refs (populated on load)
 let elStart, elOver, elScore, elBest, elFinal, elOverBest, elStartBtn, elRestartBtn;
-let elRipples, elTapToggle;
+let elRipples, elTapToggles;
 let tapViz = false;               // show taps as expanding green rings
 
 function preload() {
@@ -439,20 +439,29 @@ function cacheDom() {
   elStartBtn.addEventListener('click', startRound);
   elRestartBtn.addEventListener('click', startRound);
 
-  // Tap visualizer: a HUD toggle (persisted) that draws an expanding green ring
-  // at every tap/click.
+  // Tap visualizer: "Show Taps" toggles in the overlay panels (persisted) draw
+  // an expanding green ring at every tap/click. There's one in each panel, kept
+  // in sync.
   elRipples   = document.getElementById('ripples');
-  elTapToggle = document.getElementById('tap-toggle');
+  elTapToggles = document.querySelectorAll('.tap-toggle');
   tapViz = localStorage.getItem('bloon-boon-tapviz') === '1';
-  elTapToggle.classList.toggle('on', tapViz);
-  elTapToggle.addEventListener('click', () => {
+  syncTapToggles();
+  elTapToggles.forEach((btn) => btn.addEventListener('click', () => {
     tapViz = !tapViz;
-    elTapToggle.classList.toggle('on', tapViz);
     localStorage.setItem('bloon-boon-tapviz', tapViz ? '1' : '0');
-  });
+    syncTapToggles();
+  }));
   window.addEventListener('pointerdown', (e) => {
     if (tapViz) spawnRipple(e.clientX, e.clientY);
   }, true);
+}
+
+// Reflect the current tapViz state on every "Show Taps" toggle.
+function syncTapToggles() {
+  elTapToggles.forEach((btn) => {
+    btn.classList.toggle('on', tapViz);
+    btn.setAttribute('aria-pressed', tapViz ? 'true' : 'false');
+  });
 }
 
 // Drop an expanding green ring at (x, y) that removes itself when it finishes.
