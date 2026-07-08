@@ -150,7 +150,7 @@ const BloonAudio = (function () {
       shaper.curve = curve;
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.105, t + 0.02); // quieted twice: 0.32 → 0.21 → 0.105
+      g.gain.exponentialRampToValueAtTime(0.105, t + 0.012); // quieted twice: 0.32 → 0.21 → 0.105; snappy onset
       g.gain.setValueAtTime(0.105, t + dur - 0.05);
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
       shaper.connect(g); g.connect(out);
@@ -219,7 +219,7 @@ const BloonAudio = (function () {
     // Main envelope: soft breathy onset, then release.
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.34, t0 + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.34, t0 + 0.02); // quick onset so the tap feels immediate
     g.gain.setValueAtTime(0.34, t0 + dur - 0.1);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
@@ -305,7 +305,7 @@ const BloonAudio = (function () {
 
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.3, t0 + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.3, t0 + 0.015);
     g.gain.setValueAtTime(0.3, t0 + dur - 0.08);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
 
