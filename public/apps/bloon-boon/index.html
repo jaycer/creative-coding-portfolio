@@ -56,6 +56,8 @@
         white-space: nowrap; transition: background 0.15s ease;
       }
       .bar .back:hover { background: rgba(255,255,255,0.15); }
+      /* On mobile, collapse the back button to just the arrow to save bar space. */
+      @media (max-width: 600px) { .bar .back-label { display: none; } }
       .hud {
         margin-left: auto; flex-shrink: 0; display: flex; align-items: baseline; gap: 8px;
         white-space: nowrap; font-variant-numeric: tabular-nums;
@@ -163,7 +165,7 @@
   </head>
   <body>
     <header class="bar">
-      <a class="back" href="../../">← Gallery</a>
+      <a class="back" href="../../" aria-label="Back to gallery">←<span class="back-label"> Gallery</span></a>
       <h1>Bloon Boon</h1>
       <div class="hud">
         <span id="score">0</span>
