@@ -201,7 +201,9 @@ function spawnBalloon() {
   balloons.push(b);                // silent entry — it only sounds when batted
 }
 
-function updateBalloons(dt, tSec) {
+// `checkLoss` is false when the round is already over — the bloons keep falling
+// for effect, but a bloon leaving the bottom must not re-trigger endRound.
+function updateBalloons(dt, tSec, checkLoss) {
   for (const b of balloons) {
     // Non-helium float: gentle gravity, heavy drag, lazy horizontal sway.
     b.vy += GRAVITY * dt;
@@ -240,8 +242,10 @@ function updateBalloons(dt, tSec) {
   resolveCollisions();
 
   // Lose when any balloon has fully cleared the bottom edge.
-  for (const b of balloons) {
-    if (b.y - b.radius > height) { endRound(); return; }
+  if (checkLoss) {
+    for (const b of balloons) {
+      if (b.y - b.radius > height) { endRound(); return; }
+    }
   }
 }
 
@@ -392,8 +396,13 @@ function draw() {
       bestAloft = peakAloft;
       localStorage.setItem('bloon-boon-best-count', String(bestAloft));
     }
-    updateBalloons(dt, now / 1000);
+    updateBalloons(dt, now / 1000, true);
     updateHud();
+  } else if (state === 'over') {
+    // Keep the bloons falling behind the game-over screen; drop each once it has
+    // fully left the bottom so they drift away instead of freezing in place.
+    updateBalloons(dt, now / 1000, false);
+    balloons = balloons.filter((b) => b.y - b.radius <= height);
   }
 
   renderScene();
