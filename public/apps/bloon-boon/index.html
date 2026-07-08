@@ -36,23 +36,29 @@
       /* Top bar: gallery link + live score. */
       .bar {
         position: fixed; top: 0; left: 0; right: 0; z-index: 10;
-        display: flex; align-items: center; gap: 16px;
+        display: flex; align-items: center; gap: 14px;
         padding: 12px 18px; padding-top: max(12px, env(safe-area-inset-top));
         font-family: var(--font); color: #fff;
         background: linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0));
         pointer-events: none;
       }
-      .bar h1 { margin: 0; font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em; }
+      /* Nothing in the bar wraps. The back button and HUD hold their size; the
+         title is the only element that gives way (shrinks, then ellipsis) when
+         the bar is too narrow — so the score/best stay put on one line. */
+      .bar h1 {
+        margin: 0; font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em;
+        white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      }
       .bar .back {
         pointer-events: auto; color: #fff; text-decoration: none;
-        font-size: 0.8rem; font-weight: 500; padding: 6px 12px;
+        font-size: 0.8rem; font-weight: 500; padding: 6px 12px; flex-shrink: 0;
         border: 1px solid rgba(255,255,255,0.35); border-radius: 999px;
         white-space: nowrap; transition: background 0.15s ease;
       }
       .bar .back:hover { background: rgba(255,255,255,0.15); }
       .hud {
-        margin-left: auto; display: flex; align-items: baseline; gap: 8px;
-        font-variant-numeric: tabular-nums;
+        margin-left: auto; flex-shrink: 0; display: flex; align-items: baseline; gap: 8px;
+        white-space: nowrap; font-variant-numeric: tabular-nums;
       }
       /* Fixed width + centred so the right-anchored HUD never reflows when the
          digit count changes — that reflow leaves a repaint ghost (a stray
