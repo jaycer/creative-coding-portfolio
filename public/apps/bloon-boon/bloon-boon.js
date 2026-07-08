@@ -31,6 +31,16 @@ const LEAN_C      = 3;      // spring damping (underdamped → a gentle wobble)
 const HIT_SPIN    = 5.5;    // spin kick from catching a balloon off-centre
 const ANGVEL_MAX  = 11;     // clamp on angular velocity
 
+// --- collisions ---
+// How close two balloons' centres may get, as a fraction of their combined
+// radii, so they overlap rather than meeting edge-to-edge like flat discs.
+// Depth-aware: balloons near the same depth bump close to touching, while ones
+// at different depths overlap more — the nearer one (drawn on top) passes over
+// the farther one, which reads as 3D.
+const COLLIDE_TOUCH     = 0.86; // same-depth spacing (1 = edges just touch)
+const COLLIDE_DEPTH_K   = 0.9;  // extra overlap allowed per unit of depth (z) difference
+const COLLIDE_MIN       = 0.5;  // hard floor so they never pass fully through
+
 // --- collision sound ---
 const COLLIDE_MIN_SPEED = 34;  // px/s of closing speed below which a bump is silent
 const COLLIDE_COOLDOWN  = 0.2; // s between collision blips per balloon
@@ -228,14 +238,17 @@ function updateBalloons(dt, tSec) {
   }
 }
 
-// Soft elastic separation so opaque balloons don't overlap or stack.
+// Soft elastic separation. Balloons are allowed to overlap — more so when they
+// sit at different depths — so they read as 3D rather than colliding like flat
+// discs; the z-sorted painter's pass draws the nearer one over the farther.
 function resolveCollisions() {
   for (let i = 0; i < balloons.length; i++) {
     for (let j = i + 1; j < balloons.length; j++) {
       const a = balloons[i], b = balloons[j];
       let dx = b.x - a.x, dy = b.y - a.y;
       let dist = Math.hypot(dx, dy);
-      const min = (a.radius + b.radius) * 0.92;
+      const factor = Math.max(COLLIDE_TOUCH - Math.abs(a.z - b.z) * COLLIDE_DEPTH_K, COLLIDE_MIN);
+      const min = (a.radius + b.radius) * factor;
       if (dist === 0) { dx = 1; dy = 0; dist = 1; }
       if (dist < min) {
         const nx = dx / dist, ny = dy / dist;
