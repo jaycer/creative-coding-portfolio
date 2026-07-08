@@ -470,6 +470,9 @@ function spawnRipple(x, y) {
   r.className = 'ripple';
   r.style.left = x + 'px';
   r.style.top = y + 'px';
+  // Max ring DIAMETER = one balloon's radius, so the ring grows to a radius of
+  // about half a balloon radius.
+  r.style.setProperty('--ripple-max', Math.round(baseRadiusPx) + 'px');
   elRipples.appendChild(r);
   const done = () => r.remove();
   r.addEventListener('animationend', done);

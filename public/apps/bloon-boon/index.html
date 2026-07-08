@@ -42,10 +42,10 @@
         background: linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0));
         pointer-events: none;
       }
-      .bar h1 { margin: 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+      .bar h1 { margin: 0; font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em; }
       .bar .back {
         pointer-events: auto; color: #fff; text-decoration: none;
-        font-size: 0.9rem; font-weight: 500; padding: 6px 12px;
+        font-size: 0.8rem; font-weight: 500; padding: 6px 12px;
         border: 1px solid rgba(255,255,255,0.35); border-radius: 999px;
         white-space: nowrap; transition: background 0.15s ease;
       }
@@ -54,15 +54,15 @@
         margin-left: auto; display: flex; align-items: baseline; gap: 8px;
         font-variant-numeric: tabular-nums;
       }
-      #score { font-size: 1.5rem; font-weight: 700; letter-spacing: 0.02em; }
-      .hud-label { font-size: 0.8rem; opacity: 0.6; margin-right: 6px; }
-      #best { font-size: 0.8rem; opacity: 0.6; }
+      #score { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.02em; }
+      .hud-label { font-size: 0.7rem; opacity: 0.6; margin-right: 6px; }
+      #best { font-size: 0.7rem; opacity: 0.6; }
 
       /* Tap-visualizer toggle, a secondary control inside the overlay panels. */
       .panel .tap-toggle {
         pointer-events: auto;
         display: block; width: fit-content; margin: 14px auto 0;
-        font: inherit; font-size: 0.82rem; font-weight: 600; color: rgba(255,255,255,0.75);
+        font: inherit; font-size: 0.72rem; font-weight: 600; color: rgba(255,255,255,0.75);
         background: rgba(255,255,255,0.06);
         border: 1px solid rgba(255,255,255,0.25);
         border-radius: 999px; padding: 7px 16px; cursor: pointer;
@@ -79,17 +79,19 @@
       /* Tap ripples: expanding green rings at each tap/click, above everything,
          never blocking input. */
       #ripples { position: fixed; inset: 0; z-index: 25; pointer-events: none; overflow: hidden; }
+      /* --ripple-max (the ring's max diameter) is set per-tap from JS to a
+         balloon's radius, so the ring grows to about half a balloon radius. */
       .ripple {
         position: absolute; transform: translate(-50%, -50%);
-        width: 14px; height: 14px; border-radius: 50%;
+        width: 8px; height: 8px; border-radius: 50%;
         border: 3px solid rgba(74,255,130,0.9);
         box-shadow: 0 0 14px rgba(74,255,130,0.6), inset 0 0 8px rgba(74,255,130,0.3);
         animation: ripple 0.6s ease-out forwards;
         will-change: width, height, opacity;
       }
       @keyframes ripple {
-        0%   { width: 14px;  height: 14px;  opacity: 0.95; }
-        100% { width: 150px; height: 150px; opacity: 0; }
+        0%   { width: 8px; height: 8px; opacity: 0.95; }
+        100% { width: var(--ripple-max, 120px); height: var(--ripple-max, 120px); opacity: 0; }
       }
       @media (prefers-reduced-motion: reduce) {
         .ripple { animation-duration: 0.3s; }
@@ -121,17 +123,17 @@
         box-shadow: 0 24px 60px rgba(0,0,0,0.5);
       }
       .panel h2 {
-        margin: 0 0 12px; font-size: 1.9rem; font-weight: 800; letter-spacing: -0.02em;
+        margin: 0 0 12px; font-size: 1.8rem; font-weight: 800; letter-spacing: -0.02em;
         background: linear-gradient(90deg, #ff5b64, #ffd23e 35%, #5ed46f 62%, #4db8ff);
         -webkit-background-clip: text; background-clip: text; color: transparent;
       }
-      .panel p { margin: 8px 0; font-size: 0.98rem; line-height: 1.5; opacity: 0.85; }
-      .panel .stat b { font-size: 1.25rem; }
-      .panel .best { font-size: 0.85rem; opacity: 0.6; }
+      .panel p { margin: 8px 0; font-size: 0.88rem; line-height: 1.5; opacity: 0.85; }
+      .panel .stat b { font-size: 1.15rem; }
+      .panel .best { font-size: 0.75rem; opacity: 0.6; }
       .panel .cue-btn {
         pointer-events: auto;            /* the one interactive thing in the overlay */
         margin-top: 20px;
-        font: inherit; font-weight: 700; font-size: 1.05rem; color: #fff;
+        font: inherit; font-weight: 700; font-size: 0.95rem; color: #fff;
         background: rgba(255,255,255,0.12);
         border: 1px solid rgba(255,255,255,0.4);
         border-radius: 999px;
