@@ -1,6 +1,6 @@
 // Bloon Boon — synthesized voices.
 //
-// Every balloon colour has its own procedurally-generated sound (no audio
+// Every balloon color has its own procedurally-generated sound (no audio
 // files): a bird call, a car horn, a strummed guitar chord, a toy piano, a
 // glass bell, a kazoo. They're stylised, not photoreal — oscillators, a
 // Karplus-Strong string, and additive partials with tuned envelopes.

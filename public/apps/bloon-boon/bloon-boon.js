@@ -4,7 +4,7 @@
 // heavier than air, so they sink slowly through a lot of drag while swaying).
 // Tap or swipe to bat one upward; lose the instant any balloon slips off the
 // bottom of the screen. New balloons arrive at random 10–30s intervals, each a
-// different colour with its own synthesized voice (see audio.js) that sounds
+// different color with its own synthesized voice (see audio.js) that sounds
 // when it enters the room.
 //
 // Physics runs here in JS; every frame the live balloons are packed into
@@ -128,7 +128,7 @@ function randomSpawnGap() {
 // ---------------------------------------------------------------------------
 // Balloons
 // ---------------------------------------------------------------------------
-// Colour picker: a shuffled "bag" so every colour is dealt once before any
+// Color picker: a shuffled "bag" so every color is dealt once before any
 // repeats — even variety, no long streaks, no droughts. Pure random genuinely
 // clumps (5-of-a-kind runs happen), which reads as broken even though it isn't.
 let colorBag = [];
@@ -140,7 +140,7 @@ function nextColorIdx() {
       const j = floor(random(i + 1));
       [colorBag[i], colorBag[j]] = [colorBag[j], colorBag[i]];
     }
-    // Don't let the new bag open with the colour the last one closed on.
+    // Don't let the new bag open with the color the last one closed on.
     if (colorBag[colorBag.length - 1] === lastColorIdx) {
       [colorBag[colorBag.length - 1], colorBag[0]] = [colorBag[0], colorBag[colorBag.length - 1]];
     }

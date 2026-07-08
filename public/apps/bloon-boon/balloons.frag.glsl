@@ -1,7 +1,7 @@
 // Bloon Boon — rendering pass.
 //
 // All game *physics* runs in JS (bloon-boon.js). Each frame the JS uploads
-// every balloon's position, radius, colour and jelly-squash as uniform arrays,
+// every balloon's position, radius, color and jelly-squash as uniform arrays,
 // packed far-to-near; this fragment shader draws the whole scene in one
 // full-screen pass: a dim room, then each balloon as a fake-3D lit sphere with
 // a little knot, composited back-to-front with the over operator.
@@ -24,7 +24,7 @@ uniform vec2 resolution;
 uniform int  uCount;
 uniform vec4 uBalloons[MAX]; // xy = centre (0..1, gl_FragCoord uv, y up), z = radius (height-normalised), w = squash
 uniform vec2 uRot[MAX];      // (cos, sin) of each balloon's rotation, precomputed in JS
-uniform vec3 uColors[MAX];   // rgb balloon colour
+uniform vec3 uColors[MAX];   // rgb balloon color
 
 // Balloon silhouette shape.
 const float BODY_ASPECT = 1.14; // taller than wide (1 = round)
@@ -93,7 +93,7 @@ vec4 balloon(vec2 d, float radius, float squash, vec3 color, float aspect, vec2 
 
   vec3 bodyCol = lit + spec * 0.85;
 
-  // Knot sits in shadow — darker, desaturated toward the base colour.
+  // Knot sits in shadow — darker, desaturated toward the base color.
   vec3 knotCol = color * 0.42;
 
   vec3  col = bodyCol * bodyA + knotCol * knotA;

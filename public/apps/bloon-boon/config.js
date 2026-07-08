@@ -22,8 +22,8 @@ const BLOON_CONFIG = {
   spawnMaxSeconds: 30,
   firstSpawnsSeconds: [1.0, 4.0, 8.0], // scripted opening so you start with a few
 
-  // The palette. Each colour is a distinct "voice" — its own synthesized sound
-  // (see audio.js). `rgb` is 0..1 linear-ish colour handed straight to the
+  // The palette. Each color is a distinct "voice" — its own synthesized sound
+  // (see audio.js). `rgb` is 0..1 linear-ish color handed straight to the
   // shader. `name` doubles as the audio voice key.
   //
   // A mix of playful, non-balloon voices (bird call, car horn, slide whistle,
