@@ -1,9 +1,9 @@
 // Bloon Boon — synthesized voices.
 //
 // Every balloon color has its own procedurally-generated sound (no audio
-// files): a bird call, a car horn, a strummed guitar chord, a toy piano, a
-// glass bell, a kazoo. They're stylised, not photoreal — oscillators, a
-// Karplus-Strong string, and additive partials with tuned envelopes.
+// files): a bird call, a car horn, a slide whistle, a toy piano, a glass bell,
+// a kazoo. They're stylised, not photoreal — oscillators, pitch glides, and
+// additive partials with tuned envelopes.
 //
 // iOS is the fussy part (see the repo's "iOS Web Audio recipe" note): the
 // AudioContext must be created inside a real user gesture, resume() often needs
@@ -93,7 +93,7 @@ const BloonAudio = (function () {
   }
 
   // Schedule `node.disconnect()` for every node in the list a bit after `when`,
-  // so feedback loops (the guitar string) go silent and nothing leaks.
+  // so each voice's nodes are torn down once its tail has rung out — no leaks.
   function cleanup(nodes, when) {
     const ms = Math.max(0, (when - ctx.currentTime) * 1000) + 120;
     setTimeout(() => nodes.forEach((n) => { try { n.disconnect(); } catch (e) {} }), ms);
