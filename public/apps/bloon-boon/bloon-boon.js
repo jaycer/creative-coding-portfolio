@@ -480,8 +480,12 @@ function spawnRipple(x, y) {
 }
 
 function updateHud() {
-  elScore.textContent = balloons.length;
-  elBest.textContent = bestAloft ? 'Best: ' + bestAloft : '';
+  // Only touch the DOM when a value actually changes — updateHud runs every
+  // frame, and constant redundant writes can trip iOS WebKit's repaint bug.
+  const s = String(balloons.length);
+  if (elScore.textContent !== s) elScore.textContent = s;
+  const b = bestAloft ? 'Best: ' + bestAloft : '';
+  if (elBest.textContent !== b) elBest.textContent = b;
 }
 
 function showReady() {

@@ -54,7 +54,11 @@
         margin-left: auto; display: flex; align-items: baseline; gap: 8px;
         font-variant-numeric: tabular-nums;
       }
-      #score { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.02em; }
+      /* Fixed width + centred so the right-anchored HUD never reflows when the
+         digit count changes — that reflow leaves a repaint ghost (a stray
+         vertical line) on iOS WebKit. */
+      #score { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.02em;
+               display: inline-block; min-width: 1.5em; text-align: center; }
       .hud-label { font-size: 0.7rem; opacity: 0.6; margin-right: 6px; }
       #best { font-size: 0.7rem; opacity: 0.6; }
 
@@ -175,7 +179,7 @@
 
     <div id="over" class="overlay hidden">
       <div class="panel">
-        <h2>A balloon got away</h2>
+        <h2>A balloon got away!!!</h2>
         <p class="stat">You kept <b id="final-count">0</b> balloons aloft at once</p>
         <p id="over-best" class="best"></p>
         <button id="restart-btn" class="cue-btn" type="button">Tap here to play again</button>
