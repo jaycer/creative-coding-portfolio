@@ -128,21 +128,29 @@ function randomSpawnGap() {
 // ---------------------------------------------------------------------------
 // Balloons
 // ---------------------------------------------------------------------------
-// Color picker: a shuffled "bag" so every color is dealt once before any
-// repeats — even variety, no long streaks, no droughts. Pure random genuinely
-// clumps (5-of-a-kind runs happen), which reads as broken even though it isn't.
+// Color picker: a shuffled "bag" holding TWO of every color. Each colour shows
+// up twice per bag, so pairs and small clusters happen (a little repeatability)
+// while droughts and long streaks don't — pure random clumps into 5-of-a-kind
+// runs that read as broken even though they aren't. A boundary guard caps any
+// run at two: the two copies can sit adjacent within a bag, but a new bag never
+// opens with the colour the last one closed on.
+const BAG_SETS = 2;
 let colorBag = [];
 let lastColorIdx = -1;
 function nextColorIdx() {
   if (colorBag.length === 0) {
-    colorBag = PALETTE.map((_, i) => i);
+    colorBag = [];
+    for (let s = 0; s < BAG_SETS; s++) PALETTE.forEach((_, i) => colorBag.push(i));
     for (let i = colorBag.length - 1; i > 0; i--) { // Fisher–Yates shuffle
       const j = floor(random(i + 1));
       [colorBag[i], colorBag[j]] = [colorBag[j], colorBag[i]];
     }
-    // Don't let the new bag open with the color the last one closed on.
-    if (colorBag[colorBag.length - 1] === lastColorIdx) {
-      [colorBag[colorBag.length - 1], colorBag[0]] = [colorBag[0], colorBag[colorBag.length - 1]];
+    // Don't let the new bag open with the color the last one closed on (which
+    // would make a run of three); swap in the first colour that differs.
+    const last = colorBag.length - 1;
+    if (colorBag[last] === lastColorIdx) {
+      const j = colorBag.findIndex((c) => c !== lastColorIdx);
+      [colorBag[last], colorBag[j]] = [colorBag[j], colorBag[last]];
     }
   }
   lastColorIdx = colorBag.pop();
