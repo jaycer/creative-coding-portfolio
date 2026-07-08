@@ -387,6 +387,11 @@ function draw() {
     // Record the peak before stepping physics, so a balloon lost this frame is
     // still counted in the final score.
     if (balloons.length > peakAloft) peakAloft = balloons.length;
+    // Live record: once you pass your stored best, Best climbs with the count.
+    if (peakAloft > bestAloft) {
+      bestAloft = peakAloft;
+      localStorage.setItem('bloon-boon-best-count', String(bestAloft));
+    }
     updateBalloons(dt, now / 1000);
     updateHud();
   }

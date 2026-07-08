@@ -68,7 +68,9 @@
       #score { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.02em;
                display: inline-block; min-width: 1.5em; text-align: center; }
       .hud-label { font-size: 0.7rem; opacity: 0.6; margin-right: 6px; }
-      #best { font-size: 0.7rem; opacity: 0.6; }
+      /* Fixed width (fits "Best: 24") so it doesn't reflow the HUD — and thus
+         won't ghost on iOS — when Best ticks up live and crosses 9 -> 10. */
+      #best { font-size: 0.7rem; opacity: 0.6; display: inline-block; min-width: 4em; text-align: right; }
 
       /* Tap-visualizer toggle, a secondary control inside the overlay panels. */
       .panel .tap-toggle {
