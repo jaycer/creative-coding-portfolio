@@ -19,7 +19,7 @@ const DRAG      = 1.5;   // linear air drag → terminal fall ≈ GRAVITY/DRAG �
 const SWAY_ACC  = 26;    // horizontal sway force amplitude
 const SWAY_FREQ = 0.6;   // sway oscillation rate (Hz-ish)
 const BAT_UP    = 430;   // upward speed imparted by a hit
-const SIDE_PUSH = 260;   // sideways kick when you catch a balloon off-centre
+const SIDE_PUSH = 260;   // sideways kick when you catch a balloon off-center
 const WALL_BOUNCE = 0.7; // horizontal restitution at the side walls
 const HIT_COOLDOWN = 0.12; // s before the same balloon can be hit again (one swipe = one hit)
 
@@ -28,11 +28,11 @@ const LEAN_PER_VX = 0.0016; // how far a balloon tilts, per px/s of horizontal d
 const LEAN_MAX    = 0.5;    // clamp on the drift lean
 const LEAN_K      = 8;      // spring stiffness back toward the lean target
 const LEAN_C      = 3;      // spring damping (underdamped → a gentle wobble)
-const HIT_SPIN    = 5.5;    // spin kick from catching a balloon off-centre
+const HIT_SPIN    = 5.5;    // spin kick from catching a balloon off-center
 const ANGVEL_MAX  = 11;     // clamp on angular velocity
 
 // --- collisions ---
-// How close two balloons' centres may get, as a fraction of their combined
+// How close two balloons' centers may get, as a fraction of their combined
 // radii, so they overlap rather than meeting edge-to-edge like flat discs.
 // Depth-aware: balloons near the same depth bump close to touching, while ones
 // at different depths overlap more — the nearer one (drawn on top) passes over
@@ -46,7 +46,7 @@ const COLLIDE_MIN_SPEED = 34;  // px/s of closing speed below which a bump is si
 const COLLIDE_COOLDOWN  = 0.2; // s between collision blips per balloon
 
 // --- shared uniform buffers (padded to MAX so p5 sees a constant length) ---
-const uBalloons = new Float32Array(MAX * 4); // xy centre (uv), z radius (h-norm), w squash
+const uBalloons = new Float32Array(MAX * 4); // xy center (uv), z radius (h-norm), w squash
 const uRot      = new Float32Array(MAX * 2); // (cos, sin) of each balloon's rotation
 const uColors   = new Float32Array(MAX * 3);
 
@@ -145,12 +145,12 @@ function randomSpawnGap(roundMs) {
 // ---------------------------------------------------------------------------
 // Balloons
 // ---------------------------------------------------------------------------
-// Color picker: a shuffled "bag" holding TWO of every color. Each colour shows
+// Color picker: a shuffled "bag" holding TWO of every color. Each color shows
 // up twice per bag, so pairs and small clusters happen (a little repeatability)
 // while droughts and long streaks don't — pure random clumps into 5-of-a-kind
 // runs that read as broken even though they aren't. A boundary guard caps any
 // run at two: the two copies can sit adjacent within a bag, but a new bag never
-// opens with the colour the last one closed on.
+// opens with the color the last one closed on.
 const BAG_SETS = 2;
 let colorBag = [];
 let lastColorIdx = -1;
@@ -163,7 +163,7 @@ function nextColorIdx() {
       [colorBag[i], colorBag[j]] = [colorBag[j], colorBag[i]];
     }
     // Don't let the new bag open with the color the last one closed on (which
-    // would make a run of three); swap in the first colour that differs.
+    // would make a run of three); swap in the first color that differs.
     const last = colorBag.length - 1;
     if (colorBag[last] === lastColorIdx) {
       const j = colorBag.findIndex((c) => c !== lastColorIdx);
@@ -357,7 +357,7 @@ function tryHit(x, y, vx, vy) {
   hit.vx += (constrain(vx * 0.35, -650, 650) + off * SIDE_PUSH) / m; // flick + side kick
   // squash: struck from below, it squats then springs
   hit.squashVel = -7;
-  // ...and it spins: off-centre hits and flicks impart angular velocity.
+  // ...and it spins: off-center hits and flicks impart angular velocity.
   hit.angVel = constrain(hit.angVel + (off * HIT_SPIN + constrain(vx, -800, 800) * 0.003) / m,
                          -ANGVEL_MAX, ANGVEL_MAX);
   BloonAudio.play(hit.voice);      // the balloon sounds only when you bat it
@@ -405,7 +405,7 @@ function renderScene() {
     const o4 = n * 4, o3 = n * 3, o2 = n * 2;
     uBalloons[o4]     = b.x / width;          // uv x
     uBalloons[o4 + 1] = 1 - b.y / height;     // uv y (flip to bottom-up)
-    uBalloons[o4 + 2] = b.radius / height;    // radius, height-normalised
+    uBalloons[o4 + 2] = b.radius / height;    // radius, height-normalized
     uBalloons[o4 + 3] = b.squash;
     uRot[o2]     = Math.cos(b.angle);         // precompute rotation once here
     uRot[o2 + 1] = Math.sin(b.angle);

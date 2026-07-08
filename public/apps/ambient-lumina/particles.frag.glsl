@@ -29,7 +29,7 @@ precision highp float;
 
 uniform vec2 resolution;
 uniform int  uCount;
-uniform vec4  uParticles[MAX]; // xy = position (0..1, gl_FragCoord space), z = radius (height-normalised), w = elongation
+uniform vec4  uParticles[MAX]; // xy = position (0..1, gl_FragCoord space), z = radius (height-normalized), w = elongation
 uniform vec2  uRot[MAX];       // (cos, sin) of each particle's rotation, precomputed in JS
 uniform vec4  uRipple[MAX];    // x = phase, y = ring spatial frequency, z = amplitude — the lumen's tone as pond ripples
 uniform vec4  uColors[MAX];    // rgb = color, a = intensity
@@ -56,7 +56,7 @@ void main() {
     vec4 c = uColors[i];
 
     vec2 d = uv - p.xy;
-    d.x *= aspect;                       // into a square (height-normalised) space, so rotation is uniform
+    d.x *= aspect;                       // into a square (height-normalized) space, so rotation is uniform
 
     // Rotate into the particle's local frame, then scale each axis by its own
     // radius so the field is an oval. elong > 1 stretches one axis and squeezes
@@ -75,12 +75,12 @@ void main() {
       float w = 1.0 - qq;
       w = w * w * w;                     // smooth (1 - q^2)^3 falloff, 0 at the influence edge
 
-      // Pond ripple: concentric rings radiate from the lumen's centre, driven
+      // Pond ripple: concentric rings radiate from the lumen's center, driven
       // by its tone — the advancing phase pushes the rings outward at the
       // note's (scaled) frequency, ring spacing tightens with pitch, and depth
       // follows the voice's volume. Modulating the field makes the rings show
       // as bands in the glow and lets deep troughs carve visible rings into
-      // the surface. Faded near the centre so the ripples' source stays calm.
+      // the surface. Faded near the center so the ripples' source stays calm.
       float q = sqrt(qq);
       float ring = sin(uRipple[i].y * q - uRipple[i].x) * smoothstep(0.0, 0.15, q);
       w *= 1.0 + uRipple[i].z * ring;
@@ -88,7 +88,7 @@ void main() {
 
       // This lumen's own coverage, eased so its color ramps in over the same
       // range the surface forms. src is bounded to [0,1], so the exclusion
-      // result stays bounded too — no normalisation pass needed.
+      // result stays bounded too — no normalization pass needed.
       float cov = smoothstep(0.0, ISO, w);
       vec3 src = c.rgb * (c.a * cov);
       colXor = colXor + src - 2.0 * colXor * src;   // exclusion (soft XOR)

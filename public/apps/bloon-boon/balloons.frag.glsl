@@ -22,7 +22,7 @@ precision highp float;
 
 uniform vec2 resolution;
 uniform int  uCount;
-uniform vec4 uBalloons[MAX]; // xy = centre (0..1, gl_FragCoord uv, y up), z = radius (height-normalised), w = squash
+uniform vec4 uBalloons[MAX]; // xy = center (0..1, gl_FragCoord uv, y up), z = radius (height-normalized), w = squash
 uniform vec2 uRot[MAX];      // (cos, sin) of each balloon's rotation, precomputed in JS
 uniform vec3 uColors[MAX];   // rgb balloon color
 
@@ -36,7 +36,7 @@ const float AMBIENT = 0.26;
 
 // Draw one balloon at this pixel. Returns rgb in .rgb and coverage in .a.
 vec4 balloon(vec2 d, float radius, float squash, vec3 color, float aspect, vec2 rot) {
-  d.x *= aspect;      // into square (height-normalised) space
+  d.x *= aspect;      // into square (height-normalized) space
   // Rotate into the balloon's own frame so its knot, egg-taper and sheen spin
   // with it. Light stays fixed in screen space, so you read the turn.
   d = vec2(rot.x * d.x + rot.y * d.y, -rot.y * d.x + rot.x * d.y);
@@ -108,7 +108,7 @@ vec3 room(vec2 uv) {
   vec3 col = mix(vec3(0.045, 0.045, 0.062), vec3(0.085, 0.088, 0.115),
                  smoothstep(0.0, 1.0, uv.y));
 
-  // Soft pool of warm light, up and slightly left of centre.
+  // Soft pool of warm light, up and slightly left of center.
   float pool = distance(uv * vec2(resolution.x / resolution.y, 1.0),
                         vec2(0.46 * resolution.x / resolution.y, 0.68));
   col += vec3(0.10, 0.085, 0.075) * smoothstep(0.62, 0.0, pool);
