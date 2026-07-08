@@ -22,6 +22,12 @@ const BLOON_CONFIG = {
   spawnMaxSeconds: 30,
   firstSpawnsSeconds: [1.0, 4.0, 8.0], // scripted opening so you start with a few
 
+  // Difficulty ramp: spawn intervals shrink the longer a round lasts, so the
+  // room fills faster and the game gets harder as you play. Over spawnRampSeconds
+  // the interval scales from full down to spawnRampFloor of itself, then holds.
+  spawnRampSeconds: 150,  // ~2.5 min to reach full difficulty
+  spawnRampFloor: 0.3,    // late-game intervals are 30% of early ones (≈3–9s)
+
   // The palette. Each color is a distinct "voice" — its own synthesized sound
   // (see audio.js). `rgb` is 0..1 linear-ish color handed straight to the
   // shader. `name` doubles as the audio voice key.

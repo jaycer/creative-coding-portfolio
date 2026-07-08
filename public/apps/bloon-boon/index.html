@@ -58,6 +58,42 @@
       .hud-label { font-size: 0.8rem; opacity: 0.6; margin-right: 6px; }
       #best { font-size: 0.8rem; opacity: 0.6; }
 
+      /* HUD toggle (tap visualizer). */
+      .bar-toggle {
+        pointer-events: auto;
+        font: inherit; font-size: 0.78rem; font-weight: 600; color: #fff;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.3);
+        border-radius: 999px; padding: 6px 12px; cursor: pointer;
+        white-space: nowrap; -webkit-tap-highlight-color: transparent;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+      }
+      .bar-toggle:hover { background: rgba(255,255,255,0.15); }
+      .bar-toggle.on {
+        background: rgba(74,255,130,0.18);
+        border-color: rgba(74,255,130,0.7);
+        color: #9dffb8;
+      }
+
+      /* Tap ripples: expanding green rings at each tap/click, above everything,
+         never blocking input. */
+      #ripples { position: fixed; inset: 0; z-index: 25; pointer-events: none; overflow: hidden; }
+      .ripple {
+        position: absolute; transform: translate(-50%, -50%);
+        width: 14px; height: 14px; border-radius: 50%;
+        border: 3px solid rgba(74,255,130,0.9);
+        box-shadow: 0 0 14px rgba(74,255,130,0.6), inset 0 0 8px rgba(74,255,130,0.3);
+        animation: ripple 0.6s ease-out forwards;
+        will-change: width, height, opacity;
+      }
+      @keyframes ripple {
+        0%   { width: 14px;  height: 14px;  opacity: 0.95; }
+        100% { width: 150px; height: 150px; opacity: 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ripple { animation-duration: 0.3s; }
+      }
+
       /* Overlays. pointer-events:none so the tap passes through to the canvas,
          which owns start/restart. */
       .overlay {
@@ -116,12 +152,15 @@
     <header class="bar">
       <a class="back" href="../../">← Gallery</a>
       <h1>Bloon Boon</h1>
+      <button id="tap-toggle" class="bar-toggle" type="button" title="Show taps as expanding rings">◉ Taps</button>
       <div class="hud">
         <span id="score">0</span>
         <span class="hud-label">aloft</span>
         <span id="best"></span>
       </div>
     </header>
+
+    <div id="ripples"></div>
 
     <div id="start" class="overlay">
       <div class="panel">

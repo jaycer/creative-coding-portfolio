@@ -73,6 +73,8 @@ let pVX = 0, pVY = 0;        // smoothed pointer velocity (px/s)
 
 // DOM refs (populated on load)
 let elStart, elOver, elScore, elBest, elFinal, elOverBest, elStartBtn, elRestartBtn;
+let elRipples, elTapToggle;
+let tapViz = false;               // show taps as expanding green rings
 
 function preload() {
   // Load shaders as text so we can inject MAX before compiling.
@@ -117,7 +119,7 @@ function startRound() {
   // Scripted opening so the room isn't empty, then hand off to random cadence.
   spawnQueue = BLOON_CONFIG.firstSpawnsSeconds.map((s) => s * 1000);
   const last = spawnQueue[spawnQueue.length - 1] || 0;
-  nextRandomSpawnMs = last + randomSpawnGap();
+  nextRandomSpawnMs = last + randomSpawnGap(last);
   hideOverlays();
 }
 
@@ -131,8 +133,13 @@ function endRound() {
   showOver();
 }
 
-function randomSpawnGap() {
-  return random(BLOON_CONFIG.spawnMinSeconds, BLOON_CONFIG.spawnMaxSeconds) * 1000;
+// Time until the next random spawn, shrinking as the round goes on so balloons
+// arrive faster the longer you last. `roundMs` is elapsed time in the round.
+function randomSpawnGap(roundMs) {
+  const base = random(BLOON_CONFIG.spawnMinSeconds, BLOON_CONFIG.spawnMaxSeconds) * 1000;
+  const t = constrain(roundMs / (BLOON_CONFIG.spawnRampSeconds * 1000), 0, 1);
+  const factor = lerp(1, BLOON_CONFIG.spawnRampFloor, t);
+  return base * factor;
 }
 
 // ---------------------------------------------------------------------------
@@ -375,7 +382,7 @@ function draw() {
     }
     if (roundMs >= nextRandomSpawnMs) {
       spawnBalloon();
-      nextRandomSpawnMs = roundMs + randomSpawnGap();
+      nextRandomSpawnMs = roundMs + randomSpawnGap(roundMs);
     }
     // Record the peak before stepping physics, so a balloon lost this frame is
     // still counted in the final score.
@@ -431,6 +438,33 @@ function cacheDom() {
   // The buttons are the only way to (re)start a round.
   elStartBtn.addEventListener('click', startRound);
   elRestartBtn.addEventListener('click', startRound);
+
+  // Tap visualizer: a HUD toggle (persisted) that draws an expanding green ring
+  // at every tap/click.
+  elRipples   = document.getElementById('ripples');
+  elTapToggle = document.getElementById('tap-toggle');
+  tapViz = localStorage.getItem('bloon-boon-tapviz') === '1';
+  elTapToggle.classList.toggle('on', tapViz);
+  elTapToggle.addEventListener('click', () => {
+    tapViz = !tapViz;
+    elTapToggle.classList.toggle('on', tapViz);
+    localStorage.setItem('bloon-boon-tapviz', tapViz ? '1' : '0');
+  });
+  window.addEventListener('pointerdown', (e) => {
+    if (tapViz) spawnRipple(e.clientX, e.clientY);
+  }, true);
+}
+
+// Drop an expanding green ring at (x, y) that removes itself when it finishes.
+function spawnRipple(x, y) {
+  const r = document.createElement('div');
+  r.className = 'ripple';
+  r.style.left = x + 'px';
+  r.style.top = y + 'px';
+  elRipples.appendChild(r);
+  const done = () => r.remove();
+  r.addEventListener('animationend', done);
+  setTimeout(done, 800); // fallback in case animationend doesn't fire
 }
 
 function updateHud() {
