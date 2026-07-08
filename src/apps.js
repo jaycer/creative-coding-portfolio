@@ -10,12 +10,13 @@
 export const apps = [
   // Flow Field (app-01) and Particle Swarm (app-02) are intentionally unlisted —
   // still reachable by direct URL, just not shown in the gallery grid.
+  { slug: 'bloon-boon',             title: 'Bloon Boon',             blurb: 'A shader-bloon juggling game. Tap and flick glossy 3D bloons to keep them aloft, and each color sings its own sound.', entry: 'index.html' },
   { slug: 'particle-system',        title: 'Particle System',        blurb: 'Color-shifting orbs that breathe in and out across an HSB field.',           entry: 'index.html' },
-  { slug: 'shader-particle-system', title: 'Shader Particle System', blurb: 'The particle system reborn on the GPU — soft additive blobs in a fragment shader.', entry: 'index.html' },
-  { slug: 'ambient-lumina',         title: 'Ambient Lumina',         blurb: 'Ten lumina that sing — pitch from color, pan from motion, contrast where they meet.', entry: 'index.html' },
-  { slug: 'ios-web-audio',          title: 'Web Audio on iOS',       blurb: 'A field note: the three WebKit gotchas that keep sound silent on iPhone — with a live tone that proves the fix.', entry: 'index.html' },
-  { slug: 'spiral-generator',       title: 'Spiral Generator',       blurb: 'Paisley spirals accumulate from a rotating ring of squares — mouse sets scale and count.', entry: 'index.html' },
-  { slug: 'hieroglyph-viewer',      title: 'Hieroglyph Viewer',      blurb: 'Browse Egyptian hieroglyphs one at a time — favorite the ones you like.',   entry: 'index.html' },
+  { slug: 'shader-particle-system', title: 'Shader Particle System', blurb: 'The particle system reborn on the GPU as soft additive blobs in a fragment shader.', entry: 'index.html' },
+  { slug: 'ambient-lumina',         title: 'Ambient Lumina',         blurb: 'Ten lumina that sing, with pitch from color, pan from motion, and contrast where they meet.', entry: 'index.html' },
+  { slug: 'ios-web-audio',          title: 'Web Audio on iOS',       blurb: 'A field note on the three WebKit gotchas that keep sound silent on iPhone, with a live tone that proves the fix.', entry: 'index.html' },
+  { slug: 'spiral-generator',       title: 'Spiral Generator',       blurb: 'Paisley spirals accumulate from a rotating ring of squares. Mouse sets scale and count.', entry: 'index.html' },
+  { slug: 'hieroglyph-viewer',      title: 'Hieroglyph Viewer',      blurb: 'Browse Egyptian hieroglyphs one at a time and favorite the ones you like.',   entry: 'index.html' },
   { slug: 'u17sv-v0',               title: 'U17SV',                  blurb: 'An interactive WebGL shader visual driven by the keyboard. (flash warning)', entry: 'index.html' },
-  { slug: 'brick-layer',            title: 'Brick Layer',            blurb: 'A React shader compositor — stack, rotate, and blend generative visual layers.', entry: 'index.html' },
+  { slug: 'brick-layer',            title: 'Brick Layer',            blurb: 'A React shader compositor that stacks, rotates, and blends generative visual layers.', entry: 'index.html' },
 ];

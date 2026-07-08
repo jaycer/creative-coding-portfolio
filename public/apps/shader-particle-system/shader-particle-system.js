@@ -83,13 +83,13 @@ function windowResized() {
 function draw() {
   stepSimulation();
 
-  // Pack the live particles into the uniform buffers (height-normalised).
+  // Pack the live particles into the uniform buffers (height-normalized).
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
     const o4 = i * 4;
     uParticles[o4]     = p.x / width;            // 0..1, matches gl_FragCoord.x / resolution.x
     uParticles[o4 + 1] = 1 - p.y / height;       // flip: canvas y is top-down, gl_FragCoord is bottom-up
-    uParticles[o4 + 2] = (p.size * 0.5) / height; // radius, normalised by height
+    uParticles[o4 + 2] = (p.size * 0.5) / height; // radius, normalized by height
     uParticles[o4 + 3] = p.elong;                // oval-ness (1 = circle)
 
     uRot[i * 2]     = Math.cos(p.angle);          // precompute rotation once per particle here
@@ -221,7 +221,7 @@ function moveParticle(p) {
 
 // ---------------------------------------------------------------------------
 // Color helpers — same hue distribution / ranges as the original, but the
-// HSB→RGB conversion is done in JS so we can hand normalised RGB to the shader.
+// HSB→RGB conversion is done in JS so we can hand normalized RGB to the shader.
 // ---------------------------------------------------------------------------
 function getBackgroundColor() {
   // muted, opaque base tone

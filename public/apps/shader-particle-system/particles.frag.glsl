@@ -23,7 +23,7 @@ precision highp float;
 
 uniform vec2 resolution;
 uniform int  uCount;
-uniform vec4  uParticles[MAX]; // xy = position (0..1, gl_FragCoord space), z = radius (height-normalised), w = elongation
+uniform vec4  uParticles[MAX]; // xy = position (0..1, gl_FragCoord space), z = radius (height-normalized), w = elongation
 uniform vec2  uRot[MAX];       // (cos, sin) of each particle's rotation, precomputed in JS
 uniform vec4  uColors[MAX];    // rgb = color, a = intensity
 uniform vec3  uBg;             // background color
@@ -49,7 +49,7 @@ void main() {
     vec4 c = uColors[i];
 
     vec2 d = uv - p.xy;
-    d.x *= aspect;                       // into a square (height-normalised) space, so rotation is uniform
+    d.x *= aspect;                       // into a square (height-normalized) space, so rotation is uniform
 
     // Rotate into the particle's local frame, then scale each axis by its own
     // radius so the field is an oval. elong > 1 stretches one axis and squeezes

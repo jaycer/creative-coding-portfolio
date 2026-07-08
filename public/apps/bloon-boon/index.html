@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Bloon Boon — Jayce Renner</title>
+    <meta name="description" content="A shader-bloon juggling game — tap and flick glossy 3D bloons to keep them aloft; each color sings its own sound." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="Bloon Boon" />
+    <meta property="og:description" content="Tap and flick glossy 3D bloons to keep them aloft — each color sings its own sound." />
+    <meta property="og:url" content="https://jaycer.github.io/creative-coding-portfolio/apps/bloon-boon/" />
+    <meta property="og:image" content="https://jaycer.github.io/creative-coding-portfolio/og/bloon-boon.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Bloon Boon" />
+    <meta name="twitter:description" content="Tap and flick glossy 3D bloons to keep them aloft — each color sings its own sound." />
+    <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/bloon-boon.jpg" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; height: 100%; overflow: hidden;
+        background: #07070c;
+        overscroll-behavior: none;
+        touch-action: none;
+        -webkit-user-select: none; user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      canvas { position: fixed; inset: 0; display: block; }
+
+      :root {
+        --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      }
+
+      /* Top bar: gallery link + live score. */
+      .bar {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+        display: flex; align-items: center; gap: 14px;
+        padding: 12px 18px; padding-top: max(12px, env(safe-area-inset-top));
+        font-family: var(--font); color: #fff;
+        background: linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0));
+        pointer-events: none;
+      }
+      /* Nothing in the bar wraps. The back button and HUD hold their size; the
+         title is the only element that gives way (shrinks, then ellipsis) when
+         the bar is too narrow — so the score/best stay put on one line. */
+      .bar h1 {
+        margin: 0; font-size: 0.9rem; font-weight: 600; letter-spacing: -0.01em;
+        white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+      }
+      .bar .back {
+        pointer-events: auto; color: #fff; text-decoration: none;
+        font-size: 0.8rem; font-weight: 500; padding: 6px 12px; flex-shrink: 0;
+        border: 1px solid rgba(255,255,255,0.35); border-radius: 999px;
+        white-space: nowrap; transition: background 0.15s ease;
+      }
+      .bar .back:hover { background: rgba(255,255,255,0.15); }
+      /* On mobile, collapse the back button to just the arrow to save bar space. */
+      @media (max-width: 600px) { .bar .back-label { display: none; } }
+      .hud {
+        margin-left: auto; flex-shrink: 0; display: flex; align-items: baseline; gap: 8px;
+        white-space: nowrap; font-variant-numeric: tabular-nums;
+      }
+      /* Fixed width + centered so the right-anchored HUD never reflows when the
+         digit count changes — that reflow leaves a repaint ghost (a stray
+         vertical line) on iOS WebKit. */
+      #score { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.02em;
+               display: inline-block; min-width: 1.5em; text-align: center; }
+      .hud-label { font-size: 0.7rem; opacity: 0.6; margin-right: 6px; }
+      /* Fixed width (fits "Best: 24") so it doesn't reflow the HUD — and thus
+         won't ghost on iOS — when Best ticks up live and crosses 9 -> 10. */
+      #best { font-size: 0.7rem; opacity: 0.6; display: inline-block; min-width: 4em; text-align: right; }
+
+      /* Tap-visualizer toggle, a secondary control inside the overlay panels. */
+      .panel .tap-toggle {
+        pointer-events: auto;
+        display: block; width: fit-content; margin: 14px auto 0;
+        font: inherit; font-size: 0.72rem; font-weight: 600; color: rgba(255,255,255,0.75);
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.25);
+        border-radius: 999px; padding: 7px 16px; cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+      }
+      .panel .tap-toggle:hover { background: rgba(255,255,255,0.12); }
+      .panel .tap-toggle.on {
+        background: rgba(74,255,130,0.18);
+        border-color: rgba(74,255,130,0.7);
+        color: #9dffb8;
+      }
+
+      /* Tap ripples: expanding green rings at each tap/click, above everything,
+         never blocking input. */
+      #ripples { position: fixed; inset: 0; z-index: 25; pointer-events: none; overflow: hidden; }
+      /* --ripple-max (the ring's max diameter) is set per-tap from JS to a
+         balloon's radius, so the ring grows to about half a balloon radius. */
+      .ripple {
+        position: absolute; transform: translate(-50%, -50%);
+        width: 8px; height: 8px; border-radius: 50%;
+        border: 3px solid rgba(74,255,130,0.9);
+        box-shadow: 0 0 14px rgba(74,255,130,0.6), inset 0 0 8px rgba(74,255,130,0.3);
+        animation: ripple 0.6s ease-out forwards;
+        will-change: width, height, opacity;
+      }
+      @keyframes ripple {
+        0%   { width: 8px; height: 8px; opacity: 0.95; }
+        100% { width: var(--ripple-max, 120px); height: var(--ripple-max, 120px); opacity: 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ripple { animation-duration: 0.3s; }
+      }
+
+      /* Overlays. pointer-events:none so the tap passes through to the canvas,
+         which owns start/restart. */
+      .overlay {
+        position: fixed; inset: 0; z-index: 20;
+        display: flex; align-items: center; justify-content: center;
+        padding: 24px; pointer-events: none;
+        font-family: var(--font); color: #fff; text-align: center;
+        transition: opacity 0.35s ease;
+      }
+      /* visibility:hidden (unlike opacity:0) actually removes the overlay AND
+         its buttons from hit-testing, so the invisible start/restart buttons
+         can't be tapped mid-round. Delay it until the fade-out finishes. */
+      .overlay.hidden {
+        opacity: 0; visibility: hidden;
+        transition: opacity 0.35s ease, visibility 0s linear 0.35s;
+      }
+      .panel {
+        max-width: 22rem;
+        padding: 30px 34px;
+        background: rgba(14,14,22,0.66);
+        border: 1px solid rgba(255,255,255,0.10);
+        border-radius: 22px;
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+        box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+      }
+      .panel h2 {
+        margin: 0 0 12px; font-size: 1.8rem; font-weight: 800; letter-spacing: -0.02em;
+        background: linear-gradient(90deg, #ff5b64, #ffd23e 35%, #5ed46f 62%, #4db8ff);
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .panel p { margin: 8px 0; font-size: 0.88rem; line-height: 1.5; opacity: 0.85; }
+      .panel .stat b { font-size: 1.15rem; }
+      .panel .best { font-size: 0.75rem; opacity: 0.6; }
+      .panel .cue-btn {
+        pointer-events: auto;            /* the one interactive thing in the overlay */
+        margin-top: 6px;
+        font: inherit; font-weight: 700; font-size: 0.95rem; color: #fff;
+        background: rgba(255,255,255,0.12);
+        border: 1px solid rgba(255,255,255,0.4);
+        border-radius: 999px;
+        padding: 13px 28px;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        animation: pulse 1.6s ease-in-out infinite;
+        transition: background 0.15s ease, opacity 0.3s ease;
+      }
+      .panel .cue-btn:hover { background: rgba(255,255,255,0.2); }
+      .panel .cue-btn:active { background: rgba(255,255,255,0.28); }
+      /* Disabled = the 1.5s grace after game over: dimmed, inert, no pulse. */
+      .panel .cue-btn:disabled { opacity: 0.25; pointer-events: none; animation: none; cursor: default; }
+      @keyframes pulse { 0%,100% { opacity: 0.62; } 50% { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { .panel .cue-btn { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <header class="bar">
+      <a class="back" href="../../" aria-label="Back to gallery">←<span class="back-label"> Gallery</span></a>
+      <h1>Bloon Boon</h1>
+      <div class="hud">
+        <span id="score">0</span>
+        <span class="hud-label">aloft</span>
+        <span id="best"></span>
+      </div>
+    </header>
+
+    <div id="ripples"></div>
+
+    <div id="start" class="overlay">
+      <div class="panel">
+        <h2>Bloon Boon</h2>
+        <p>Tap them Bloons!</p>
+        <button id="start-btn" class="cue-btn" type="button">Tap here to play</button>
+        <button class="tap-toggle" type="button" aria-pressed="false">Show Taps</button>
+      </div>
+    </div>
+
+    <div id="over" class="overlay hidden">
+      <div class="panel">
+        <h2>A bloon got away!!!</h2>
+        <p class="stat">You kept <b id="final-count">0</b> bloons aloft at once</p>
+        <p id="over-best" class="best"></p>
+        <button id="restart-btn" class="cue-btn" type="button">Tap here to play again</button>
+        <button class="tap-toggle" type="button" aria-pressed="false">Show Taps</button>
+      </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
+    <script src="./config.js"></script>
+    <script src="./audio.js"></script>
+    <script src="./bloon-boon.js"></script>
+  </body>
+</html>
