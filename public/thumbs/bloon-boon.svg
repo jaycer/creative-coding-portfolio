@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400" role="img" aria-label="Bloon Boon — glossy balloons in a dark room">
+  <defs>
+    <!-- Dark room -->
+    <radialGradient id="room" cx="46%" cy="42%" r="75%">
+      <stop offset="0%" stop-color="#1a1a26"/>
+      <stop offset="55%" stop-color="#0e0e16"/>
+      <stop offset="100%" stop-color="#050509"/>
+    </radialGradient>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0b0a10"/>
+      <stop offset="100%" stop-color="#040406"/>
+    </linearGradient>
+    <!-- Glossy balloon gradients: highlight toward the upper-left -->
+    <radialGradient id="g-blue" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#d6efff"/><stop offset="22%" stop-color="#7cceff"/>
+      <stop offset="70%" stop-color="#2f9be8"/><stop offset="100%" stop-color="#1d5f9c"/>
+    </radialGradient>
+    <radialGradient id="g-red" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#ffd7d9"/><stop offset="22%" stop-color="#ff8288"/>
+      <stop offset="70%" stop-color="#e83a44"/><stop offset="100%" stop-color="#9c2229"/>
+    </radialGradient>
+    <radialGradient id="g-green" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#dcffe4"/><stop offset="22%" stop-color="#8fe6a0"/>
+      <stop offset="70%" stop-color="#43c65c"/><stop offset="100%" stop-color="#248a3a"/>
+    </radialGradient>
+    <radialGradient id="g-yellow" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#fff6d6"/><stop offset="22%" stop-color="#ffe483"/>
+      <stop offset="70%" stop-color="#f5c93a"/><stop offset="100%" stop-color="#b8901e"/>
+    </radialGradient>
+    <radialGradient id="g-violet" cx="35%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#efe2ff"/><stop offset="22%" stop-color="#c9a6ff"/>
+      <stop offset="70%" stop-color="#a06ff0"/><stop offset="100%" stop-color="#6b3fbf"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="46%" cy="34%" r="45%">
+      <stop offset="0%" stop-color="#20202e" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#20202e" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="600" height="400" fill="url(#room)"/>
+  <ellipse cx="276" cy="150" rx="260" ry="150" fill="url(#glow)"/>
+  <rect y="352" width="600" height="48" fill="url(#floor)"/>
+
+  <!-- balloons: body (egg) + knot + gloss speck; grouped back-to-front -->
+  <g>
+    <!-- violet (back) -->
+    <g transform="translate(470,150)">
+      <path d="M0,-56 C30,-56 40,-26 40,-2 C40,30 18,58 0,64 C-18,58 -40,30 -40,-2 C-40,-26 -30,-56 0,-56 Z" fill="url(#g-violet)"/>
+      <path d="M-6,62 L6,62 L0,74 Z" fill="#5a34a0"/>
+      <ellipse cx="-13" cy="-30" rx="9" ry="13" fill="#ffffff" opacity="0.55"/>
+    </g>
+    <!-- green -->
+    <g transform="translate(150,170)">
+      <path d="M0,-58 C31,-58 42,-27 42,-2 C42,31 19,60 0,66 C-19,60 -42,31 -42,-2 C-42,-27 -31,-58 0,-58 Z" fill="url(#g-green)"/>
+      <path d="M-6,64 L6,64 L0,77 Z" fill="#1f7a33"/>
+      <ellipse cx="-14" cy="-31" rx="10" ry="14" fill="#ffffff" opacity="0.55"/>
+    </g>
+    <!-- yellow -->
+    <g transform="translate(370,224)">
+      <path d="M0,-52 C28,-52 38,-24 38,-1 C38,28 17,54 0,60 C-17,54 -38,28 -38,-1 C-38,-24 -28,-52 0,-52 Z" fill="url(#g-yellow)"/>
+      <path d="M-5,58 L5,58 L0,69 Z" fill="#9c7a1a"/>
+      <ellipse cx="-12" cy="-28" rx="8" ry="12" fill="#ffffff" opacity="0.55"/>
+    </g>
+    <!-- blue -->
+    <g transform="translate(245,232)">
+      <path d="M0,-62 C33,-62 45,-29 45,-2 C45,33 20,64 0,71 C-20,64 -45,33 -45,-2 C-45,-29 -33,-62 0,-62 Z" fill="url(#g-blue)"/>
+      <path d="M-6,69 L6,69 L0,83 Z" fill="#1a5891"/>
+      <ellipse cx="-15" cy="-33" rx="11" ry="15" fill="#ffffff" opacity="0.6"/>
+    </g>
+    <!-- red (front) -->
+    <g transform="translate(120,300)">
+      <path d="M0,-48 C26,-48 35,-22 35,-1 C35,26 16,50 0,56 C-16,50 -35,26 -35,-1 C-35,-22 -26,-48 0,-48 Z" fill="url(#g-red)"/>
+      <path d="M-5,54 L5,54 L0,65 Z" fill="#8f2027"/>
+      <ellipse cx="-11" cy="-26" rx="8" ry="11" fill="#ffffff" opacity="0.58"/>
+    </g>
+  </g>
+</svg>
