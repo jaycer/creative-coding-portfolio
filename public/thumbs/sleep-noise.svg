@@ -1,50 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
   <defs>
-    <radialGradient id="sn-bg" cx="50%" cy="8%" r="110%">
-      <stop offset="0" stop-color="#20242d"/>
-      <stop offset="0.5" stop-color="#191c22"/>
-      <stop offset="1" stop-color="#14161b"/>
+    <radialGradient id="sn-bg" cx="50%" cy="42%" r="82%">
+      <stop offset="0" stop-color="#20232b"/>
+      <stop offset="1" stop-color="#131418"/>
     </radialGradient>
-    <linearGradient id="sn-scrim" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#000" stop-opacity="0"/>
-      <stop offset="1" stop-color="#000" stop-opacity="0.35"/>
+    <radialGradient id="sn-disc" cx="50%" cy="30%" r="72%">
+      <stop offset="0" stop-color="#3d424e"/>
+      <stop offset="0.55" stop-color="#2b2f39"/>
+      <stop offset="1" stop-color="#21242c"/>
+    </radialGradient>
+    <linearGradient id="sn-rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b6c0d0" stop-opacity="0.6"/>
+      <stop offset="0.42" stop-color="#b6c0d0" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#b6c0d0" stop-opacity="0.22"/>
     </linearGradient>
-    <filter id="sn-glow" x="-60%" y="-60%" width="220%" height="220%">
-      <feGaussianBlur stdDeviation="7" result="b"/>
-      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
   </defs>
-
   <rect width="600" height="400" fill="url(#sn-bg)"/>
-
-  <!-- breathing "play" moon -->
-  <circle cx="300" cy="118" r="46" fill="none" stroke="#3a414e" stroke-width="1.5"/>
-  <circle cx="300" cy="118" r="46" fill="#aeb8c8" fill-opacity="0.06" filter="url(#sn-glow)"/>
-  <g fill="#ccd2dc">
-    <rect x="288" y="100" width="8" height="36" rx="2.6"/>
-    <rect x="304" y="100" width="8" height="36" rx="2.6"/>
-  </g>
-
-  <!-- three noise sliders: dark, white, pink (by level) -->
-  <g font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="15" font-weight="600" fill="#8d95a3">
-    <!-- Dark -->
-    <text x="140" y="223">Dark</text>
-    <line x1="200" y1="218" x2="460" y2="218" stroke="#2b303b" stroke-width="4" stroke-linecap="round"/>
-    <line x1="200" y1="218" x2="343" y2="218" stroke="#5b6470" stroke-width="4" stroke-linecap="round"/>
-    <circle cx="343" cy="218" r="10" fill="#ccd2dc" stroke="#ffffff" stroke-opacity="0.2"/>
-
-    <!-- White -->
-    <text x="140" y="273">White</text>
-    <line x1="200" y1="268" x2="460" y2="268" stroke="#2b303b" stroke-width="4" stroke-linecap="round"/>
-    <line x1="200" y1="268" x2="247" y2="268" stroke="#5b6470" stroke-width="4" stroke-linecap="round"/>
-    <circle cx="247" cy="268" r="10" fill="#ccd2dc" stroke="#ffffff" stroke-opacity="0.2"/>
-
-    <!-- Pink -->
-    <text x="140" y="323">Pink</text>
-    <line x1="200" y1="318" x2="460" y2="318" stroke="#2b303b" stroke-width="4" stroke-linecap="round"/>
-    <line x1="200" y1="318" x2="299" y2="318" stroke="#5b6470" stroke-width="4" stroke-linecap="round"/>
-    <circle cx="299" cy="318" r="10" fill="#ccd2dc" stroke="#ffffff" stroke-opacity="0.2"/>
-  </g>
-
-  <rect width="600" height="400" fill="url(#sn-scrim)"/>
+  <circle cx="300" cy="200" r="153" fill="url(#sn-rim)"/>
+  <circle cx="300" cy="200" r="150" fill="url(#sn-disc)"/>
+  <path d="M283 158 L356 200 L283 242 Z" fill="#d7dce4"/>
 </svg>
