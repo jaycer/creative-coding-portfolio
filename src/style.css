@@ -54,13 +54,13 @@ body {
   font-size: clamp(1.5rem, 3.5vw, 2.25rem);
   font-weight: 650;
   letter-spacing: -0.02em;
-  color: #fff;
-  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+  color: rgba(255, 255, 255, 0.84);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
 }
 .site-header h1 .dash { opacity: 0.55; font-weight: 400; }
 .tagline {
   margin: 6px 0 0;
-  color: rgba(255, 255, 255, 0.82);
+  color: rgba(255, 255, 255, 0.72);
   font-size: 0.95rem;
 }
 .site-header__tools {
@@ -71,7 +71,7 @@ body {
 .version {
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.92);
+  color: rgba(255, 255, 255, 0.8);
   background: rgba(0, 0, 0, 0.18);
   padding: 4px 9px;
   border-radius: 999px;
@@ -81,18 +81,17 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: 550;
-  color: var(--ink);
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  padding: 8px 14px;
+  color: #fff;
+  background: #6b6f77;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  padding: 7px 13px;
   border-radius: 999px;
   cursor: pointer;
-  box-shadow: var(--shadow);
-  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  transition: transform 0.12s ease, background 0.12s ease;
 }
-.btn-refresh:hover { background: #fff; box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+.btn-refresh:hover { background: #787c85; transform: translateY(-1px); }
 .btn-refresh:active { transform: translateY(0); }
 .btn-refresh:disabled { opacity: 0.6; cursor: progress; }
 .btn-refresh svg { transition: transform 0.4s ease; }
@@ -112,7 +111,7 @@ body {
 .tile {
   display: flex;
   flex-direction: column;
-  background: var(--surface);
+  background: var(--ink-soft);
   border: 1px solid rgba(0, 0, 0, 0.06);
   border-radius: var(--radius);
   overflow: hidden;
@@ -129,7 +128,7 @@ body {
 /* Titles live baked into the thumbnail SVGs (white, over the art); the caption
    is just the blurb, so we don't repeat the title here. The tile's aria-label
    still carries the accessible name. */
-.tile__blurb { display: block; color: var(--ink-soft); font-size: 0.86rem; line-height: 1.4; }
+.tile__blurb { display: block; color: var(--surface); font-size: 0.86rem; line-height: 1.4; }
 
 /* ---- Footer ---- */
 .site-footer {
@@ -143,7 +142,12 @@ body {
   align-items: center;
   padding-top: 0;
   padding-bottom: 0;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(255, 255, 255, 0.72);
 }
-.site-footer a { color: #fff; text-decoration: none; border-bottom: 1px solid rgba(255,255,255,0.4); }
-.site-footer a:hover { border-bottom-color: #fff; }
+.site-footer__tools {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.site-footer a { color: rgba(255, 255, 255, 0.82); text-decoration: none; border-bottom: 1px solid rgba(255,255,255,0.32); }
+.site-footer a:hover { color: #fff; border-bottom-color: rgba(255,255,255,0.7); }
