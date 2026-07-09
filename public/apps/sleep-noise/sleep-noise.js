@@ -182,12 +182,14 @@ for (const ch of CHANNELS) {
     ch.level = v;
     levelValEl.textContent = `${v}%`;
     if (built) ramp(nodes[ch.id].gain.gain, levelToGain(v));
+    persistSettings();
   });
   toneEl.addEventListener('input', () => {
     const v = toneEl.valueAsNumber;
     ch.tone = v;
     toneValEl.textContent = `${v}%`;
     if (built) ramp(nodes[ch.id].filter.frequency, toneToFreq(v));
+    persistSettings();
   });
 }
 
@@ -195,6 +197,7 @@ masterSlider.addEventListener('input', () => {
   const v = masterSlider.valueAsNumber;
   masterVal.textContent = `${v}%`;
   if (built) ramp(master.gain, masterToGain(v));
+  persistSettings();
 });
 
 function markLive(on) {
@@ -243,6 +246,24 @@ function currentSettings() {
   const channels = {};
   for (const ch of CHANNELS) channels[ch.id] = { level: ch.level, tone: ch.tone };
   return { app: 'sleep-noise', version: 1, master: masterSlider.valueAsNumber, channels };
+}
+
+// --- persistence: remember settings across reloads via localStorage ------------
+// Separate from the file-based Save/Load: every slider change mirrors the current
+// settings into localStorage, and restoreFromStorage() rehydrates them on load.
+const STORAGE_KEY = 'sleep-noise:settings';
+
+function persistSettings() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(currentSettings()));
+  } catch { /* private mode / quota / disabled — non-fatal */ }
+}
+
+function restoreFromStorage() {
+  let raw;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch { return; }
+  if (!raw) return;
+  try { applySettings(JSON.parse(raw)); } catch { /* stale or corrupt — ignore */ }
 }
 
 function fileStamp() {
@@ -325,3 +346,6 @@ fileInput.style.display = 'none';
 fileInput.addEventListener('change', handleStateFile);
 document.body.appendChild(fileInput);
 document.getElementById('loadState').addEventListener('click', () => fileInput.click());
+
+// Rehydrate the last-used settings (if any) now that all controls are wired.
+restoreFromStorage();
