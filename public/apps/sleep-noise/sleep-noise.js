@@ -84,17 +84,26 @@ const toneToFreq  = (v) => 80 * Math.pow(18000 / 80, v / 100);  // 0..100 → 80
 const masterToGain = (v) => Math.pow(v / 100, 1.4);
 
 // --- audio graph (built lazily on first play) ----------------------------------
+const FADE_SECONDS = 3; // gentle ramp in/out on play/pause
+
 const audio = makeUnlockableAudioContext();
 const ctx = audio.ctx;
 let master = null;
+let fade = null;        // dedicated node for the play/pause fade, downstream of master
 let built = false;
 let playing = false;
+let sourcesRunning = false;
+let fadeStopTimer = null;
 const nodes = {}; // id → { buffer, filter, gain, source|null }
 
 function buildGraph() {
   master = ctx.createGain();
   master.gain.value = masterToGain(masterSlider.valueAsNumber);
-  master.connect(ctx.destination);
+
+  // A separate gain rides the fade so it never fights the master slider's ramps.
+  fade = ctx.createGain();
+  fade.gain.value = 0; // start silent; fadeTo(1) brings it up on play
+  master.connect(fade).connect(ctx.destination);
 
   for (const ch of CHANNELS) {
     const len = Math.floor(ctx.sampleRate * NOISE_SECONDS);
@@ -125,6 +134,7 @@ function startSources() {
     source.start();
     n.source = source;
   }
+  sourcesRunning = true;
 }
 
 function stopSources() {
@@ -132,6 +142,30 @@ function stopSources() {
     const n = nodes[ch.id];
     if (n.source) { try { n.source.stop(); } catch { /* already stopped */ } n.source = null; }
   }
+  sourcesRunning = false;
+}
+
+// Smootherstep (Perlin): eased at both ends, so the fade lingers near silence
+// and near full — an S curve with long tails rather than a straight line.
+function sCurve(from, to, steps) {
+  const arr = new Float32Array(steps);
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1);
+    const s = t * t * t * (t * (t * 6 - 15) + 10);
+    arr[i] = from + (to - from) * s;
+  }
+  return arr;
+}
+
+// Ride the fade node to a target (0 = silent, 1 = full) over FADE_SECONDS along
+// an S curve. Building the curve from the current value keeps quick re-toggles
+// click-free — it glides on from wherever the last fade left off.
+function fadeTo(target) {
+  const now = ctx.currentTime;
+  const g = fade.gain;
+  const from = g.value;
+  g.cancelScheduledValues(now);
+  g.setValueCurveAtTime(sCurve(from, target, 96), now, FADE_SECONDS);
 }
 
 // --- UI ------------------------------------------------------------------------
@@ -210,7 +244,10 @@ async function togglePlay() {
   if (!playing) {
     await audio.unlock();          // must run from the gesture (pointerup/click)
     if (!built) buildGraph();
-    startSources();
+    // Cancel a pending fade-out stop, and (re)start sources if they've been cut.
+    if (fadeStopTimer) { clearTimeout(fadeStopTimer); fadeStopTimer = null; }
+    if (!sourcesRunning) startSources();
+    fadeTo(1);                     // gentle 2s ramp up
     playing = true;
     playBtn.classList.add('playing');
     playBtn.setAttribute('aria-pressed', 'true');
@@ -218,7 +255,9 @@ async function togglePlay() {
     playLabel.textContent = 'playing';
     markLive(true);
   } else {
-    stopSources();
+    fadeTo(0);                     // gentle 2s ramp down, then cut the sources
+    if (fadeStopTimer) clearTimeout(fadeStopTimer);
+    fadeStopTimer = setTimeout(() => { stopSources(); fadeStopTimer = null; }, FADE_SECONDS * 1000 + 80);
     playing = false;
     playBtn.classList.remove('playing');
     playBtn.setAttribute('aria-pressed', 'false');
