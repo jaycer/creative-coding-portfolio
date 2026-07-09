@@ -19,4 +19,5 @@
   <circle cx="300" cy="200" r="153" fill="url(#sn-rim)"/>
   <circle cx="300" cy="200" r="150" fill="url(#sn-disc)"/>
   <path d="M283 158 L356 200 L283 242 Z" fill="#d7dce4"/>
+  <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="34" font-weight="600" fill="#fff">Sleep Noise</text>
 </svg>
