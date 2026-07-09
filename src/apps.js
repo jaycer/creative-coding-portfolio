@@ -11,7 +11,7 @@ export const apps = [
   // Flow Field (app-01) and Particle Swarm (app-02) are intentionally unlisted —
   // still reachable by direct URL, just not shown in the gallery grid.
   { slug: 'bloon-boon',             title: 'Bloon Boon',             blurb: 'A shader-bloon juggling game. Tap and flick glossy 3D bloons to keep them aloft, and each color sings its own sound.', entry: 'index.html' },
-  { slug: 'sleep-noise',            title: 'Sleep Noise',            blurb: 'A calm noise machine for sleep — blend dark, white, and pink noise, each with its own level and tone.', entry: 'index.html' },
+  { slug: 'sleep-noise',            title: 'Sleep Noise',            blurb: 'A calm noise machine for sleep. Blend dark, white, and pink noise, each with its own level and tone.', entry: 'index.html' },
   { slug: 'particle-system',        title: 'Particle System',        blurb: 'Color-shifting orbs that breathe in and out across an HSB field.',           entry: 'index.html' },
   { slug: 'shader-particle-system', title: 'Shader Particle System', blurb: 'The particle system reborn on the GPU as soft additive blobs in a fragment shader.', entry: 'index.html' },
   { slug: 'ambient-lumina',         title: 'Ambient Lumina',         blurb: 'Ten lumina that sing, with pitch from color, pan from motion, and contrast where they meet.', entry: 'index.html' },
