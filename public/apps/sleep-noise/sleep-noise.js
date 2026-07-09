@@ -36,7 +36,7 @@ function makeUnlockableAudioContext() {
 }
 
 // --- noise buffer generators ---------------------------------------------------
-const NOISE_SECONDS = 6; // long enough that the loop point is inaudible
+const NOISE_SECONDS = 6; // AudioBufferSourceNode loops this sample-accurately (gapless)
 
 function fillWhite(data) {
   for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
@@ -84,17 +84,32 @@ const toneToFreq  = (v) => 80 * Math.pow(18000 / 80, v / 100);  // 0..100 → 80
 const masterToGain = (v) => Math.pow(v / 100, 1.4);
 
 // --- audio graph (built lazily on first play) ----------------------------------
-const FADE_SECONDS = 3; // gentle ramp in/out on play/pause
+const FADE_SECONDS = 3;         // gentle ramp in/out on play/pause
+const STALE_PAUSE_MS = 60_000;  // a pause longer than this rebuilds fresh on play
 
-const audio = makeUnlockableAudioContext();
-const ctx = audio.ctx;
+// audio/ctx are rebuilt from scratch when Safari leaves them stale after a long
+// background (see rebuildAudio), so they're reassignable rather than const.
+let audio = makeUnlockableAudioContext();
+let ctx = audio.ctx;
 let master = null;
 let fade = null;        // dedicated node for the play/pause fade, downstream of master
+let streamEl = null;    // <audio> element playing the graph's MediaStream (see buildGraph)
 let built = false;
 let playing = false;
 let sourcesRunning = false;
 let fadeStopTimer = null;
-const nodes = {}; // id → { buffer, filter, gain, source|null }
+let audioStale = false; // set when the tab is backgrounded or the context suspends
+let pausedAt = null;    // performance.now() when playback last stopped
+const nodes = {}; // id → { el, source, filter, gain }
+
+// Once a context leaves "running" it won't play the old graph again — mark it
+// stale so the next play rebuilds. Attached to every context we create.
+function watchContext(c) {
+  c.addEventListener('statechange', () => {
+    if (c.state === 'suspended' || c.state === 'interrupted') audioStale = true;
+  });
+}
+watchContext(ctx);
 
 function buildGraph() {
   master = ctx.createGain();
@@ -103,7 +118,21 @@ function buildGraph() {
   // A separate gain rides the fade so it never fights the master slider's ramps.
   fade = ctx.createGain();
   fade.gain.value = 0; // start silent; fadeTo(1) brings it up on play
-  master.connect(fade).connect(ctx.destination);
+  master.connect(fade);
+
+  // Route the graph into a MediaStream played by an <audio> element instead of
+  // fade → ctx.destination. This is the key to background playback in Safari: a
+  // media element consuming a live MediaStream uses WebKit's call/stream keep-alive
+  // path (the same one behind WebRTC/mic audio), so — with audioSession 'playback'
+  // set in unlock() — the context keeps rendering while the tab is backgrounded and
+  // even while an iPhone is locked (verified). A live stream also has no loop point,
+  // so there's no seam. The rebuildAudio() fallback covers any deeper staleness.
+  if (streamEl) { try { streamEl.pause(); } catch { /* */ } streamEl.remove(); }
+  const streamDest = ctx.createMediaStreamDestination();
+  fade.connect(streamDest);
+  streamEl = new Audio();
+  streamEl.srcObject = streamDest.stream;
+  document.body.appendChild(streamEl); // some Safari builds want it in the DOM
 
   for (const ch of CHANNELS) {
     const len = Math.floor(ctx.sampleRate * NOISE_SECONDS);
@@ -124,6 +153,8 @@ function buildGraph() {
   built = true;
 }
 
+// Buffer sources loop gaplessly but can only be started once, so play creates a
+// fresh source and stop discards it.
 function startSources() {
   for (const ch of CHANNELS) {
     const n = nodes[ch.id];
@@ -134,6 +165,7 @@ function startSources() {
     source.start();
     n.source = source;
   }
+  if (streamEl) streamEl.play().catch(() => { /* non-gesture resync — best effort */ });
   sourcesRunning = true;
 }
 
@@ -142,7 +174,23 @@ function stopSources() {
     const n = nodes[ch.id];
     if (n.source) { try { n.source.stop(); } catch { /* already stopped */ } n.source = null; }
   }
+  if (streamEl) streamEl.pause();
   sourcesRunning = false;
+}
+
+// Full teardown + rebuild — what closing and reopening the tab does by hand.
+// WebKit suspends a backgrounded tab's context and its buffer sources come back
+// silent even after it auto-resumes to "running" (the macOS Safari bug); the only
+// cure is a brand-new context and graph. Runs synchronously (the old context's
+// close() isn't awaited) so it can happen inside a play gesture.
+function rebuildAudio() {
+  const old = audio;
+  audio = makeUnlockableAudioContext();
+  ctx = audio.ctx;
+  watchContext(ctx);
+  master = null; fade = null; built = false; sourcesRunning = false;
+  buildGraph();
+  try { old.ctx.close(); } catch { /* already closed */ }
 }
 
 // Smootherstep (Perlin): eased at both ends, so the fade lingers near silence
@@ -242,12 +290,17 @@ function markLive(on) {
 
 async function togglePlay() {
   if (!playing) {
-    await audio.unlock();          // must run from the gesture (pointerup/click)
-    if (!built) buildGraph();
-    // Cancel a pending fade-out stop, and (re)start sources if they've been cut.
+    // A long pause can leave the context silently stale even foreground, so treat
+    // it like a background: rebuild a fresh stack. Rebuild (or first build), then
+    // start + resume — all inside the gesture, so Safari lets start()/resume() through.
+    if (pausedAt != null && performance.now() - pausedAt > STALE_PAUSE_MS) audioStale = true;
+    if (audioStale) { rebuildAudio(); audioStale = false; }
+    else if (!built) buildGraph();
+    pausedAt = null;
     if (fadeStopTimer) { clearTimeout(fadeStopTimer); fadeStopTimer = null; }
     if (!sourcesRunning) startSources();
-    fadeTo(1);                     // gentle 2s ramp up
+    fadeTo(1);                     // gentle 3s ramp up (scheduled; sounds once running)
+    audio.unlock();
     playing = true;
     playBtn.classList.add('playing');
     playBtn.setAttribute('aria-pressed', 'true');
@@ -255,9 +308,10 @@ async function togglePlay() {
     playLabel.textContent = 'playing';
     markLive(true);
   } else {
-    fadeTo(0);                     // gentle 2s ramp down, then cut the sources
+    fadeTo(0);                     // gentle 3s ramp down, then cut the sources
     if (fadeStopTimer) clearTimeout(fadeStopTimer);
     fadeStopTimer = setTimeout(() => { stopSources(); fadeStopTimer = null; }, FADE_SECONDS * 1000 + 80);
+    pausedAt = performance.now();
     playing = false;
     playBtn.classList.remove('playing');
     playBtn.setAttribute('aria-pressed', 'false');
@@ -273,6 +327,44 @@ playBtn.addEventListener('pointerup', togglePlay);
 playBtn.addEventListener('keydown', (e) => {
   if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); togglePlay(); }
 });
+
+// --- self-heal after macOS Safari idles the audio ------------------------------
+// WebKit suspends a backgrounded tab's context, and its buffer sources come back
+// silent even after it auto-resumes to "running" (the address-bar speaker shows,
+// but nothing plays). We can't observe that a source went dead, so we treat any
+// background as suspect: mark the stack stale on hide, and on return, if it was
+// backgrounded, rebuild fresh and resume so sound comes back on its own instead
+// of needing the tab closed and reopened.
+let resyncing = false;
+async function resyncPlayback() {
+  if (!playing || !built || resyncing || !audioStale) return;
+  resyncing = true;
+  try {
+    // Did the MediaStream keep the audio alive through the background? If the
+    // context is still running and the stream element wasn't paused, trust it
+    // survived and skip the rebuild — that's the whole reason for the stream.
+    const alive = ctx.state === 'running' && streamEl && !streamEl.paused;
+    if (alive) { audioStale = false; return; }
+    rebuildAudio();
+    await audio.unlock();
+    startSources();
+    fade.gain.value = 1;                 // already mid-listen; resume at full
+    if (ctx.state === 'running') audioStale = false; // else a play tap rebuilds
+  } finally {
+    resyncing = false;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    if (built) audioStale = true;        // a background can kill buffer sources
+  } else {
+    resyncPlayback();                    // rebuilds now if we were playing…
+  }
+  // …and if we were paused, the stale flag makes the next play tap rebuild.
+});
+// Focus covers returning to the window when the tab never went fully hidden.
+window.addEventListener('focus', () => resyncPlayback());
 
 // --- save / load settings ------------------------------------------------------
 // The CHANNELS model and the master slider always hold the current values (kept
