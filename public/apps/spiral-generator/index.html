@@ -4,18 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Spiral Generator — Jayce Renner</title>
-    <meta name="description" content="Paisley spirals accumulate from a rotating ring of squares — mouse sets scale and count." />
+    <meta name="description" content="Paisley spirals accumulate from a rotating ring of squares — move to set scale and count." />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
     <meta property="og:title" content="Spiral Generator" />
-    <meta property="og:description" content="Paisley spirals accumulate from a rotating ring of squares — mouse sets scale and count." />
+    <meta property="og:description" content="Paisley spirals accumulate from a rotating ring of squares — move to set scale and count." />
     <meta property="og:url" content="https://jaycer.github.io/creative-coding-portfolio/apps/spiral-generator/" />
     <meta property="og:image" content="https://jaycer.github.io/creative-coding-portfolio/og/spiral-generator.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Spiral Generator" />
-    <meta name="twitter:description" content="Paisley spirals accumulate from a rotating ring of squares — mouse sets scale and count." />
+    <meta name="twitter:description" content="Paisley spirals accumulate from a rotating ring of squares — move to set scale and count." />
     <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/spiral-generator.jpg" />
     <style>
       * { box-sizing: border-box; }
@@ -50,42 +50,127 @@
       }
       .bar .back:hover { background: rgba(255,255,255,0.15); }
       .bar .hint { margin-left: auto; font-size: 0.8rem; opacity: 0.7; }
+      /* bright while its message is new (page load, mode/lock change), then ambient */
+      .bar .hint.fresh { animation: hint-settle 5s ease; }
+      @keyframes hint-settle {
+        0%, 60% { opacity: 1; }
+        100% { opacity: 0.7; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .bar .hint.fresh { animation: none; }
+      }
+      @media (max-width: 600px) {
+        .bar h1 { display: none; } /* keep the hint readable on phones */
+      }
 
-      #intro-overlay {
+      .bar .menu {
+        pointer-events: auto;
+        color: #fff;
+        background: none;
+        font: inherit;
+        font-size: 1rem;
+        line-height: 1;
+        padding: 7px 12px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .bar .menu:hover { background: rgba(255,255,255,0.15); }
+
+      #settings-panel {
         position: fixed;
-        inset: 0;
-        z-index: 5;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        pointer-events: none;
+        top: 58px;
+        right: 18px;
+        z-index: 20;
+        width: 250px;
+        padding: 16px 18px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         color: #fff;
-        opacity: 1;
-        transition: opacity 0.8s ease;
-      }
-      #intro-overlay.gone { opacity: 0; }
-      #intro-overlay span {
-        padding: 14px 24px;
+        background: rgba(0,0,0,0.6);
         border: 1px solid rgba(255,255,255,0.35);
         border-radius: 16px;
-        background: rgba(0,0,0,0.35);
-        font-size: 0.95rem;
-        letter-spacing: 0.01em;
-        line-height: 1.7;
-        white-space: pre-line;
-        text-align: center;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
       }
+      #settings-panel .setting {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      #settings-panel .desc {
+        margin: 10px 0 0;
+        font-size: 0.78rem;
+        line-height: 1.5;
+        opacity: 0.7;
+      }
+      #settings-panel input[type="checkbox"] {
+        appearance: none;
+        -webkit-appearance: none;
+        position: relative;
+        width: 38px;
+        height: 22px;
+        margin: 0;
+        flex-shrink: 0;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        background: rgba(255,255,255,0.1);
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+      #settings-panel input[type="checkbox"]::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        transition: transform 0.2s ease;
+      }
+      #settings-panel input[type="checkbox"]:checked { background: rgba(255,255,255,0.55); }
+      #settings-panel input[type="checkbox"]:checked::after { transform: translateX(16px); }
+      #settings-panel .action {
+        margin-top: 14px;
+        width: 100%;
+        padding: 7px 12px;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #fff;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      #settings-panel .action + .action { margin-top: 8px; }
+      #settings-panel .action:hover { background: rgba(255,255,255,0.2); }
+
     </style>
   </head>
   <body>
     <header class="bar">
       <a class="back" href="../../">← Gallery</a>
       <h1>Spiral Generator</h1>
-      <span class="hint">mouse sets scale &amp; count · click to clear</span>
+      <span class="hint fresh" id="hint">move to set scale &amp; count · tap to lock</span>
+      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="true">☰</button>
     </header>
 
-    <div id="intro-overlay"><span id="intro-text"></span></div>
+    <div id="settings-panel" hidden>
+      <label class="setting">
+        3D motion
+        <input type="checkbox" id="toggle-3d" />
+      </label>
+      <p class="desc">Tilts the spiral's plane in 3D. Move to aim the plane and tap to lock it in place. While locked, drag to pan and pinch or scroll to zoom.</p>
+      <button class="action" id="palette-btn" type="button">Reset palette</button>
+      <button class="action" id="restart-btn" type="button">Restart spiral</button>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
     <script src="./spiral-generator.js"></script>
