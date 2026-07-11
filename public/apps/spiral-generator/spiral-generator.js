@@ -53,6 +53,12 @@ var maxZoom = 8;
 var panX = 0; // camera offset across the plane, buffer px
 var panY = 0;
 
+// last pointer position over the canvas itself; p5's mouseX/mouseY also
+// follow the pointer across the header and settings menu, which would drag
+// the spiral input along on every menu trip — UI positions must not count
+var inputX = 0;
+var inputY = 0;
+
 // tap-vs-drag bookkeeping (shared by mouse and touch)
 var pressOnCanvas = false;
 var tapMoved = false;
@@ -130,8 +136,8 @@ function draw() {
   // scale/count follow the pointer only in unlocked 2D mode: a tap locks
   // them in place, and in 3D mode the pointer aims the plane instead
   if (!tilt3D && !paramsLocked) {
-    // change the amount of elements according to the mouse x position
-    elAmount = constrain(map(mouseX, 0, width, minElAmount, maxElAmount), minElAmount, maxElAmount);
+    // change the amount of elements according to the pointer x position
+    elAmount = constrain(map(inputX, 0, width, minElAmount, maxElAmount), minElAmount, maxElAmount);
 
     // make sure elAmount is not 7 and even if above 10
     if (elAmount == 7) {
@@ -140,8 +146,8 @@ function draw() {
       elAmount = elAmount - 1;
     }
 
-    // change the scale of elements according to the mouse y position
-    elScale = constrain(map(mouseY, 0, height, minScale, maxScale), minScale, maxScale);
+    // change the scale of elements according to the pointer y position
+    elScale = constrain(map(inputY, 0, height, minScale, maxScale), minScale, maxScale);
   }
 
   // loop according to the amount of elements
@@ -190,8 +196,8 @@ function draw() {
   // unlocked (screen center = flat); locking freezes the aim where it is;
   // turning 3D off brings everything back to the flat framing
   if (tilt3D && !planeLocked) {
-    targetTiltX = constrain(map(mouseY, 0, height, -maxTilt, maxTilt), -maxTilt, maxTilt);
-    targetTiltY = constrain(map(mouseX, 0, width, -maxTilt, maxTilt), -maxTilt, maxTilt);
+    targetTiltX = constrain(map(inputY, 0, height, -maxTilt, maxTilt), -maxTilt, maxTilt);
+    targetTiltY = constrain(map(inputX, 0, width, -maxTilt, maxTilt), -maxTilt, maxTilt);
   } else if (!tilt3D) {
     targetTiltX = 0;
     targetTiltY = 0;
@@ -367,6 +373,20 @@ function updateHint() {
       : 'move to tilt the plane · tap to lock';
   }
 }
+
+// feed inputX/inputY only from pointer positions over the canvas (mouse and
+// touch both arrive as pointer events; the canvas is fixed at 0,0 with
+// pixelDensity 1, so client coords are sketch coords)
+(function () {
+  function track(e) {
+    if (e.target && e.target.tagName === 'CANVAS') {
+      inputX = e.clientX;
+      inputY = e.clientY;
+    }
+  }
+  window.addEventListener('pointerdown', track, { passive: true });
+  window.addEventListener('pointermove', track, { passive: true });
+})();
 
 // settings menu (hamburger in the header)
 (function () {
