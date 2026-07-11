@@ -83,6 +83,7 @@
         top: 58px;
         right: 18px;
         z-index: 20;
+        transition: opacity 0.4s ease;
         width: 250px;
         padding: 16px 18px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -151,6 +152,8 @@
       }
       #settings-panel .action + .action { margin-top: 8px; }
       #settings-panel .action:hover { background: rgba(255,255,255,0.2); }
+      /* ride the shared autohide's idle fade (autohide.js toggles body.idle) */
+      body.idle #settings-panel { opacity: 0; pointer-events: none; }
 
     </style>
   </head>
