@@ -108,8 +108,29 @@ function factorSetup(bgColor) {
 }
 
 function windowResized() {
+  // resizeCanvas keeps the WebGL context; recreating the canvas (factorSetup)
+  // would orphan postShader on the old context and kill the draw loop
   resizeCanvas(windowWidth, windowHeight);
-  factorSetup(0);
+
+  // rebuild the accumulation buffer for the new window diagonal, carrying
+  // the artwork over centered so fullscreen jumps don't reset the spiral
+  var bufSize = ceil(sqrt(windowWidth * windowWidth + windowHeight * windowHeight));
+  if (bufSize !== pg.width) {
+    var old = pg;
+    pg = createGraphics(bufSize, bufSize);
+    pg.pixelDensity(1);
+    pg.colorMode(HSB);
+    pg.noStroke();
+    pg.background(0);
+    pg.image(old, (bufSize - old.width) / 2, (bufSize - old.height) / 2);
+    old.remove();
+  }
+
+  if (width > height) {
+    dimension = width;
+  } else {
+    dimension = height;
+  }
 }
 
 function resetColors() {
