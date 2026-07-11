@@ -7,19 +7,23 @@ import { execSync } from 'node:child_process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'));
 
-// Displayed version = package.json semver + the current git short SHA, so the
-// badge auto-changes every commit and tells you exactly which build is live.
-// Bump the semver base with `npm version patch|minor|major` for real releases.
-// (actions/checkout keeps .git, so this resolves in CI too; falls back if not.)
-let gitSha = '';
-try {
-  gitSha = execSync('git rev-parse --short HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
-    .toString()
-    .trim();
-} catch {
-  gitSha = '';
+// Displayed version comes from the latest git tag — i.e. the GitHub Release —
+// so the badge tracks real releases with no manual bumping: exactly "0.3.0"
+// on the tagged commit, "0.3.0-2-gabc123" once commits land after it. Needs
+// tags in the checkout (deploy.yml fetches them); falls back to package.json
+// semver + short SHA when they aren't available.
+const sh = (cmd) => {
+  try {
+    return execSync(cmd, { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+  } catch {
+    return '';
+  }
+};
+let appVersion = sh('git describe --tags').replace(/^v/, '');
+if (!appVersion) {
+  const gitSha = sh('git rev-parse --short HEAD');
+  appVersion = gitSha ? `${pkg.version}+${gitSha}` : pkg.version;
 }
-const appVersion = gitSha ? `${pkg.version}+${gitSha}` : pkg.version;
 
 // Multi-page build: the main gallery plus every self-contained app folder.
 const input = { main: resolve(__dirname, 'index.html') };
