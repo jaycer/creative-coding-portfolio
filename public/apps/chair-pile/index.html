@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chair Pile — Jayce Renner</title>
+    <meta name="description" content="Chairs fall out of the dark and pile up forever. Tap or press any key to drop the one that floats, then drag to walk around what you have built." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="Chair Pile" />
+    <meta property="og:description" content="Chairs fall out of the dark and pile up forever. Tap or press any key to drop the one that floats, then drag to walk around what you have built." />
+    <meta property="og:url" content="https://jaycer.github.io/creative-coding-portfolio/apps/chair-pile/" />
+    <meta property="og:image" content="https://jaycer.github.io/creative-coding-portfolio/og/chair-pile.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Chair Pile" />
+    <meta name="twitter:description" content="Chairs fall out of the dark and pile up forever. Tap or press any key to drop the one that floats, then drag to walk around what you have built." />
+    <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/chair-pile.jpg" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #06070a; }
+      canvas { position: fixed; inset: 0; display: block; touch-action: none; }
+
+      .bar {
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 12px 18px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0));
+        pointer-events: none;
+      }
+      .bar h1 { margin: 0 auto 0 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+      .bar .back {
+        pointer-events: auto;
+        color: #fff;
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        padding: 6px 12px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        white-space: nowrap;
+        transition: background 0.15s ease;
+      }
+      .bar .back:hover { background: rgba(255,255,255,0.15); }
+      .bar .count {
+        font-size: 0.9rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.8;
+      }
+      .bar .sound {
+        pointer-events: auto;
+        color: #fff;
+        background: none;
+        font: inherit;
+        font-size: 1rem;
+        line-height: 1;
+        padding: 6px 12px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .bar .sound:hover { background: rgba(255,255,255,0.15); }
+      @media (max-width: 600px) {
+        .back-label { display: none; } /* just the arrow on phones */
+      }
+
+      .foot {
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 10px 18px 16px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: linear-gradient(0deg, rgba(0,0,0,0.45), rgba(0,0,0,0));
+        pointer-events: none;
+        transition: opacity 0.6s ease;
+      }
+      .foot .hint { font-size: 0.9rem; font-weight: 500; opacity: 0.7; text-align: center; }
+      body.idle .foot { opacity: 0; }
+      .foot.gone { opacity: 0; }
+    </style>
+  </head>
+  <body>
+    <header class="bar">
+      <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
+      <h1>Chair Pile</h1>
+      <span class="count" id="count">0 chairs</span>
+      <button class="sound" id="sound" type="button" aria-label="Turn sound off" aria-pressed="true">🔊</button>
+    </header>
+
+    <footer class="foot" id="foot">
+      <span class="hint" id="hint">Tap or press any key to drop the chair. Drag to look around.</span>
+    </footer>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+          "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+        }
+      }
+    </script>
+    <script type="module" src="./chair-pile.js"></script>
+    <script src="../shared/autohide.js"></script>
+  </body>
+</html>

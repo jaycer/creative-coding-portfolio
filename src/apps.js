@@ -10,6 +10,7 @@
 export const apps = [
   // Flow Field (app-01) and Particle Swarm (app-02) are intentionally unlisted —
   // still reachable by direct URL, just not shown in the gallery grid.
+  { slug: 'chair-pile',             title: 'Chair Pile',             blurb: 'Chairs fall out of the dark and pile up forever. Tap or press any key to drop the one that floats, then drag to look around what you built.', entry: 'index.html' },
   { slug: 'ch4td1c3',               title: 'ch4td1c3',               blurb: 'A full set of DnD dice drawn by a raymarching shader, hearts and all. Tap a die to roll it, or rattle the whole set.', entry: 'index.html' },
   { slug: 'bloon-boon',             title: 'Bloon Boon',             blurb: 'A shader-bloon juggling game. Tap and flick glossy 3D bloons to keep them aloft, and each color sings its own sound.', entry: 'index.html' },
   { slug: 'sleep-noise',            title: 'Sleep Noise',            blurb: 'A calm noise machine for sleep. Blend dark, white, and pink noise, each with its own level and tone.', entry: 'index.html' },
