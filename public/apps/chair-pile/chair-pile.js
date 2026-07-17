@@ -1,9 +1,11 @@
 // Chair Pile — chairs fall out of the dark and pile up forever.
 //
-// One chair floats above the pile at a time. Any tap or keypress drops it; a
-// couple of seconds later the next fades in. The physics collider is built from the
-// same boxes as the visible chair, so legs really do snag on slats and the pile
-// interlocks the way the shapes suggest.
+// Any tap or keypress sends another one down, out of a disc of sky above the
+// frame that is never itself in shot. They land somewhere random within it, and
+// it widens as the heap spreads, so the pile grows outward as well as up instead
+// of stacking into a spire. The physics collider is built from the same boxes as
+// the visible chair, so legs really do snag on slats and the pile interlocks the
+// way the shapes suggest.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -11,16 +13,86 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { initAudio, resumeAudio, clatter, setMuted, isMuted, setTimbre, getTimbre } from './audio.js';
 
-const SPAWN_DELAY_MS = 2000;   // gap between a chair landing and the next appearing
+// Chairs are drawn as one instance apiece once frozen, and the physics only ever
+// solves the few dozen still moving, so what this bounds is the broadphase, which
+// keeps sweeping every body forever. Measured on an M1 Max: flat 120fps out past
+// 1,500, about 40 at 2,200, and the cost is all in cannon sorting bodies rather
+// than in anything drawn. 2,000 is a round number just under where it tips.
+const MAX_CHAIRS = 2000;
+
+const DEMO_DROP_MS = 2000;     // demo's cadence, as it ships; the slider moves it
+let demoDropMs = DEMO_DROP_MS;
 const FREEZE_BEHIND = 25;      // chairs this far down the pile turn to static bedrock
-const PILE_RADIUS = 1.3;       // chairs beyond this from the drop column are strays
-// Both scaled together, so a chair falls the same way onto a tall pile as onto
-// an empty floor. The gap is what gets scaled, not the height above the floor:
-// the chair floats over the pile, so scaling its absolute height would stretch
-// the fall further the taller the heap got, and a drop that grows without bound
-// would end up scattering the pile it is supposed to be building.
-const SPAWN_GAP = 2.55;        // how far above the pile the next chair floats
-const MIN_SPAWN_Y = 3.6;       // floating height over an empty floor
+// ...and this far down they turn to bedrock whether they have settled or not.
+// Freezing runs in drop order off a single index, so the oldest unsettled chair
+// holds up every chair behind it, however still those are. That is usually a
+// wait of a frame or two. But a chair pinned deep in the heap can be left
+// jittering in place by the solver — barely moving, yet never still enough to
+// pass atRest and never slow enough to fall asleep — and it blocks the queue for
+// good: the live set then grows without bound, every chair in it costs physics
+// and a pair of draw calls a frame, and the whole pile grinds down. Measured, it
+// stalled at 494 frozen with the head spinning at 0.03 m/s and never recovered,
+// even with nothing left falling on it. So past this depth the queue stops
+// asking. A chair with 60 chairs on top of it cannot be seen, and snapping it to
+// the pose it is already sitting in is invisible next to seizing up.
+const FREEZE_FORCE_BEHIND = 60;
+// The drop zone: a disc overhead that chairs fall out of, somewhere unseen.
+//
+// It starts ten chairs across and widens with the heap, which is the difference
+// between a pile and a tower. Dropping every chair down one column builds a
+// spire that grows until it topples, because a chair can only ever land on the
+// chair below it. Spreading them over the width the heap has already reached
+// lets it grow the way a heap of anything grows: outward as much as upward, each
+// chair finding a shoulder to settle on.
+//
+// SPREAD has to be high enough to engage at all. It only widens the disc once
+// SPREAD of the reached width beats the ten chairs it starts at, so at 0.7 the
+// heap had to already be 3.3m across before the disc grew by so much as a
+// centimeter — and it never got there, because what makes a heap of chairs
+// spread is chairs rolling down it, and chairs barely roll: they are all corners
+// and they catch on each other. So the disc stayed exactly ten chairs wide for
+// two thousand chairs and built the tower it was put there to prevent.
+//
+// At 0.9 it tracks the heap from almost the first chair, and the cap is what
+// decides the shape rather than a fixed point nobody can predict. That is the
+// honest way round: the width where a heap of this size stops looking like a
+// heap is a thing to look at and choose, and the arithmetic between the disc,
+// the roll, and the stray limit is not something to derive it from.
+const SPAWN_SPAN_CHAIRS = 10;  // how many chairs across the disc starts
+const SPAWN_SPREAD = 0.9;      // share of the reached width the disc grows to fill
+// Where the heap stops widening and starts climbing. Two thousand chairs pack
+// into roughly 170 cubic meters, so a disc of this radius leaves a heap about as
+// tall as it is wide — a pile, at the angle a pile sits at. Much wider and the
+// same chairs spread into a floor covering; much narrower and they tower.
+const SPAWN_RADIUS_MAX = 4.5;
+const STRAY_MARGIN = 1.4;      // past the disc by this much and a chair has rolled away
+
+// Nowhere near the pile, and above whatever the camera can see: the sky height is
+// worked out per drop from the frame itself, and this is only the floor under it,
+// for when the camera is in so close that the top of the frame is lower than the
+// heap.
+const MIN_SKY_GAP = 3.2;       // least a chair may fall, over the top of the pile
+const SKY_MARGIN = 1.3;        // clearance over the top of the frame, so it is never seen waiting
+
+// A chair still high up casts almost no shadow, fading up to a full one as it
+// comes down.
+//
+// Nothing about that is physical, and it is standing in for something that is. A
+// real shadow softens as its caster gets further from what it falls on, until a
+// chair up in the sky throws nothing you would notice. A shadow map has one
+// hardness for everything, so ours stays needle sharp all the way up — and the
+// key light is 35 degrees, which throws a chair's shadow about 1.4x its height
+// sideways. A chair released above the frame therefore lays a hard, chair-shaped
+// shadow across the floor several meters from where it will land, a second
+// before it arrives: a shadow with nothing above it, which gives away both that
+// a chair is coming and that it came from nowhere.
+//
+// Fading it is the cheap half of what real penumbra would do. It cannot spread
+// the shadow, but it can take away the thing that reads as wrong, which is a
+// hard edge with no object over it.
+const SHADOW_FADE_FROM = 4.6;  // height over the heap where the shadow starts coming in
+const SHADOW_FADE_TO = 1.1;    // and where it is full strength
+
 const REST_SPEED = 0.4;        // m/s under which a chair counts as come to rest
 const MIN_FALL_TIME = 0.4;     // s of falling before a chair can be called landed
 const HIT_MIN_SPEED = 0.7;     // m/s of impact under which a contact makes no sound
@@ -28,29 +100,26 @@ const HIT_COOLDOWN_MS = 70;    // one chair can only speak this often
 const HIT_LOUD_SPEED = 5;      // impact speed that counts as a full-strength bang
 const BUMP_LEVEL = 0.32;       // how loudly a chair already at rest answers when knocked
 
-// Framing. The view is centered at spanTop * FOCUS_BIAS and reaches
-// spanTop * 0.5 * FRAME_MARGIN above that, so the top edge lands at
-// spanTop * (FOCUS_BIAS + 0.5 * FRAME_MARGIN). That has to clear 1.0 or the
-// floating chair hangs off the top of the screen — at 0.45 the margin must
-// exceed 1.1.
+// Framing. Only the heap has to be held now — chairs arrive from over the top of
+// the frame and are meant to, so nothing hangs above it waiting to be cropped,
+// and the old margin that existed to keep a floating chair in shot can go back to
+// merely comfortable.
 //
-// It needs to clear it by more than it looks, though, so the nominal 1.1 is not
-// the number to sail close to. That arithmetic measures the frame where the
-// camera is pointed, but the floating chair is the one thing above the view
-// axis: it sits nearer than the target plane, where the frame is narrower than
-// the half-extent used here, and the error runs to about 5% at the angle the
-// camera keeps. The chair also bobs, spawns off-center, and lands on a random
-// tilt that reaches further above its origin than its own half-height does. Each
-// is small; together they cost more than the 5% that a margin of 1.2 left over.
+// It does have to hold the heap's width as well as its height, which it never
+// used to: every chair landed in one column, so fitting the height fitted
+// everything. Now the disc widens as the pile spreads, and a wide heap under a
+// wide screen still runs out of frame sideways long before it runs out of it
+// upward. Both fits are computed and the camera takes whichever wants it further
+// back.
 const FOCUS_BIAS = 0.45;       // <0.5 sits the view low, giving the pile the frame
-const FRAME_MARGIN = 1.35;
+const FRAME_MARGIN = 1.2;
+const PILE_AIR = 1.6;          // headroom over the heap, so a chair is seen falling before it lands
 const EXPLORE_FRACTION = 0.8;  // closer than this share of the fit = exploring, so stop framing
 
 // Demo mode. The camera orbits on its own and breathes in and out on a slow
 // sine, while chairs drop themselves. The zoom is expressed as a share of the
 // framing distance rather than in meters, so it keeps its composition as the
 // pile grows and the fit distance climbs with it.
-const DEMO_DWELL_MS = 1500;    // how long a chair is left floating before demo drops it
 const DEMO_ORBIT_SPEED = 0.55; // OrbitControls units: about one lap every two minutes
 const DEMO_ZOOM_PERIOD = 26;   // seconds for one full breath in and back out
 const DEMO_ZOOM_NEAR = 0.4;    // closest approach, as a share of the framing distance
@@ -253,7 +322,12 @@ scene.add(fill);
 // no visible rim — just a slow brightening toward the middle. It deliberately
 // casts no shadow: the key light already does, and a second set would read as a
 // mistake. angle 0.42 at 9m up puts the falloff around 4m out, wider than the heap.
-const pool = new THREE.SpotLight(0xdce8ff, 1.5, 0, 0.42, 1.0, 0);
+//
+// Near enough to neutral, where it used to be openly blue. It is the brightest
+// thing on the floor by some way, so its color is what the floor's color reads
+// as — and the floor is a cool gray already, which was tinting the same light
+// twice. A hair of warmth left in it, so it reads as light rather than as gray.
+const pool = new THREE.SpotLight(0xf6f3ef, 1.5, 0, 0.42, 1.0, 0);
 pool.position.set(0, 9, 0);
 pool.target.position.set(0, 0, 0);
 scene.add(pool);
@@ -363,10 +437,12 @@ const materials = PALETTE.map((color) => new THREE.MeshStandardMaterial({ color,
 
 const chairs = [];     // every dropped chair, in drop order
 let freezeIdx = 0;     // chairs before this index are already frozen
-let floating = null;   // the chair waiting in the air, if any
 let pileTopY = 0;
+let pileRadius = 0;    // how wide the heap has reached, which is what widens the drop zone
 let frozenTopY = 0;    // tallest frozen chair — fixed forever, so measured once
+let frozenRadius = 0;  // and the widest, likewise
 let dropped = 0;
+let lastDropAt = 0;    // demo's clock: it drops when this is old enough
 
 const countEl = document.getElementById('count');
 
@@ -422,10 +498,58 @@ function onCollide(chair, event) {
   );
 }
 
+/**
+ * The stand-in for the depth material three.js would otherwise use in the shadow
+ * pass, with one addition: it can throw away a share of its own fragments, and
+ * so cast a partial shadow.
+ *
+ * Dithered rather than blended because a shadow map has nowhere to put a
+ * half-shadow — a fragment is either the nearest thing to the light or it is
+ * not. So discard a share of them in a fine pattern instead, and let the filter
+ * that already softens every shadow edge average what survives back into a gray.
+ * Interleaved gradient noise for the pattern: it scatters evenly at pixel scale,
+ * costs two instructions, and needs no array to index into, which the shader
+ * language makes awkward anyway.
+ *
+ * Every chair gets one of these, so each can fade on its own, but the cache key
+ * is fixed so they all still share the one compiled program — the uniform is the
+ * only thing that differs.
+ */
+function makeShadowFader() {
+  const material = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  material.userData.fade = { value: 1 };
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uFade = material.userData.fade;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      'void main() {',
+      `uniform float uFade;
+       float chairDither(vec2 p) {
+         return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+       }
+       void main() {
+         if (chairDither(gl_FragCoord.xy) >= uFade) discard;`
+    );
+  };
+  material.customProgramCacheKey = () => 'chair-shadow-fade';
+  return material;
+}
+
+/** How solid this chair's shadow should be, from how far it still has to fall. */
+function shadowFade(chair) {
+  const above = chair.body.position.y - pileTopY;
+  return THREE.MathUtils.clamp(
+    (SHADOW_FADE_FROM - above) / (SHADOW_FADE_FROM - SHADOW_FADE_TO), 0, 1);
+}
+
 function makeChair() {
-  const mesh = new THREE.Mesh(chairGeometry, materials[Math.floor(Math.random() * materials.length)]);
+  // Kept as an index, not just a material: when this chair freezes it stops
+  // being a mesh with a material of its own and becomes one instance among many,
+  // which carries its color as a value rather than as a reference.
+  const tint = Math.floor(Math.random() * PALETTE.length);
+  const mesh = new THREE.Mesh(chairGeometry, materials[tint]);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  mesh.customDepthMaterial = makeShadowFader(); // dropped again when it freezes
   scene.add(mesh);
 
   const body = new CANNON.Body({ mass: 2.2, material: chairMat });
@@ -438,7 +562,8 @@ function makeChair() {
   body.isChair = true;
 
   const chair = {
-    mesh,
+    mesh,            // dropped when it freezes: the instance carries it from then on
+    tint,
     body,
     landed: false,   // has it come to rest since being dropped: pile, not rain
     fallTime: 0,
@@ -449,82 +574,197 @@ function makeChair() {
   return chair;
 }
 
-/**
- * How high the next chair floats. The framing reads this too, rather than
- * re-deriving it from SPAWN_GAP alone: over a low pile the MIN_SPAWN_Y floor is
- * what actually decides the height, and a shot fitted to the gap instead would
- * be fitted to somewhere below the chair and crop it off the top.
- */
-function spawnHeight() {
-  return Math.max(pileTopY + SPAWN_GAP, MIN_SPAWN_Y);
+/** How wide the drop zone is: ten chairs, or the share of the heap it has reached. */
+function spawnRadius() {
+  const base = (SEAT_W * SPAWN_SPAN_CHAIRS) / 2;
+  return Math.min(SPAWN_RADIUS_MAX, Math.max(base, pileRadius * SPAWN_SPREAD));
 }
 
-function spawnFloating() {
+/** Past here a chair has rolled clear, and counts toward neither the height nor the width. */
+function strayLimit() {
+  return spawnRadius() + STRAY_MARGIN;
+}
+
+/**
+ * How high a chair starts: out of sight, above the top of the frame.
+ *
+ * Worked out from the camera rather than from the pile, because "off screen" is
+ * a fact about the frame and the frame keeps moving — it pulls back as the heap
+ * grows and dives in when demo mode does. A fixed height over the pile would
+ * hang chairs in plain sight at one zoom and bury them at another.
+ *
+ * The MIN_SKY_GAP floor is for exactly that second case: zoomed in among the
+ * chairs the top of the frame can be lower than the top of the heap, and a chair
+ * released there would appear inside the pile rather than over it.
+ */
+function skyHeight() {
+  const dist = camera.position.distanceTo(controls.target);
+  const halfTall = dist * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+  const frameTop = controls.target.y + halfTall;
+  return Math.max(frameTop + SKY_MARGIN, pileTopY + MIN_SKY_GAP);
+}
+
+/** Send one down out of the dark. */
+function dropChair() {
+  if (chairs.length >= MAX_CHAIRS) return; // the heap is as big as it is allowed to get
+  lastDropAt = performance.now();
+
   const chair = makeChair();
-  // Just high enough to read as floating: a longer fall only scatters the pile.
-  const spawnY = spawnHeight();
-  chair.mesh.position.set((Math.random() - 0.5) * 0.36, spawnY, (Math.random() - 0.5) * 0.36);
-  chair.mesh.rotation.set(
+
+  // Uniform over the disc, not over the radius: without the square root the
+  // middle gets crowded, since a ring's area grows with how far out it is, and
+  // the drop column this is meant to break up would quietly come back.
+  const angle = Math.random() * Math.PI * 2;
+  const r = spawnRadius() * Math.sqrt(Math.random());
+  const x = Math.cos(angle) * r;
+  const z = Math.sin(angle) * r;
+  const y = skyHeight();
+
+  chair.body.position.set(x, y, z);
+  chair.body.quaternion.setFromEuler(
     (Math.random() - 0.5) * 1.0,
     Math.random() * Math.PI * 2,
     (Math.random() - 0.5) * 1.0
   );
-  chair.baseY = spawnY;
-  chair.phase = Math.random() * Math.PI * 2;
-  chair.spin = (Math.random() - 0.5) * 0.5;
-  chair.spawnedAt = performance.now(); // demo mode waits a beat from here before dropping it
-  chair.mesh.scale.setScalar(0.01); // pops in over the first moments
-  floating = chair;
-}
-
-function dropFloating() {
-  if (!floating) return; // nothing waiting up there; the pile is between chairs
-  const chair = floating;
-  floating = null;
-
-  chair.mesh.scale.setScalar(1); // honor a tap landing mid pop-in: snap to full size and go
-  const p = chair.mesh.position;
-  const q = chair.mesh.quaternion;
-  chair.body.position.set(p.x, p.y, p.z);
-  chair.body.quaternion.set(q.x, q.y, q.z, q.w);
   chair.body.angularVelocity.set(
     (Math.random() - 0.5) * 0.7,
     (Math.random() - 0.5) * 0.7,
     (Math.random() - 0.5) * 0.7
   );
+  // The mesh is driven off the body every frame from here; this is only so its
+  // first frame is not at the origin.
+  chair.mesh.position.set(x, y, z);
+  chair.mesh.quaternion.copy(chair.body.quaternion);
+
   world.addBody(chair.body);
   chairs.push(chair);
 
   dropped += 1;
   countEl.textContent = dropped === 1 ? '1 chair' : `${dropped} chairs`;
+}
 
-  setTimeout(spawnFloating, SPAWN_DELAY_MS);
+// ------------------------------------------------------------------ bedrock
+// Every frozen chair, drawn in one call.
+//
+// A chair of its own costs two draw calls a frame forever — once into the shadow
+// map, once into the scene — and three.js spends real CPU on each one whether
+// the chair moved or not. Measured, a settled heap of ~2,200 chairs was 4,355
+// calls and about 50ms a frame, which is where "pile up forever" stopped being
+// true: the GPU was idle and the time went entirely on submitting the work.
+//
+// But a frozen chair is welded in place with its velocity zeroed and is never
+// read again, which is exactly the bargain an InstancedMesh asks for: one
+// transform, written once, never touched. So the whole of bedrock collapses into
+// a single call and stays there, however deep it gets, and the per-frame cost of
+// the pile becomes the couple of dozen chairs still moving on top of it.
+const BEDROCK_CHUNK = 256; // instances to allocate at a time; doubles from here
+
+// One material for all of it. The palette lives in each instance's own color
+// instead, which is why this one is white: three.js multiplies the two, so
+// anything else here would tint the whole heap.
+const bedrockMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.68, metalness: 0.04 });
+
+let bedrock = null;
+let bedrockCount = 0;
+
+const _pos = new THREE.Vector3();
+const _quat = new THREE.Quaternion();
+const _one = new THREE.Vector3(1, 1, 1);
+const _mat = new THREE.Matrix4();
+const _color = new THREE.Color();
+
+/**
+ * Make sure there is room for one more, growing by doubling. An InstancedMesh
+ * takes its capacity at construction and cannot be resized, so growing means
+ * building a new one and copying the old buffers straight across — cheap, and
+ * rare, since the count doubles every time.
+ */
+function reserveBedrock(need) {
+  if (bedrock && need <= bedrock.instanceMatrix.count) return;
+
+  let capacity = bedrock ? bedrock.instanceMatrix.count * 2 : BEDROCK_CHUNK;
+  while (capacity < need) capacity *= 2;
+
+  const next = new THREE.InstancedMesh(chairGeometry, bedrockMaterial, capacity);
+  next.castShadow = true;
+  next.receiveShadow = true;
+  next.instanceMatrix.setUsage(THREE.StaticDrawUsage); // written once and left alone
+  // Culled as a single object, and its instances are the whole pile: the bounding
+  // sphere would have to cover all of them anyway, so testing it only costs.
+  next.frustumCulled = false;
+  // instanceColor is allocated lazily on the first setColorAt, and the copy below
+  // needs it to exist already.
+  next.setColorAt(0, _color.setHex(0xffffff));
+
+  if (bedrock) {
+    next.instanceMatrix.array.set(bedrock.instanceMatrix.array);
+    next.instanceColor.array.set(bedrock.instanceColor.array);
+    scene.remove(bedrock);
+    bedrock.dispose(); // the instance buffers only; geometry and material are shared
+  }
+  next.count = bedrockCount;
+  bedrock = next;
+  scene.add(bedrock);
+}
+
+/** Hand a chair's mesh over to bedrock: its transform becomes one instance. */
+function addToBedrock(chair) {
+  reserveBedrock(bedrockCount + 1);
+
+  // Composed from the body rather than read off the mesh: the mesh's matrix is
+  // only refreshed at render, so it can be a frame stale, and this is the last
+  // chance to get the transform right — nothing will ever update it again.
+  _pos.copy(chair.body.position);
+  _quat.copy(chair.body.quaternion);
+  _mat.compose(_pos, _quat, _one);
+  bedrock.setMatrixAt(bedrockCount, _mat);
+  bedrock.setColorAt(bedrockCount, _color.setHex(PALETTE[chair.tint]));
+  bedrockCount++;
+  bedrock.count = bedrockCount;
+  bedrock.instanceMatrix.needsUpdate = true;
+  bedrock.instanceColor.needsUpdate = true;
+
+  scene.remove(chair.mesh);
+  // Bedrock is solid and never fades, so the fader goes with the mesh. One per
+  // chair adds up over two thousand of them, and nothing is going to ask this one
+  // for a shadow again.
+  chair.mesh.customDepthMaterial.dispose();
+  chair.mesh = null; // it is an instance now, and nothing may reach for it again
 }
 
 /**
  * Settled chairs deep in the pile become static: cheap, and the base stops
- * creeping. Only ever freezes a chair that is actually at rest, so one still
- * tumbling is never locked in place mid-motion — it just gets frozen on a later
+ * creeping. Prefers to freeze a chair that is actually at rest, so one still
+ * tumbling is not locked in place mid-motion — it just gets frozen on a later
  * frame once it comes to rest. Deliberately tests rest rather than the physics
  * engine's sleep state: chairs this deep are pinned but get knocked awake by
  * every landing above them, so waiting for sleep could stall the queue for good
  * and let the per-frame work grow without bound.
+ *
+ * Past FREEZE_FORCE_BEHIND it stops preferring and just takes them, which is
+ * what actually holds that promise — testing rest instead of sleep narrows the
+ * stall but does not close it, since a chair can jitter below the sleep
+ * threshold and above the rest one indefinitely.
  */
 function freezeSettled() {
   while (chairs.length - freezeIdx > FREEZE_BEHIND) {
     const chair = chairs[freezeIdx];
-    if (!chair.landed || !atRest(chair.body)) break; // still moving; try again later
+    const buried = chairs.length - freezeIdx > FREEZE_FORCE_BEHIND;
+    if (!buried && (!chair.landed || !atRest(chair.body))) break; // still moving; try again later
     freezeIdx++;
     chair.body.type = CANNON.Body.STATIC;
     chair.body.mass = 0;
     chair.body.updateMassProperties();
     chair.body.velocity.setZero();
     chair.body.angularVelocity.setZero();
-    // Fold its height in now: a frozen chair can never move, so the per-frame
-    // scan below never has to look at it again.
-    if (Math.hypot(chair.body.position.x, chair.body.position.z) <= PILE_RADIUS) {
+    // Fold its height and its reach in now: a frozen chair can never move, so the
+    // per-frame scan below never has to look at it again.
+    const reach = Math.hypot(chair.body.position.x, chair.body.position.z);
+    if (reach <= strayLimit()) {
       frozenTopY = Math.max(frozenTopY, chair.body.position.y + CHAIR_MID);
+      frozenRadius = Math.max(frozenRadius, reach);
     }
+    addToBedrock(chair); // after the body is settled and pinned: this reads its final transform
   }
 }
 
@@ -546,7 +786,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   downs.delete(e.pointerId);
   if (downs.size > 0) return; // part of a multi-touch gesture, not a tap
   const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
-  if (moved < 6 && performance.now() - down.at < 400) dropFloating();
+  if (moved < 6 && performance.now() - down.at < 400) dropChair();
 });
 
 renderer.domElement.addEventListener('pointercancel', (e) => downs.delete(e.pointerId));
@@ -560,7 +800,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.target.closest && e.target.closest('a, button')) return; // let the Gallery link work
   initAudio();
-  dropFloating();
+  dropChair();
 });
 
 // Safari suspends the context when the tab goes away and only wakes on request.
@@ -579,27 +819,15 @@ const demoToggle = document.getElementById('demo-toggle');
 const doneBtn = document.getElementById('done-btn');
 const howEl = document.getElementById('how');
 const timbreEl = document.getElementById('timbre');
+const spawnEl = document.getElementById('spawn');
+const spawnValEl = document.getElementById('spawn-val');
+const rateEl = document.getElementById('rate'); // the drop rate, shown only while demo is on
 
 let menuOpen = false;
 let openedFromButton = false;
 let demo = false;
 
-// Whether this browser has met the piece before. The how-to lives in the overlay
-// now, so a first-time visitor is shown it unasked — there is nothing else on
-// screen that would tell them the chair is waiting on a tap.
-const SEEN_KEY = 'chair-pile-seen';
 const TIMBRE_KEY = 'chair-pile-timbre'; // which knock they settled on, kept for next time
-
-function seenBefore() {
-  // Storage is off entirely in some privacy modes, and reading it throws rather
-  // than returning null. Treat that as a first visit: showing the how-to twice
-  // is a smaller failure than never showing it, and than a dead sketch.
-  try { return !!localStorage.getItem(SEEN_KEY); } catch { return false; }
-}
-
-function markSeen() {
-  try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* private mode: greet them again */ }
-}
 
 /**
  * fromButton says a real click opened this, which decides two things: whether
@@ -650,6 +878,8 @@ scrim.addEventListener('click', (e) => {
 });
 
 doneBtn.addEventListener('click', (e) => closeMenu({ toButton: e.detail === 0 }));
+document.getElementById('close-btn')
+  .addEventListener('click', (e) => closeMenu({ toButton: e.detail === 0 }));
 
 soundToggle.checked = !isMuted();
 soundToggle.addEventListener('change', () => {
@@ -659,12 +889,29 @@ soundToggle.addEventListener('change', () => {
 
 demoToggle.addEventListener('change', () => {
   demo = demoToggle.checked;
-  controls.autoRotate = demo;
-  howEl.hidden = demo; // nothing to tell them to do while it plays itself
+  howEl.hidden = demo;   // nothing to tell them to do while it plays itself
+  rateEl.hidden = !demo; // and nothing for the rate to mean while it is off
   initAudio(); // demo drops chairs with nothing else to unlock the audio
 });
 
-/** Light the chosen knock and dim the other. */
+/**
+ * Demo waits for the overlay to be out of the way — it is switched on from
+ * behind the very thing that would hide it, and the first chair down is the one
+ * worth seeing. Both halves hold off: nothing falls, and the camera stays put.
+ */
+function demoRunning() {
+  return demo && !menuOpen;
+}
+
+// Deliberately not remembered between visits, where the knock is. The knock is a
+// taste; this is a thing to play with. Coming back to a sketch you left at 0.1
+// and finding chairs already falling faster than they can land is a fright, not
+// a preference being honored.
+spawnEl.addEventListener('input', () => {
+  const seconds = Number(spawnEl.value);
+  demoDropMs = seconds * 1000;
+  spawnValEl.textContent = `${seconds.toFixed(1)}s`;
+});
 function paintTimbre() {
   for (const btn of timbreEl.querySelectorAll('.choice-btn')) {
     const on = btn.dataset.timbre === getTimbre();
@@ -691,25 +938,39 @@ timbreEl.addEventListener('click', (e) => {
   clatter(0.85, 1, 0); // hear the choice now, rather than waiting for a chair to land
 });
 
-// Say hello, once ever. Marked on the way in rather than on the way out: someone
-// who has read it and wandered off has been greeted, and reloading should not
-// greet them again.
-if (!seenBefore()) {
-  markSeen();
-  openMenu({ fromButton: false });
-}
+// Open, every time, over an empty floor. The piece starts as a room with nothing
+// in it and a card explaining what it is; nothing falls, and demo mode holds,
+// until the card is out of the way. Whatever happens first should be watched
+// rather than missed behind the thing telling you about it.
+openMenu({ fromButton: false });
 
 // --------------------------------------------------------------------- loop
 const clock = new THREE.Clock();
 let camFocusY = 1.2;
 let framedTop = -1;                                    // pile height the framing was last fit to
+let framedWide = -1;                                   // and the width, which grows on its own now
 let wantDist = camera.position.distanceTo(controls.target);
 const _dir = new THREE.Vector3();
 
+// Whether the viewer has taken themselves in among the chairs, which is the one
+// case where the framing must not pull back.
+//
+// Decided only when they stop touching it, never mid-flight. Reading it live off
+// the distance looks equivalent and is not: the framing trails its own fit
+// whenever the pile grows quickly, and a camera lagging behind the fit is
+// indistinguishable, by distance alone, from a camera someone drove in close. So
+// the shot would give up following exactly when the heap was growing fastest, and
+// stay given up, because the fit only runs further ahead from there. It went in
+// among the chairs and never came out.
+let viewerZoomed = false;
+controls.addEventListener('end', () => {
+  viewerZoomed = camera.position.distanceTo(controls.target) < wantDist * EXPLORE_FRACTION;
+});
+
 /**
- * Keep the floor, the pile, and the floating chair all in frame as the heap
- * grows. Only re-fits when the pile actually gets taller, and only ever pulls
- * back — so orbiting is never fought.
+ * Keep the floor and the heap in frame as it grows, on both counts: it gets
+ * taller, and it gets wider. Only re-fits when it actually gains one or the
+ * other, and only ever pulls back — so orbiting is never fought.
  *
  * Stands down entirely once the camera is well inside the framing distance,
  * which means the viewer has deliberately zoomed in among the chairs. Otherwise
@@ -717,15 +978,18 @@ const _dir = new THREE.Vector3();
  * them back out of the pile they were exploring.
  */
 function frame(dt, t) {
-  // Floor up to the top of the floating chair: its own height above its origin,
-  // plus the bob. Measured from where the chair really is, so the low-pile case
-  // where MIN_SPAWN_Y holds it up stays in shot.
-  const spanTop = spawnHeight() + CHAIR_MID + 0.11;
-  if (pileTopY > framedTop + 0.05) {
+  const spanTop = pileTopY + PILE_AIR;
+  const spanWide = (pileRadius + STRAY_MARGIN) * 2;
+  if (pileTopY > framedTop + 0.05 || pileRadius > framedWide + 0.05) {
     framedTop = pileTopY;
+    framedWide = pileRadius;
     const vFov = THREE.MathUtils.degToRad(camera.fov);
-    const need = (spanTop * 0.5) / Math.tan(vFov / 2) * FRAME_MARGIN;
-    wantDist = Math.max(wantDist, need);
+    // The horizontal field is the vertical one widened by the aspect, so on a
+    // wide screen the width is nearly free and on a tall one it is what decides.
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
+    const needTall = (spanTop * 0.5) / Math.tan(vFov / 2) * FRAME_MARGIN;
+    const needWide = (spanWide * 0.5) / Math.tan(hFov / 2) * FRAME_MARGIN;
+    wantDist = Math.max(wantDist, needTall, needWide);
   }
 
   _dir.subVectors(camera.position, controls.target);
@@ -738,8 +1002,8 @@ function frame(dt, t) {
   scene.fog.density = FOG_HAZE / Math.max(dist, FOG_HOLD);
 
   // The orbit center is both what the camera looks at and what it zooms toward.
-  // Framed from outside it belongs up between the pile and the floating chair;
-  // but zooming toward that point just flies into the empty air above the heap.
+  // Framed from outside it belongs up in the air over the heap, where the shot is
+  // centered; but zooming toward that point just flies into that empty air.
   // So as the viewer comes in, walk it down into the body of the pile — the
   // closer they get, the more the pile itself is the subject, and zooming
   // carries them in among the chairs.
@@ -763,7 +1027,7 @@ function frame(dt, t) {
   // demo tried to make. wantDist still tracks the growing pile above, so the
   // breath stays proportional to it, and the focus walk has already read the
   // closer distance — so diving in also tips the view down into the heap.
-  if (demo) {
+  if (demoRunning()) {
     const breath = (Math.sin((t / DEMO_ZOOM_PERIOD) * Math.PI * 2) + 1) / 2;
     const want = wantDist * THREE.MathUtils.lerp(DEMO_ZOOM_NEAR, DEMO_ZOOM_FAR, breath);
     const next = dist + (want - dist) * Math.min(1, dt * 0.8);
@@ -772,7 +1036,7 @@ function frame(dt, t) {
   }
 
   // Never pull them back out of a pile they went in to look at.
-  if (dist < wantDist * EXPLORE_FRACTION) return;
+  if (viewerZoomed) return;
   if (dist < wantDist - 0.02) {
     const next = dist + (wantDist - dist) * Math.min(1, dt * 0.7);
     camera.position.copy(controls.target).addScaledVector(_dir.normalize(), next);
@@ -798,41 +1062,44 @@ function animate() {
   // is about being at rest, NOT about the physics engine putting the body to
   // sleep: at this drop cadence chairs constantly knock each other awake, so a
   // sleep-based test finds almost nothing settled and the pile reads as flat.
-  let measured = frozenTopY;
+  let measuredTop = frozenTopY;
+  let measuredWide = frozenRadius;
+  const limit = strayLimit();
   for (let i = freezeIdx; i < chairs.length; i++) {
     const chair = chairs[i];
     const body = chair.body;
     chair.mesh.position.copy(body.position);
     chair.mesh.quaternion.copy(body.quaternion);
+    chair.mesh.customDepthMaterial.userData.fade.value = shadowFade(chair);
 
     if (!chair.landed) {
       chair.fallTime += dt;
       if (chair.fallTime > MIN_FALL_TIME && atRest(body)) chair.landed = true;
       continue; // still on its way down: not part of the pile yet
     }
-    // Strays that slid off the heap shouldn't push the next chair higher.
-    if (Math.hypot(body.position.x, body.position.z) > PILE_RADIUS) continue;
-    measured = Math.max(measured, body.position.y + CHAIR_MID);
+    // Strays that rolled clear are neither the top of the heap nor the width of
+    // it: one chair skittering away must not haul the framing out after it, nor
+    // widen the drop zone to somewhere no chair has actually settled.
+    const reach = Math.hypot(body.position.x, body.position.z);
+    if (reach > limit) continue;
+    measuredTop = Math.max(measuredTop, body.position.y + CHAIR_MID);
+    measuredWide = Math.max(measuredWide, reach);
   }
 
   // Rise readily, sink reluctantly. If the chair holding the high point topples
   // off the heap the measurement steps down; sinking slowly keeps that from
   // yanking the view, while genuine growth is still followed.
-  const rate = measured > pileTopY ? 1.5 : 0.15;
-  pileTopY += (measured - pileTopY) * Math.min(1, dt * rate);
+  const rate = measuredTop > pileTopY ? 1.5 : 0.15;
+  pileTopY += (measuredTop - pileTopY) * Math.min(1, dt * rate);
+  // Width only ever grows: a heap does not pull itself back in, and frozenRadius
+  // is a floor under this anyway.
+  pileRadius = Math.max(pileRadius, measuredWide);
 
   freezeSettled(); // after the copies above, so a chair freezes at its final transform
 
-  if (floating) {
-    floating.mesh.position.y = floating.baseY + Math.sin(t * 1.1 + floating.phase) * 0.11;
-    floating.mesh.rotateY(floating.spin * dt);
-    const s = floating.mesh.scale.x;
-    if (s < 1) floating.mesh.scale.setScalar(Math.min(1, s + dt * 2.2));
-    // Hands free: let it hang long enough to be seen, then let it go. The next
-    // chair is already on the SPAWN_DELAY_MS timer dropFloating sets, so the
-    // demo settles into a chair every dwell-plus-delay without a timer of its own.
-    if (demo && performance.now() - floating.spawnedAt > DEMO_DWELL_MS) dropFloating();
-  }
+  // Hands free: keep them coming, on the slider's clock.
+  controls.autoRotate = demoRunning();
+  if (demoRunning() && performance.now() - lastDropAt > demoDropMs) dropChair();
 
   frame(dt, t);
 
@@ -848,5 +1115,4 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-spawnFloating();
 animate();

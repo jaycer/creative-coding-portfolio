@@ -31,18 +31,36 @@ const VOICE_CAP = 28;
  * MELLOW is the original: a soft, low strike over partials that ring on for a
  * tenth of a second, which is close to how a tuned skin behaves — hence the
  * bongo in it. SHARP puts the energy in the transient instead: brighter, tighter
- * strike, partials dropped and cut short so the crack lands and gets out of the
- * way, plus a third high partial to break up what is left. The pitch bend has to
- * go with it — the ear reads a fast bend on a short partial as a hard surface.
+ * strike, partials cut short so the crack lands and gets out of the way, plus a
+ * third high partial to break up what is left. The pitch bend goes with it — the
+ * ear reads a fast bend on a short partial as a hard surface.
+ *
+ * The two are matched for loudness, which takes deliberate work in opposite
+ * directions. Nearly all the energy in a knock is in the body, not the strike: a
+ * 20ms noise burst carries almost none however high its peak, while a partial
+ * ringing for a tenth of a second carries a lot. So cutting the partials short
+ * to sharpen it also gutted it — measured, sharp came out around a third of
+ * mellow's energy and a fifth of its peak. The answer is not to let them ring
+ * again, which would only walk back to mellow, but to strike them harder: sharp's
+ * partials start well above mellow's and still die in half the time.
+ *
+ * They have to match, because loudness masquerades as quality — given two
+ * versions of a sound, the louder one is picked nearly every time, whatever else
+ * is true of it. A choice between these two is only a real choice about timbre
+ * if neither wins by being louder.
  */
 const TIMBRES = {
   sharp: {
-    strikeGain: 0.72,
+    strikeGain: 1.12,
     strikeHz: [2600, 3400, 900],  // base + strength + jitter, all times the chair's pitch
     strikeQ: 1.3,
     strikeDecay: [0.008, 0.014],  // base + strength
     bodyHz: [190, 140],           // base + jitter
-    partials: [[1, 0.2, 0.06], [2.7, 0.13, 0.042], [5.1, 0.07, 0.028]],
+    // Struck well past mellow's [0.34, 0.16] and gone in half the time. The
+    // levels only look hot: a bandpass at this Q throws away most of the noise
+    // it is handed, and each partial is most of the way down before the next
+    // frame. Measured at the speakers, this lands level with mellow.
+    partials: [[1, 0.63, 0.06], [2.7, 0.4, 0.042], [5.1, 0.21, 0.028]],
     bend: 0.84,
   },
   mellow: {
