@@ -55,7 +55,7 @@
         font-variant-numeric: tabular-nums;
         opacity: 0.8;
       }
-      .bar .sound {
+      .bar .menu {
         pointer-events: auto;
         color: #fff;
         background: none;
@@ -68,28 +68,146 @@
         cursor: pointer;
         transition: background 0.15s ease;
       }
-      .bar .sound:hover { background: rgba(255,255,255,0.15); }
+      .bar .menu:hover { background: rgba(255,255,255,0.15); }
       @media (max-width: 600px) {
         .back-label { display: none; } /* just the arrow on phones */
       }
+      /* The header carries the only way to reopen the overlay, so it has to
+         outlast the idle fade while the overlay is up. autohide.js appends its
+         rules after this block, so beating `body.idle .bar` takes the extra class. */
+      body.idle.menu-open .bar { opacity: 1; pointer-events: auto; }
 
-      .foot {
+      /* The scrim covers the canvas, so a click that dismisses the overlay is
+         swallowed here instead of reaching the sketch and dropping a chair. */
+      .scrim {
         position: fixed;
-        bottom: 0; left: 0; right: 0;
-        z-index: 10;
+        inset: 0;
+        z-index: 20;
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 10px 18px 16px;
+        padding: 18px;
+        background: rgba(4,6,10,0.55);
+        backdrop-filter: blur(3px);
+        -webkit-backdrop-filter: blur(3px);
+        animation: scrim-in 0.18s ease;
+      }
+      .scrim[hidden] { display: none; }
+
+      .sheet {
+        width: 100%;
+        max-width: 320px;
+        padding: 18px 20px 20px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         color: #fff;
-        background: linear-gradient(0deg, rgba(0,0,0,0.45), rgba(0,0,0,0));
-        pointer-events: none;
-        transition: opacity 0.6s ease;
+        background: rgba(0,0,0,0.6);
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 16px;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        animation: sheet-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.15);
       }
-      .foot .hint { font-size: 0.9rem; font-weight: 500; opacity: 0.7; text-align: center; }
-      body.idle .foot { opacity: 0; }
-      .foot.gone { opacity: 0; }
+      .sheet h2 {
+        margin: 0 0 14px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .sheet .setting {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .sheet .setting + .setting { margin-top: 16px; }
+      .sheet .desc {
+        margin: 8px 0 0;
+        font-size: 0.78rem;
+        line-height: 1.5;
+        opacity: 0.7;
+      }
+      .sheet .desc + .setting { margin-top: 16px; }
+      .sheet input[type="checkbox"] {
+        appearance: none;
+        -webkit-appearance: none;
+        position: relative;
+        width: 38px;
+        height: 22px;
+        margin: 0;
+        flex-shrink: 0;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        background: rgba(255,255,255,0.1);
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+      .sheet input[type="checkbox"]::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        transition: transform 0.2s ease;
+      }
+      .sheet input[type="checkbox"]:checked { background: rgba(255,255,255,0.55); }
+      .sheet input[type="checkbox"]:checked::after { transform: translateX(16px); }
+      .sheet .choice { display: flex; gap: 8px; margin-top: 12px; }
+      .sheet .choice-btn {
+        flex: 1;
+        padding: 7px 10px;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #fff;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid transparent;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease, border-color 0.15s ease;
+      }
+      .sheet .choice-btn:hover { background: rgba(255,255,255,0.14); }
+      .sheet .choice-btn.active { border-color: rgba(255,255,255,0.55); background: rgba(255,255,255,0.12); }
+
+      /* Ruled off above: the settings are things to change, this is only some-
+         thing to know, and the line is what says so without another heading. */
+      .sheet .how-title {
+        margin: 18px 0 0;
+        padding-top: 14px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        opacity: 0.7;
+        border-top: 1px solid rgba(255,255,255,0.18);
+      }
+      .sheet .action {
+        margin-top: 20px;
+        width: 100%;
+        padding: 7px 12px;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #fff;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .sheet .action:hover { background: rgba(255,255,255,0.2); }
+
+      @keyframes scrim-in { from { opacity: 0; } }
+      @keyframes sheet-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+      @media (prefers-reduced-motion: reduce) {
+        .scrim, .sheet { animation: none; }
+      }
+
     </style>
   </head>
   <body>
@@ -97,12 +215,39 @@
       <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
       <h1>Chair Pile</h1>
       <span class="count" id="count">0 chairs</span>
-      <button class="sound" id="sound" type="button" aria-label="Turn sound off" aria-pressed="true">🔊</button>
+      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false">☰</button>
     </header>
 
-    <footer class="foot" id="foot">
-      <span class="hint" id="hint">Tap or press any key to drop the chair. Drag to look around, scroll to zoom into the pile.</span>
-    </footer>
+    <div class="scrim" id="scrim" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <h2 id="sheet-title">Settings</h2>
+
+        <label class="setting">
+          Sound
+          <input type="checkbox" id="sound-toggle" checked />
+        </label>
+        <p class="desc">Wooden knocks as the chairs land, panned to wherever they fall across the view. Whatever they land on answers underneath, quietly, until it is buried too deep to move.</p>
+
+        <div class="choice" id="timbre" role="group" aria-label="Knock">
+          <button class="choice-btn" data-timbre="sharp" type="button" aria-pressed="true">Sharp</button>
+          <button class="choice-btn" data-timbre="mellow" type="button" aria-pressed="false">Mellow</button>
+        </div>
+        <p class="desc">Sharp leads with the crack of the strike. Mellow is the original: lower, and left to ring on. Tap either to hear it.</p>
+
+        <label class="setting">
+          Demo mode
+          <input type="checkbox" id="demo-toggle" />
+        </label>
+        <p class="desc">Drops the chairs on its own and drifts the camera around the pile, diving in among the chairs and back out. Turn it off to take the controls back.</p>
+
+        <div id="how">
+          <p class="how-title">How to play</p>
+          <p class="desc">Tap or press any key to drop the chair. Drag to look around, scroll to zoom into the pile.</p>
+        </div>
+
+        <button class="action" id="done-btn" type="button">Done</button>
+      </div>
+    </div>
 
     <script type="importmap">
       {
