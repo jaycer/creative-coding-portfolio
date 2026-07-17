@@ -18,7 +18,44 @@
 const REVERB_SECONDS = 2.4;
 const REVERB_DECAY = 2.8;   // higher = faster tail
 const WET = 0.3;
-const VOICE_CAP = 18;       // concurrent impacts; a big collapse can ask for more
+// Concurrent impacts. Settled chairs answer when they are bumped, so one chair
+// landing on a crowded heap can ask for a handful of voices at once where it
+// used to ask for one; a big collapse asks for more again.
+const VOICE_CAP = 28;
+
+/**
+ * Two voices for the same physics — same synthesis throughout, only the balance
+ * between the strike and the body moves.
+ *
+ * What reads as "wooden" rather than "drum" is which of the two you hear first.
+ * MELLOW is the original: a soft, low strike over partials that ring on for a
+ * tenth of a second, which is close to how a tuned skin behaves — hence the
+ * bongo in it. SHARP puts the energy in the transient instead: brighter, tighter
+ * strike, partials dropped and cut short so the crack lands and gets out of the
+ * way, plus a third high partial to break up what is left. The pitch bend has to
+ * go with it — the ear reads a fast bend on a short partial as a hard surface.
+ */
+const TIMBRES = {
+  sharp: {
+    strikeGain: 0.72,
+    strikeHz: [2600, 3400, 900],  // base + strength + jitter, all times the chair's pitch
+    strikeQ: 1.3,
+    strikeDecay: [0.008, 0.014],  // base + strength
+    bodyHz: [190, 140],           // base + jitter
+    partials: [[1, 0.2, 0.06], [2.7, 0.13, 0.042], [5.1, 0.07, 0.028]],
+    bend: 0.84,
+  },
+  mellow: {
+    strikeGain: 0.5,
+    strikeHz: [1400, 2200, 700],
+    strikeQ: 0.9,
+    strikeDecay: [0.012, 0.02],
+    bodyHz: [150, 120],
+    partials: [[1, 0.34, 0.13], [2.7, 0.16, 0.085]],
+    bend: 0.88,
+  },
+};
+const DEFAULT_TIMBRE = 'sharp';
 
 let ctx = null;
 let master = null;
@@ -27,6 +64,7 @@ let wetBus = null;
 let muted = false;
 let voices = 0;
 let noiseBuf = null;
+let timbre = DEFAULT_TIMBRE;
 
 /** Cached white noise every transient slices out of. */
 function noise() {
@@ -138,6 +176,16 @@ export function setMuted(next) {
 
 export function isMuted() { return muted; }
 
+/** Takes effect on the next impact; nothing already ringing is disturbed. */
+export function setTimbre(next) {
+  if (TIMBRES[next]) timbre = next;
+}
+
+export function getTimbre() { return timbre; }
+
+/** The names a caller may pass to setTimbre, so the UI need not hardcode them. */
+export function timbreNames() { return Object.keys(TIMBRES); }
+
 function cleanup(nodes, when) {
   const ms = Math.max(0, (when - ctx.currentTime) * 1000) + 120;
   voices++;
@@ -159,6 +207,7 @@ export function clatter(strength, pitch, pan) {
   const t = ctx.currentTime + 0.005;
   const s = Math.min(1, Math.max(0.05, strength));
   const nodes = [];
+  const T = TIMBRES[timbre];
 
   let out = master ? dryBus : null;
   if (!out) return;
@@ -175,15 +224,15 @@ export function clatter(strength, pitch, pan) {
 
   // The strike: a burst of bandpass noise. Harder hits are brighter and ring a
   // touch longer, which is most of what sells one impact as heavier than another.
-  const snapDecay = 0.012 + s * 0.02;
+  const snapDecay = T.strikeDecay[0] + s * T.strikeDecay[1];
   const snap = noise();
   const bp = ctx.createBiquadFilter();
   bp.type = 'bandpass';
-  bp.frequency.value = (1400 + s * 2200 + Math.random() * 700) * pitch;
-  bp.Q.value = 0.9;
+  bp.frequency.value = (T.strikeHz[0] + s * T.strikeHz[1] + Math.random() * T.strikeHz[2]) * pitch;
+  bp.Q.value = T.strikeQ;
   const g = ctx.createGain();
   g.gain.setValueAtTime(0.0001, t);
-  g.gain.exponentialRampToValueAtTime(0.5 * s, t + 0.001);
+  g.gain.exponentialRampToValueAtTime(T.strikeGain * s, t + 0.001);
   g.gain.exponentialRampToValueAtTime(0.0001, t + snapDecay);
   snap.connect(bp); bp.connect(g); g.connect(out);
   snap.start(t); snap.stop(t + snapDecay + 0.02);
@@ -192,14 +241,14 @@ export function clatter(strength, pitch, pan) {
   // The body: two inharmonic partials. The 2.7 ratio is deliberately not a
   // musical interval — whole-number ratios would ring like a bell or a pipe,
   // where a struck wooden frame is atonal.
-  const f0 = (150 + Math.random() * 120) * pitch;
-  for (const [mult, level, decay] of [[1, 0.34, 0.13], [2.7, 0.16, 0.085]]) {
+  const f0 = (T.bodyHz[0] + Math.random() * T.bodyHz[1]) * pitch;
+  for (const [mult, level, decay] of T.partials) {
     const o = ctx.createOscillator();
     o.type = 'sine';
     o.frequency.setValueAtTime(f0 * mult, t);
     // A slight downward bend is what a struck object does as the strike energy
     // leaves it; without it the partials sound synthetic.
-    o.frequency.exponentialRampToValueAtTime(f0 * mult * 0.88, t + decay);
+    o.frequency.exponentialRampToValueAtTime(f0 * mult * T.bend, t + decay);
     const og = ctx.createGain();
     const peak = Math.max(0.0002, level * s);
     og.gain.setValueAtTime(0.0001, t);

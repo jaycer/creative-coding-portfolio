@@ -9,27 +9,52 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
-import { initAudio, resumeAudio, clatter, setMuted, isMuted } from './audio.js';
+import { initAudio, resumeAudio, clatter, setMuted, isMuted, setTimbre, getTimbre } from './audio.js';
 
 const SPAWN_DELAY_MS = 2000;   // gap between a chair landing and the next appearing
 const FREEZE_BEHIND = 25;      // chairs this far down the pile turn to static bedrock
 const PILE_RADIUS = 1.3;       // chairs beyond this from the drop column are strays
-const SPAWN_GAP = 1.7;         // how far above the pile the next chair floats
-const MIN_SPAWN_Y = 2.4;       // floating height over an empty floor
+// Both scaled together, so a chair falls the same way onto a tall pile as onto
+// an empty floor. The gap is what gets scaled, not the height above the floor:
+// the chair floats over the pile, so scaling its absolute height would stretch
+// the fall further the taller the heap got, and a drop that grows without bound
+// would end up scattering the pile it is supposed to be building.
+const SPAWN_GAP = 2.55;        // how far above the pile the next chair floats
+const MIN_SPAWN_Y = 3.6;       // floating height over an empty floor
 const REST_SPEED = 0.4;        // m/s under which a chair counts as come to rest
 const MIN_FALL_TIME = 0.4;     // s of falling before a chair can be called landed
 const HIT_MIN_SPEED = 0.7;     // m/s of impact under which a contact makes no sound
 const HIT_COOLDOWN_MS = 70;    // one chair can only speak this often
 const HIT_LOUD_SPEED = 5;      // impact speed that counts as a full-strength bang
+const BUMP_LEVEL = 0.32;       // how loudly a chair already at rest answers when knocked
 
 // Framing. The view is centered at spanTop * FOCUS_BIAS and reaches
 // spanTop * 0.5 * FRAME_MARGIN above that, so the top edge lands at
 // spanTop * (FOCUS_BIAS + 0.5 * FRAME_MARGIN). That has to clear 1.0 or the
 // floating chair hangs off the top of the screen — at 0.45 the margin must
-// exceed 1.1, so 1.2 leaves about 5% of headroom above the chair.
+// exceed 1.1.
+//
+// It needs to clear it by more than it looks, though, so the nominal 1.1 is not
+// the number to sail close to. That arithmetic measures the frame where the
+// camera is pointed, but the floating chair is the one thing above the view
+// axis: it sits nearer than the target plane, where the frame is narrower than
+// the half-extent used here, and the error runs to about 5% at the angle the
+// camera keeps. The chair also bobs, spawns off-center, and lands on a random
+// tilt that reaches further above its origin than its own half-height does. Each
+// is small; together they cost more than the 5% that a margin of 1.2 left over.
 const FOCUS_BIAS = 0.45;       // <0.5 sits the view low, giving the pile the frame
-const FRAME_MARGIN = 1.2;
+const FRAME_MARGIN = 1.35;
 const EXPLORE_FRACTION = 0.8;  // closer than this share of the fit = exploring, so stop framing
+
+// Demo mode. The camera orbits on its own and breathes in and out on a slow
+// sine, while chairs drop themselves. The zoom is expressed as a share of the
+// framing distance rather than in meters, so it keeps its composition as the
+// pile grows and the fit distance climbs with it.
+const DEMO_DWELL_MS = 1500;    // how long a chair is left floating before demo drops it
+const DEMO_ORBIT_SPEED = 0.55; // OrbitControls units: about one lap every two minutes
+const DEMO_ZOOM_PERIOD = 26;   // seconds for one full breath in and back out
+const DEMO_ZOOM_NEAR = 0.4;    // closest approach, as a share of the framing distance
+const DEMO_ZOOM_FAR = 0.98;    // and the far end of the breath, just inside the fit
 
 /** Barely moving — resting or being jostled, as opposed to falling. */
 function atRest(body) {
@@ -104,9 +129,19 @@ function addChairShapes(body) {
 // transition over a wide band of screen rather than compressing it into an edge.
 const VOID = 0x070b14;
 
+// Fog is the one thing here measured from the camera rather than from the world,
+// so a fixed density reads as a bubble of visibility that travels with the
+// viewer — and the pile grows without bound while the framing pulls back to keep
+// up, so ANY fixed density eventually swallows it whole. Instead, hold the haze
+// on the pile constant and let the density fall as the camera retreats: at the
+// framing distance the pile always sits at the same slight remove, while the
+// floor's true horizon is always far enough beyond it to still dissolve.
+// density = FOG_HAZE / dist puts fog(dist) = 1 - exp(-FOG_HAZE^2), about 15%.
+const FOG_HAZE = 0.4;
+const FOG_HOLD = 8; // stop thickening inside this: zoomed among the chairs, fog must not close in
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(VOID);
-scene.fog = new THREE.FogExp2(VOID, 0.055);
+scene.fog = new THREE.FogExp2(VOID, FOG_HAZE / FOG_HOLD);
 
 // A near plane this close lets the camera push right through a chair without the
 // surfaces clipping out early — see the zoom-through note on controls.minDistance.
@@ -133,28 +168,84 @@ controls.target.set(0, 1.2, 0);
 controls.minDistance = 0.05;
 controls.maxDistance = 60; // headroom for auto-framing to pull back from a tall pile
 controls.maxPolarAngle = Math.PI / 2 - 0.04; // stay above the floor
+// Demo mode's orbit. Off until asked for; controls.update() already runs every
+// frame, which is all autoRotate needs, and dragging still overrides it.
+controls.autoRotate = false;
+controls.autoRotateSpeed = DEMO_ORBIT_SPEED;
 
 // Lit from above, softly: a wide key light plus cool sky bounce, no hard sun.
 scene.add(new THREE.AmbientLight(0x9fb4c8, 0.22));
 scene.add(new THREE.HemisphereLight(0x9fb4c8, 0x15171d, 0.5));
 
-const key = new THREE.DirectionalLight(0xfff1dd, 1.7);
-key.position.set(3.5, 11, 4);
+// A directional light is nothing but a direction — position only aims it and
+// places its shadow camera. So this is the whole of the light's character, set
+// once and never touched again: what makes a source read as fixed in the world
+// is that orbiting past it changes which face is lit, and that only holds if the
+// direction is constant. It has to ride up with the pile to keep the heap inside
+// its shadow frustum, which aimKey does by moving the light and its target
+// together, as one rigid pair.
+// 35 degrees up, and about 90 degrees around from where the camera starts. Both
+// halves matter: the low angle is what gives every chair a bright side and a
+// dark one, but a low light sitting behind the viewer would only flatten the
+// pile from the front and hide its own shadows behind it. Off to one side, the
+// shadows rake across the floor where they can be seen.
+const KEY_DIR = new THREE.Vector3(10, 8.5, -7).normalize(); // pile toward light
+const KEY_STANDOFF = 22; // how far back it rides, on top of the pile's own height
+
+// Brighter than the old overhead key at the same exposure. Light this low strikes
+// the seats and the floor at a glance, and the cosine falloff costs those faces
+// about a third of what a steeper light gave them; the vertical faces more than
+// make it back, which is the whole point, but the flat ones need the make-up.
+const key = new THREE.DirectionalLight(0xfff1dd, 2.4);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
-key.shadow.camera.left = -8;
-key.shadow.camera.right = 8;
-key.shadow.camera.top = 8;
-key.shadow.camera.bottom = -8;
 key.shadow.camera.near = 0.5;
-key.shadow.camera.far = 90; // the light rises with the pile; keep the floor inside it
 key.shadow.bias = -0.0012;
 key.shadow.normalBias = 0.02;
 scene.add(key);
 scene.add(key.target);
 
-const fill = new THREE.DirectionalLight(0x8fa6c4, 0.22);
-fill.position.set(-6, 4, -5);
+let shadowSpan = -1;
+
+/**
+ * Ride the light up with the pile without ever turning it. Both ends move by the
+ * same vector, so the direction survives untouched however tall the heap gets —
+ * moving them by different amounts is what quietly tips a side light into an
+ * overhead one, and an overhead light lands the same on every face, so orbiting
+ * it reveals nothing and the source seems to travel with the viewer.
+ */
+function aimKey() {
+  key.target.position.set(0, pileTopY * 0.5, 0);
+  key.target.updateMatrixWorld();
+  key.position.copy(key.target.position).addScaledVector(KEY_DIR, KEY_STANDOFF + pileTopY);
+
+  // The frustum has to grow with the heap, and faster than the heap does. A
+  // light held at 35 degrees rakes a shadow about 1.4x the pile's height across
+  // the floor, and the box has to hold the receiving floor as well as the chairs
+  // casting onto it: the shadow map is only sampled inside it, so a floor that
+  // falls outside simply comes back lit and the shadow ends in a straight line.
+  // The cost is resolution — the same 2048 map stretched over a wider box — but
+  // a pile tall enough to notice it is a long way from the camera by then.
+  const span = 10 + pileTopY * 1.1;
+  if (Math.abs(span - shadowSpan) > 0.25) { // resizing every frame rebuilds the matrix for nothing
+    shadowSpan = span;
+    const cam = key.shadow.camera;
+    cam.left = -span;
+    cam.right = span;
+    cam.top = span;
+    cam.bottom = -span;
+    cam.far = KEY_STANDOFF + pileTopY + span * 2;
+    cam.updateProjectionMatrix();
+  }
+}
+
+// Swung round to sit opposite the key, and left low and weak. A key this low
+// leaves a genuinely dark side, which is the point — but with nothing coming the
+// other way it goes to flat black and takes the shape of the chair with it. Cool
+// against the key's warmth, and far too dim to compete: it says how deep the
+// shadow is, not where the light comes from. Casts nothing, as before.
+const fill = new THREE.DirectionalLight(0x8fa6c4, 0.3);
+fill.position.set(-9, 4.5, 6);
 scene.add(fill);
 
 // A soft pool of light on the patch of floor the pile grows on. decay=0 keeps it
@@ -217,11 +308,12 @@ function makeFloorTexture() {
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  // ~10 units per tile. Tiles any larger than this and the patch of floor around
-  // the pile is less than one tile wide, so the mottling flattens into a plain
-  // gradient and reads as no texture at all. Here the coarsest octave lands
-  // around 3 units — several chairs across, large but legible.
-  texture.repeat.set(16, 16);
+  // ~10 units per tile, matching the floor's own size: 60 tiles over 600 units.
+  // Tiles any larger than this and the patch of floor around the pile is less
+  // than one tile wide, so the mottling flattens into a plain gradient and reads
+  // as no texture at all. Here the coarsest octave lands around 3 units —
+  // several chairs across, large but legible.
+  texture.repeat.set(60, 60);
   // Enough to keep the mottling from smearing at grazing angles near the
   // horizon; the full 16x costs real sampling time on a floor this big for no
   // visible gain on texture this soft.
@@ -230,8 +322,12 @@ function makeFloorTexture() {
 }
 
 const floorTexture = makeFloorTexture();
+// Two triangles, so the size is free — and it has to outrun the fog. The haze
+// thins as the camera pulls back, which reaches further out into the floor, and
+// a plane that ends inside the visible range shows its edge as a hard line
+// against the void. This one always ends well past where the fog has closed.
 const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(160, 160),
+  new THREE.PlaneGeometry(600, 600),
   new THREE.MeshStandardMaterial({
     color: 0x5a636e, // cooler, bluer gray
     roughness: 0.94,
@@ -273,17 +369,21 @@ let frozenTopY = 0;    // tallest frozen chair — fixed forever, so measured on
 let dropped = 0;
 
 const countEl = document.getElementById('count');
-const footEl = document.getElementById('foot');
 
 const _pan = new THREE.Vector3();
 
+/** Frozen chairs are bedrock: welded in place, with their velocity zeroed. */
+function isFrozen(chair) {
+  return chair.body.type === CANNON.Body.STATIC;
+}
+
 /** Turn a physics contact into a knock, if it's worth hearing. */
 function onCollide(chair, event) {
-  const other = event.body;
-  // Both chairs in a chair-on-chair hit get told about it, so let the lower id
-  // own the pair or every impact speaks twice. The floor has no listener, so
-  // chair-on-floor needs no such tie-break.
-  if (other.isChair && other.id < chair.body.id) return;
+  // Bedrock has no rattle left in it — it cannot move, so there is nothing there
+  // to hear. It also puts a ceiling on the racket: every chair ever dropped
+  // stays in the world and stays able to answer, so without this the deeper the
+  // pile got the louder every landing would be, forever.
+  if (isFrozen(chair)) return;
 
   const speed = Math.abs(event.contact.getImpactVelocityAlongNormal());
   if (speed < HIT_MIN_SPEED) return; // a nudge, not a knock
@@ -295,12 +395,28 @@ function onCollide(chair, event) {
   if (now - chair.lastHitAt < HIT_COOLDOWN_MS) return;
   chair.lastHitAt = now;
 
+  // Both chairs in a chair-on-chair hit are told about it, and both now answer.
+  //
+  // They didn't before, and which one was speaking was backwards: the tie-break
+  // gave the pair to the lower id, and the lower id is always the older chair —
+  // so what sounded on every landing was the chair already lying in the pile, at
+  // full strength, while the chair that actually fell was silenced. A landing was
+  // four or five settled chairs shouting at once, each at its own pitch, and no
+  // voice for the impact itself. That chord is where the mush came from.
+  //
+  // So keep both voices and let the fall decide the level. The arriving chair is
+  // still falling when it strikes, so it makes the knock; the chairs it lands on
+  // have come to rest, so they answer under it — quietly, each in its own voice,
+  // from its own place in the stereo field. Same count of voices, one of them now
+  // in front.
+  const level = chair.landed ? BUMP_LEVEL : 1;
+
   // Pan by where the chair sits across the current view rather than in world
   // space: the camera orbits, so world x has nothing to do with left and right.
   _pan.copy(chair.body.position);
   camera.worldToLocal(_pan);
   clatter(
-    speed / HIT_LOUD_SPEED,
+    (speed / HIT_LOUD_SPEED) * level,
     chair.pitch,
     THREE.MathUtils.clamp(_pan.x / 3, -1, 1) * 0.7
   );
@@ -333,10 +449,20 @@ function makeChair() {
   return chair;
 }
 
+/**
+ * How high the next chair floats. The framing reads this too, rather than
+ * re-deriving it from SPAWN_GAP alone: over a low pile the MIN_SPAWN_Y floor is
+ * what actually decides the height, and a shot fitted to the gap instead would
+ * be fitted to somewhere below the chair and crop it off the top.
+ */
+function spawnHeight() {
+  return Math.max(pileTopY + SPAWN_GAP, MIN_SPAWN_Y);
+}
+
 function spawnFloating() {
   const chair = makeChair();
   // Just high enough to read as floating: a longer fall only scatters the pile.
-  const spawnY = Math.max(pileTopY + SPAWN_GAP, MIN_SPAWN_Y);
+  const spawnY = spawnHeight();
   chair.mesh.position.set((Math.random() - 0.5) * 0.36, spawnY, (Math.random() - 0.5) * 0.36);
   chair.mesh.rotation.set(
     (Math.random() - 0.5) * 1.0,
@@ -346,6 +472,7 @@ function spawnFloating() {
   chair.baseY = spawnY;
   chair.phase = Math.random() * Math.PI * 2;
   chair.spin = (Math.random() - 0.5) * 0.5;
+  chair.spawnedAt = performance.now(); // demo mode waits a beat from here before dropping it
   chair.mesh.scale.setScalar(0.01); // pops in over the first moments
   floating = chair;
 }
@@ -370,7 +497,6 @@ function dropFloating() {
 
   dropped += 1;
   countEl.textContent = dropped === 1 ? '1 chair' : `${dropped} chairs`;
-  if (dropped === 3) footEl.classList.add('gone'); // hint has done its job
 
   setTimeout(spawnFloating, SPAWN_DELAY_MS);
 }
@@ -428,6 +554,10 @@ renderer.domElement.addEventListener('pointercancel', (e) => downs.delete(e.poin
 window.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === 'Tab') return;                                  // leave keyboard nav alone
+  if (menuOpen) {
+    if (e.key === 'Escape') closeMenu({ toButton: true });
+    return; // no chair drops while the settings are up, whatever is focused
+  }
   if (e.target.closest && e.target.closest('a, button')) return; // let the Gallery link work
   initAudio();
   dropFloating();
@@ -438,20 +568,136 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) resumeAudio();
 });
 
-const soundBtn = document.getElementById('sound');
-soundBtn.addEventListener('click', (e) => {
-  setMuted(!isMuted());
-  soundBtn.textContent = isMuted() ? '🔇' : '🔊';
-  soundBtn.setAttribute('aria-label', isMuted() ? 'Turn sound on' : 'Turn sound off');
-  soundBtn.setAttribute('aria-pressed', String(!isMuted()));
-  initAudio(); // this click is itself a gesture, so it can start the context too
+// ---------------------------------------------------------------- settings
+// The hamburger opens a centered overlay. Its scrim covers the canvas, so the
+// click that dismisses it is swallowed there rather than dropping a chair, and
+// the keydown handler above stands down for as long as the overlay is up.
+const menuBtn = document.getElementById('menu-btn');
+const scrim = document.getElementById('scrim');
+const soundToggle = document.getElementById('sound-toggle');
+const demoToggle = document.getElementById('demo-toggle');
+const doneBtn = document.getElementById('done-btn');
+const howEl = document.getElementById('how');
+const timbreEl = document.getElementById('timbre');
 
-  // A mouse click leaves the button focused, and every later keypress would go
-  // to it: "press any key" would stop dropping chairs and the spacebar would
-  // silently toggle the sound instead. Hand focus back to the page. Keyboard
-  // activation (detail === 0) keeps it — a keyboard user must not lose their place.
-  if (e.detail > 0) soundBtn.blur();
+let menuOpen = false;
+let openedFromButton = false;
+let demo = false;
+
+// Whether this browser has met the piece before. The how-to lives in the overlay
+// now, so a first-time visitor is shown it unasked — there is nothing else on
+// screen that would tell them the chair is waiting on a tap.
+const SEEN_KEY = 'chair-pile-seen';
+const TIMBRE_KEY = 'chair-pile-timbre'; // which knock they settled on, kept for next time
+
+function seenBefore() {
+  // Storage is off entirely in some privacy modes, and reading it throws rather
+  // than returning null. Treat that as a first visit: showing the how-to twice
+  // is a smaller failure than never showing it, and than a dead sketch.
+  try { return !!localStorage.getItem(SEEN_KEY); } catch { return false; }
+}
+
+function markSeen() {
+  try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* private mode: greet them again */ }
+}
+
+/**
+ * fromButton says a real click opened this, which decides two things: whether
+ * the audio context may be created (it may only be built inside a genuine
+ * gesture, and the greeting on load is not one), and where focus goes on the way
+ * back out.
+ */
+function openMenu({ fromButton }) {
+  menuOpen = true;
+  openedFromButton = fromButton;
+  scrim.hidden = false;
+  document.body.classList.add('menu-open'); // hold the header against the idle fade
+  menuBtn.setAttribute('aria-expanded', 'true');
+  if (fromButton) initAudio();
+}
+
+/**
+ * Close, and put focus somewhere the page still works from. A mouse click
+ * leaves its control focused, and the keydown handler ignores keys aimed at a
+ * button — so "press any key" would quietly stop dropping chairs. Blur for the
+ * pointer, hand it back to the hamburger for the keyboard, where losing your
+ * place is worse than losing a keystroke.
+ *
+ * Only ever back to the hamburger, though, if that is where they came from. The
+ * greeting on load came from nowhere: parking focus on a button they never
+ * pressed would leave the keyboard aimed at the menu, and every key they then
+ * pressed to drop a chair would go to it instead and do nothing.
+ */
+function closeMenu({ toButton }) {
+  menuOpen = false;
+  scrim.hidden = true;
+  document.body.classList.remove('menu-open');
+  menuBtn.setAttribute('aria-expanded', 'false');
+  if (toButton && openedFromButton) menuBtn.focus();
+  else if (document.activeElement) document.activeElement.blur();
+}
+
+menuBtn.addEventListener('click', (e) => {
+  // detail 0 is a keyboard activation: only then does focus belong on the
+  // button afterwards. A mouse click that lands there wants it back on the page.
+  if (menuOpen) closeMenu({ toButton: e.detail === 0 });
+  else openMenu({ fromButton: true });
 });
+
+// Only the scrim itself: a click that lands on the overlay is not a dismissal.
+scrim.addEventListener('click', (e) => {
+  if (e.target === scrim) closeMenu({ toButton: false });
+});
+
+doneBtn.addEventListener('click', (e) => closeMenu({ toButton: e.detail === 0 }));
+
+soundToggle.checked = !isMuted();
+soundToggle.addEventListener('change', () => {
+  setMuted(!soundToggle.checked);
+  initAudio(); // the click behind this change is a gesture too
+});
+
+demoToggle.addEventListener('change', () => {
+  demo = demoToggle.checked;
+  controls.autoRotate = demo;
+  howEl.hidden = demo; // nothing to tell them to do while it plays itself
+  initAudio(); // demo drops chairs with nothing else to unlock the audio
+});
+
+/** Light the chosen knock and dim the other. */
+function paintTimbre() {
+  for (const btn of timbreEl.querySelectorAll('.choice-btn')) {
+    const on = btn.dataset.timbre === getTimbre();
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', String(on));
+  }
+}
+
+// setTimbre ignores a name it does not know, so a stale or hand-edited value
+// here leaves the default standing rather than breaking the sound.
+try {
+  const saved = localStorage.getItem(TIMBRE_KEY);
+  if (saved) setTimbre(saved);
+} catch { /* storage off: the default stands */ }
+paintTimbre();
+
+timbreEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.choice-btn');
+  if (!btn) return;
+  setTimbre(btn.dataset.timbre);
+  try { localStorage.setItem(TIMBRE_KEY, getTimbre()); } catch { /* nothing to do */ }
+  paintTimbre();
+  initAudio(); // a click is a gesture, which is the only way the preview can sound
+  clatter(0.85, 1, 0); // hear the choice now, rather than waiting for a chair to land
+});
+
+// Say hello, once ever. Marked on the way in rather than on the way out: someone
+// who has read it and wandered off has been greeted, and reloading should not
+// greet them again.
+if (!seenBefore()) {
+  markSeen();
+  openMenu({ fromButton: false });
+}
 
 // --------------------------------------------------------------------- loop
 const clock = new THREE.Clock();
@@ -470,8 +716,11 @@ const _dir = new THREE.Vector3();
  * the next chair to land would grow the pile, widen the fit, and quietly drag
  * them back out of the pile they were exploring.
  */
-function frame(dt) {
-  const spanTop = pileTopY + SPAWN_GAP + 0.6; // floor up to the top of the floating chair
+function frame(dt, t) {
+  // Floor up to the top of the floating chair: its own height above its origin,
+  // plus the bob. Measured from where the chair really is, so the low-pile case
+  // where MIN_SPAWN_Y holds it up stays in shot.
+  const spanTop = spawnHeight() + CHAIR_MID + 0.11;
   if (pileTopY > framedTop + 0.05) {
     framedTop = pileTopY;
     const vFov = THREE.MathUtils.degToRad(camera.fov);
@@ -481,6 +730,12 @@ function frame(dt) {
 
   _dir.subVectors(camera.position, controls.target);
   const dist = _dir.length();
+
+  // Thin the haze as the camera retreats, so the pile keeps the same slight
+  // remove at any zoom instead of dissolving into the void. Held below FOG_HOLD:
+  // zoomed in among the chairs the orbit distance goes to almost nothing, and
+  // dividing by it would pack the whole pile into solid fog.
+  scene.fog.density = FOG_HAZE / Math.max(dist, FOG_HOLD);
 
   // The orbit center is both what the camera looks at and what it zooms toward.
   // Framed from outside it belongs up between the pile and the floating chair;
@@ -501,6 +756,20 @@ function frame(dt) {
   camFocusY += delta;
   camera.position.y += delta;
   controls.target.y += delta;
+
+  // In demo mode the breath owns the distance. It has to run instead of the
+  // framing below rather than alongside it: that code exists to pull the camera
+  // back out to the fit, which is exactly what it would do to every zoom the
+  // demo tried to make. wantDist still tracks the growing pile above, so the
+  // breath stays proportional to it, and the focus walk has already read the
+  // closer distance — so diving in also tips the view down into the heap.
+  if (demo) {
+    const breath = (Math.sin((t / DEMO_ZOOM_PERIOD) * Math.PI * 2) + 1) / 2;
+    const want = wantDist * THREE.MathUtils.lerp(DEMO_ZOOM_NEAR, DEMO_ZOOM_FAR, breath);
+    const next = dist + (want - dist) * Math.min(1, dt * 0.8);
+    camera.position.copy(controls.target).addScaledVector(_dir.normalize(), next);
+    return;
+  }
 
   // Never pull them back out of a pile they went in to look at.
   if (dist < wantDist * EXPLORE_FRACTION) return;
@@ -559,13 +828,15 @@ function animate() {
     floating.mesh.rotateY(floating.spin * dt);
     const s = floating.mesh.scale.x;
     if (s < 1) floating.mesh.scale.setScalar(Math.min(1, s + dt * 2.2));
+    // Hands free: let it hang long enough to be seen, then let it go. The next
+    // chair is already on the SPAWN_DELAY_MS timer dropFloating sets, so the
+    // demo settles into a chair every dwell-plus-delay without a timer of its own.
+    if (demo && performance.now() - floating.spawnedAt > DEMO_DWELL_MS) dropFloating();
   }
 
-  frame(dt);
+  frame(dt, t);
 
-  key.position.y = 11 + pileTopY;
-  key.target.position.y = pileTopY * 0.5;
-  key.target.updateMatrixWorld();
+  aimKey();
 
   controls.update();
   renderer.render(scene, camera);
