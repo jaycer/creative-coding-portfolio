@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="2.4"/>
+    </filter>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="#14151a"/>
+  <g filter="url(#soft)" opacity="0.85">
+    <circle cx="13" cy="13" r="6" fill="#ff4d7e"/>
+    <circle cx="20.5" cy="15" r="6" fill="#4dd0ff"/>
+    <circle cx="16" cy="21" r="6" fill="#7a5bff"/>
+  </g>
+</svg>
