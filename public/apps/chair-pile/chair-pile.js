@@ -136,29 +136,51 @@ function atRest(body) {
 // Both the mesh and the physics compound are generated from this one list.
 const SEAT_W = 0.46, SEAT_D = 0.44, SEAT_T = 0.05, SEAT_Y = 0.44;
 const LEG = 0.05, LEG_H = 0.44;
-const LEG_X = SEAT_W / 2 - LEG / 2;
-const LEG_Z = SEAT_D / 2 - LEG / 2;
 const BACK_H = 0.55;
+
+// Every joint here was once a butt joint — the leg's top face at exactly 0.44
+// against the seat's underside at exactly 0.44, and so on. Coplanar faces have
+// equal depth, so which one a pixel gets is down to float rounding, and at the
+// top of every leg a lit square fought the seat's dark underside and won often
+// enough to read as light in the wrong place.
+//
+// What matters is not that two faces are coplanar but that they SHADE
+// differently. The pairs that showed were always a face pointing up against one
+// pointing down — opposite normals, so one was lit and one was not, and the
+// fight was the difference between them. Two flush outer faces share a normal,
+// a material and a depth, so whichever wins draws the same pixel and nothing is
+// visible at all. Only opposed normals need keeping apart.
+//
+// So every part is flush with its neighbors on the outside, and is separated
+// only along the axis it joins on: each pushes a JOIN inside the next, which
+// puts the end faces — the ones that point the wrong way — inside solid
+// geometry where they cannot be seen. No part is inset, and no seam is drawn.
+const JOIN = 0.004;
+const LEG_X = SEAT_W / 2 - LEG / 2; // flush with the seat's sides
+const LEG_Z = SEAT_D / 2 - LEG / 2;
+const CHAIR_H = SEAT_Y + SEAT_T + BACK_H; // the silhouette the rail's top sets
 
 const CHAIR_PARTS = [
   // seat
   { size: [SEAT_W, SEAT_T, SEAT_D], pos: [0, SEAT_Y + SEAT_T / 2, 0] },
-  // legs
-  { size: [LEG, LEG_H, LEG], pos: [ LEG_X, LEG_H / 2,  LEG_Z] },
-  { size: [LEG, LEG_H, LEG], pos: [-LEG_X, LEG_H / 2,  LEG_Z] },
-  { size: [LEG, LEG_H, LEG], pos: [ LEG_X, LEG_H / 2, -LEG_Z] },
-  { size: [LEG, LEG_H, LEG], pos: [-LEG_X, LEG_H / 2, -LEG_Z] },
-  // back posts
-  { size: [LEG, BACK_H, LEG], pos: [ LEG_X, SEAT_Y + SEAT_T + BACK_H / 2, -LEG_Z] },
-  { size: [LEG, BACK_H, LEG], pos: [-LEG_X, SEAT_Y + SEAT_T + BACK_H / 2, -LEG_Z] },
-  // back slats, with gaps for legs to catch in
-  { size: [SEAT_W - LEG * 2, 0.07, 0.035], pos: [0, 0.66, -LEG_Z] },
-  { size: [SEAT_W - LEG * 2, 0.07, 0.035], pos: [0, 0.80, -LEG_Z] },
-  // top rail
-  { size: [SEAT_W, 0.07, LEG], pos: [0, SEAT_Y + SEAT_T + BACK_H - 0.035, -LEG_Z] },
+  // front legs, standing on the floor and running up inside the seat
+  { size: [LEG, LEG_H + JOIN, LEG], pos: [ LEG_X, (LEG_H + JOIN) / 2, LEG_Z] },
+  { size: [LEG, LEG_H + JOIN, LEG], pos: [-LEG_X, (LEG_H + JOIN) / 2, LEG_Z] },
+  // Back stiles: floor to top rail in one piece, passing through the seat on
+  // the way. The back leg and the post above it used to be two boxes meeting at
+  // the seat, which is a joint a chair does not have — the rear leg and the
+  // back upright are one length of timber. Made whole, there is nothing left to
+  // fight there and one less part to carry.
+  { size: [LEG, CHAIR_H - JOIN, LEG], pos: [ LEG_X, (CHAIR_H - JOIN) / 2, -LEG_Z] },
+  { size: [LEG, CHAIR_H - JOIN, LEG], pos: [-LEG_X, (CHAIR_H - JOIN) / 2, -LEG_Z] },
+  // back slats, with gaps for legs to catch in; ends buried in the stiles
+  { size: [SEAT_W - LEG * 2 + JOIN * 2, 0.07, LEG], pos: [0, 0.66, -LEG_Z] },
+  { size: [SEAT_W - LEG * 2 + JOIN * 2, 0.07, LEG], pos: [0, 0.80, -LEG_Z] },
+  // top rail, flush all round, swallowing the tops of the stiles
+  { size: [SEAT_W, 0.07, LEG], pos: [0, CHAIR_H - 0.035, -LEG_Z] },
 ];
 
-const CHAIR_TOP = SEAT_Y + SEAT_T + BACK_H;
+const CHAIR_TOP = CHAIR_H; // the parts list above needed this before it could be named
 const CHAIR_MID = CHAIR_TOP / 2; // shift parts down by this so the body origin sits mid-chair
 
 const PALETTE = [
@@ -182,10 +204,24 @@ function buildChairGeometry() {
   return mergeGeometries(boxes);
 }
 
+// Colliders are this much bigger than the chair you can see, all round.
+//
+// A contact in cannon settles with the two bodies slightly inside each other —
+// measured, about 2mm here. Where two boxes overlap, their surfaces cross, and
+// the crossing is a crisp polygon shaded quite differently from the face it cuts
+// through: a hard little wedge of one chair showing inside another. Padding the
+// collider spends that overlap on empty space instead. The physics still sinks
+// 2mm into the padding, and the wood stops just short of touching, which at this
+// size reads as contact and cannot produce an intersection to light.
+const COLLIDER_SKIN = 0.003;
+
 /** The matching compound collider: one cannon Box per visible box. */
 function addChairShapes(body) {
   for (const part of CHAIR_PARTS) {
-    const half = new CANNON.Vec3(part.size[0] / 2, part.size[1] / 2, part.size[2] / 2);
+    const half = new CANNON.Vec3(
+      part.size[0] / 2 + COLLIDER_SKIN,
+      part.size[1] / 2 + COLLIDER_SKIN,
+      part.size[2] / 2 + COLLIDER_SKIN);
     const offset = new CANNON.Vec3(part.pos[0], part.pos[1] - CHAIR_MID, part.pos[2]);
     body.addShape(new CANNON.Box(half), offset);
   }
