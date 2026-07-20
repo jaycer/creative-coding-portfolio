@@ -861,6 +861,13 @@ function closeMenu({ toButton }) {
   scrim.hidden = true;
   document.body.classList.remove('menu-open');
   menuBtn.setAttribute('aria-expanded', 'false');
+  // Every way out of here is a real gesture — a click on the scrim, Close, the
+  // close cross or the hamburger, or Escape — so this is the earliest the
+  // context may legally be built. It has to happen here now that demo ships on:
+  // the greeting is the only thing holding the chairs back, so the first one
+  // lands moments after this returns, and nothing else would have unlocked the
+  // audio in time for it to be heard.
+  initAudio();
   if (toButton && openedFromButton) menuBtn.focus();
   else if (document.activeElement) document.activeElement.blur();
 }
@@ -887,10 +894,17 @@ soundToggle.addEventListener('change', () => {
   initAudio(); // the click behind this change is a gesture too
 });
 
-demoToggle.addEventListener('change', () => {
+// The checkbox is the source of truth, markup included — syncing off it rather
+// than assigning a default here means the shipped setting lives in one place.
+function syncDemo() {
   demo = demoToggle.checked;
   howEl.hidden = demo;   // nothing to tell them to do while it plays itself
   rateEl.hidden = !demo; // and nothing for the rate to mean while it is off
+}
+syncDemo(); // ships on: the piece should be playing before anyone touches it
+
+demoToggle.addEventListener('change', () => {
+  syncDemo();
   initAudio(); // demo drops chairs with nothing else to unlock the audio
 });
 

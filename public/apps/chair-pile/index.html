@@ -285,11 +285,11 @@
 
         <label class="setting">
           Demo mode
-          <input type="checkbox" id="demo-toggle" />
+          <input type="checkbox" id="demo-toggle" checked />
         </label>
         <p class="desc">Drops the chairs on its own and drifts the camera around the pile, diving in among the chairs and back out. Turn it off to take the controls back.</p>
 
-        <div id="rate" hidden>
+        <div id="rate">
           <label class="slider-label" for="spawn">
             Drop every
             <span class="val" id="spawn-val">2.0s</span>
@@ -298,12 +298,12 @@
           <p class="desc">How often demo mode sends one down. Wind it right down and they come faster than they can land. Your own taps are never held back.</p>
         </div>
 
-        <div id="how">
+        <div id="how" hidden>
           <p class="how-title">How to play</p>
           <p class="desc">Tap or press any key to send another chair down. Drag to look around, scroll to zoom into the pile.</p>
         </div>
 
-        <button class="action" id="done-btn" type="button">Done</button>
+        <button class="action" id="done-btn" type="button">Close</button>
       </div>
     </div>
 
