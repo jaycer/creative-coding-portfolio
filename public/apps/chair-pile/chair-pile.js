@@ -1,95 +1,59 @@
 // Chair Pile — chairs fall out of the dark and pile up forever.
 //
-// Any tap or keypress sends another one down, out of a disc of sky above the
-// frame that is never itself in shot. They land somewhere random within it, and
-// it widens as the heap spreads, so the pile grows outward as well as up instead
-// of stacking into a spire. The physics collider is built from the same boxes as
-// the visible chair, so legs really do snag on slats and the pile interlocks the
-// way the shapes suggest.
+// A tap or keypress drops another chair from a random point in a disc above
+// the frame. The disc widens as the heap spreads, so the pile grows outward as
+// well as up. The physics collider is built from the same boxes as the visible
+// chair, so legs snag on slats and the pile interlocks.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as CANNON from 'cannon-es';
 import { initAudio, resumeAudio, clatter, setMuted, isMuted, setTimbre, getTimbre } from './audio.js';
 
-// Chairs are drawn as one instance apiece once frozen, and the physics only ever
-// solves the few dozen still moving, so what this bounds is the broadphase, which
-// keeps sweeping every body forever. Measured on an M1 Max: flat 120fps out past
-// 1,500, about 40 at 2,200, and the cost is all in cannon sorting bodies rather
-// than in anything drawn. 2,000 is a round number just under where it tips.
+// Frozen chairs draw as instances and only the few dozen live ones are solved,
+// so the cap is really about the broadphase, which sweeps every body forever.
+// Measured on an M1 Max: flat 120fps past 1,500 chairs, ~40fps at 2,200.
 const MAX_CHAIRS = 2000;
 
 const DEMO_DROP_MS = 2000;     // demo's cadence, as it ships; the slider moves it
 let demoDropMs = DEMO_DROP_MS;
 const FREEZE_BEHIND = 25;      // chairs this far down the pile turn to static bedrock
-// ...and this far down they turn to bedrock whether they have settled or not.
-// Freezing runs in drop order off a single index, so the oldest unsettled chair
-// holds up every chair behind it, however still those are. That is usually a
-// wait of a frame or two. But a chair pinned deep in the heap can be left
-// jittering in place by the solver — barely moving, yet never still enough to
-// pass atRest and never slow enough to fall asleep — and it blocks the queue for
-// good: the live set then grows without bound, every chair in it costs physics
-// and a pair of draw calls a frame, and the whole pile grinds down. Measured, it
-// stalled at 494 frozen with the head spinning at 0.03 m/s and never recovered,
-// even with nothing left falling on it. So past this depth the queue stops
-// asking. A chair with 60 chairs on top of it cannot be seen, and snapping it to
-// the pose it is already sitting in is invisible next to seizing up.
+// ...and this far down they freeze whether settled or not. Freezing runs in
+// drop order off a single index, and the solver can leave a pinned chair
+// jittering forever — never passing atRest, never falling asleep — which would
+// block the queue and let the live set grow without bound (measured: stalled
+// at 494 frozen, never recovered). A chair this deep cannot be seen, so
+// snapping it still is invisible.
 const FREEZE_FORCE_BEHIND = 60;
-// The drop zone: a disc overhead that chairs fall out of, somewhere unseen.
-//
-// It starts ten chairs across and widens with the heap, which is the difference
-// between a pile and a tower. Dropping every chair down one column builds a
-// spire that grows until it topples, because a chair can only ever land on the
-// chair below it. Spreading them over the width the heap has already reached
-// lets it grow the way a heap of anything grows: outward as much as upward, each
-// chair finding a shoulder to settle on.
-//
-// SPREAD has to be high enough to engage at all. It only widens the disc once
-// SPREAD of the reached width beats the ten chairs it starts at, so at 0.7 the
-// heap had to already be 3.3m across before the disc grew by so much as a
-// centimeter — and it never got there, because what makes a heap of chairs
-// spread is chairs rolling down it, and chairs barely roll: they are all corners
-// and they catch on each other. So the disc stayed exactly ten chairs wide for
-// two thousand chairs and built the tower it was put there to prevent.
-//
-// At 0.9 it tracks the heap from almost the first chair, and the cap is what
-// decides the shape rather than a fixed point nobody can predict. That is the
-// honest way round: the width where a heap of this size stops looking like a
-// heap is a thing to look at and choose, and the arithmetic between the disc,
-// the roll, and the stray limit is not something to derive it from.
+// The drop zone: a disc overhead, starting SPAWN_SPAN_CHAIRS wide and growing
+// with the width the heap has reached, so the pile grows outward as well as up
+// instead of building a spire. SPAWN_SPREAD must be high enough to engage
+// early: chairs are all corners and barely roll, so at 0.7 the disc never grew
+// at all.
 const SPAWN_SPAN_CHAIRS = 10;  // how many chairs across the disc starts
 const SPAWN_SPREAD = 0.9;      // share of the reached width the disc grows to fill
-// Where the heap stops widening and starts climbing. Two thousand chairs pack
-// into roughly 170 cubic meters, so a disc of this radius leaves a heap about as
-// tall as it is wide — a pile, at the angle a pile sits at. Much wider and the
-// same chairs spread into a floor covering; much narrower and they tower.
+// Where the heap stops widening and starts climbing: at this radius 2,000
+// chairs leave a heap about as tall as it is wide.
 const SPAWN_RADIUS_MAX = 4.5;
 const STRAY_MARGIN = 1.4;      // past the disc by this much and a chair has rolled away
 
-// Nowhere near the pile, and above whatever the camera can see: the sky height is
-// worked out per drop from the frame itself, and this is only the floor under it,
-// for when the camera is in so close that the top of the frame is lower than the
-// heap.
+// Chairs spawn above the top of the frame, computed per drop; this is only the
+// floor under that, for when the camera is in so close that the frame top is
+// lower than the heap.
 const MIN_SKY_GAP = 3.2;       // least a chair may fall, over the top of the pile
-const SKY_MARGIN = 1.3;        // clearance over the top of the frame, so it is never seen waiting
+const SKY_MARGIN = 1.3;        // clearance over the top of the frame
 
-// A chair still high up casts almost no shadow, fading up to a full one as it
-// comes down.
-//
-// Nothing about that is physical, and it is standing in for something that is. A
-// real shadow softens as its caster gets further from what it falls on, until a
-// chair up in the sky throws nothing you would notice. A shadow map has one
-// hardness for everything, so ours stays needle sharp all the way up — and the
-// key light is 35 degrees, which throws a chair's shadow about 1.4x its height
-// sideways. A chair released above the frame therefore lays a hard, chair-shaped
-// shadow across the floor several meters from where it will land, a second
-// before it arrives: a shadow with nothing above it, which gives away both that
-// a chair is coming and that it came from nowhere.
-//
-// Fading it is the cheap half of what real penumbra would do. It cannot spread
-// the shadow, but it can take away the thing that reads as wrong, which is a
-// hard edge with no object over it.
+// A chair still high up casts almost no shadow, fading to full as it comes
+// down. The shadow map is equally sharp at every height, and the 35-degree key
+// throws a shadow ~1.4x the chair's height sideways — so a chair released
+// above the frame would lay a hard chair-shaped shadow meters from where it
+// lands, a second before it arrives. Fading cannot spread the shadow the way
+// real penumbra would, but it removes the hard edge with nothing above it.
 const SHADOW_FADE_FROM = 4.6;  // height over the heap where the shadow starts coming in
 const SHADOW_FADE_TO = 1.1;    // and where it is full strength
 
@@ -98,35 +62,38 @@ const SHADOW_FADE_TO = 1.1;    // and where it is full strength
 // filter radius from it.
 const SHADOW_BLUR = 0.015;
 
-// Contact darkening. A shadow map knows more than whether a point is in shadow:
-// it knows how far away the thing shadowing it is. Subtract the two depths and
-// the difference is the gap between a chair and whatever its shadow has landed
-// on, in meters, which is exactly the quantity that says "these two are
-// touching". Darken hard where the gap is nothing and let it go by CONTACT_GAP.
-//
-// The reason it is needed: a shadow map occludes the key light and nothing
-// else, so the sky fill reaches the floor at full strength right up against a
-// foot. That leaves a flat, evenly gray shadow with no gradient, and a chair
-// with an even gray shadow under it reads as hovering over one. This is the
-// cheap half of ambient occlusion — it only knows about occluders in the
-// light's direction, so it does little inside a dense heap, but out on the open
-// floor it is the whole of what was missing.
-//
-// The floor gets it and the chairs do not, which is deliberate. On a flat plane
-// the gap changes gradually and the term reads as a smooth pool of shade. On
-// the chairs it changes fast — surfaces at every angle, and in a heap almost
-// everything is within CONTACT_GAP of something — so great blotches of the pile
-// darkened at once, and the coverage below, which can only count in ninths,
-// stepped across them in visible bands. That was paying an artifact for the
-// case this technique is worst at anyway.
-// How fast a shadow softens as its caster lifts away, as blur-meters per meter
-// of gap: at 0.15 an edge reaches the full SHADOW_BLUR once its caster is about
-// 10cm off the surface, and is a single texel — hard — where they touch.
+// Contact darkening on the floor. Subtracting the shadow map's stored depth
+// from the receiver's gives the gap between a chair and what its shadow lands
+// on, in meters; darken hard at zero gap, fading out by CONTACT_GAP. Without
+// it the sky fill reaches the floor at full strength right against a foot, and
+// an even gray shadow under a chair reads as hovering. The floor gets it and
+// the chairs do not: on them the gap changes too fast, and the nine-tap
+// coverage stepped across the pile in visible bands.
+// How fast a shadow softens as its caster lifts away, in blur-meters per meter
+// of gap: at 0.15 an edge reaches full SHADOW_BLUR with the caster ~10cm off
+// the surface, and is a single texel — hard — at contact.
 const PCSS_SOFTNESS = 0.15;
 
 const CONTACT_GAP = 0.12;      // meters of separation before it fades out entirely
 const CONTACT_STRENGTH = 0.65; // how much of the light it takes away at zero gap
 
+// Seam shading: a thin dark line where one chair part meets another. The
+// members are only 50mm deep, so the key light legitimately skims past the
+// back edge of one part and lands right at the foot of the next — and even a
+// soft area light would leave that sliver sharp, because the occluding edge
+// sits only centimeters away. What reads as a defect is the light touching
+// the seam itself, so this pulls the joint line out of it: a narrow band,
+// falling off with the square of distance so it stays a line rather than a
+// smudge. Computed per fragment from the part list — no extra geometry, and
+// identical for bedrock instances.
+const JOINT_RADIUS = 0.012;    // meters the line reaches from a junction
+const JOINT_STRENGTH = 0.3;    // how much of the light it takes away at the seam
+
+// No tunneling guard, by choice. cannon has no continuous collision
+// detection, and an uncapped chair covers ~14cm per 60Hz step against
+// colliders 5.6cm thick, so a fast faller can occasionally pass through a
+// member. A fall-speed cap plus finer stepping fixed that, but it slowed the
+// falls and cost physics budget; the fast drop is worth the rare clip.
 const REST_SPEED = 0.4;        // m/s under which a chair counts as come to rest
 const MIN_FALL_TIME = 0.4;     // s of falling before a chair can be called landed
 const HIT_MIN_SPEED = 0.7;     // m/s of impact under which a contact makes no sound
@@ -134,26 +101,17 @@ const HIT_COOLDOWN_MS = 70;    // one chair can only speak this often
 const HIT_LOUD_SPEED = 5;      // impact speed that counts as a full-strength bang
 const BUMP_LEVEL = 0.32;       // how loudly a chair already at rest answers when knocked
 
-// Framing. Only the heap has to be held now — chairs arrive from over the top of
-// the frame and are meant to, so nothing hangs above it waiting to be cropped,
-// and the old margin that existed to keep a floating chair in shot can go back to
-// merely comfortable.
-//
-// It does have to hold the heap's width as well as its height, which it never
-// used to: every chair landed in one column, so fitting the height fitted
-// everything. Now the disc widens as the pile spreads, and a wide heap under a
-// wide screen still runs out of frame sideways long before it runs out of it
-// upward. Both fits are computed and the camera takes whichever wants it further
-// back.
+// Framing holds the heap's height and its width — a wide heap under a wide
+// screen still runs out of frame sideways first. Both fits are computed and
+// the camera takes whichever wants it further back.
 const FOCUS_BIAS = 0.45;       // <0.5 sits the view low, giving the pile the frame
 const FRAME_MARGIN = 1.2;
 const PILE_AIR = 1.6;          // headroom over the heap, so a chair is seen falling before it lands
 const EXPLORE_FRACTION = 0.8;  // closer than this share of the fit = exploring, so stop framing
 
-// Demo mode. The camera orbits on its own and breathes in and out on a slow
-// sine, while chairs drop themselves. The zoom is expressed as a share of the
-// framing distance rather than in meters, so it keeps its composition as the
-// pile grows and the fit distance climbs with it.
+// Demo mode: the camera orbits and breathes in and out on a slow sine while
+// chairs drop themselves. The zoom is a share of the framing distance, not
+// meters, so the composition holds as the pile grows.
 const DEMO_ORBIT_SPEED = 0.55; // OrbitControls units: about one lap every two minutes
 const DEMO_ZOOM_PERIOD = 26;   // seconds for one full breath in and back out
 const DEMO_ZOOM_NEAR = 0.4;    // closest approach, as a share of the framing distance
@@ -172,23 +130,12 @@ const SEAT_W = 0.46, SEAT_D = 0.44, SEAT_T = 0.05, SEAT_Y = 0.44;
 const LEG = 0.05, LEG_H = 0.44;
 const BACK_H = 0.55;
 
-// Every joint here was once a butt joint — the leg's top face at exactly 0.44
-// against the seat's underside at exactly 0.44, and so on. Coplanar faces have
-// equal depth, so which one a pixel gets is down to float rounding, and at the
-// top of every leg a lit square fought the seat's dark underside and won often
-// enough to read as light in the wrong place.
-//
-// What matters is not that two faces are coplanar but that they SHADE
-// differently. The pairs that showed were always a face pointing up against one
-// pointing down — opposite normals, so one was lit and one was not, and the
-// fight was the difference between them. Two flush outer faces share a normal,
-// a material and a depth, so whichever wins draws the same pixel and nothing is
-// visible at all. Only opposed normals need keeping apart.
-//
-// So every part is flush with its neighbors on the outside, and is separated
-// only along the axis it joins on: each pushes a JOIN inside the next, which
-// puts the end faces — the ones that point the wrong way — inside solid
-// geometry where they cannot be seen. No part is inset, and no seam is drawn.
+// Butt joints put two coplanar faces at the same depth, and which one a pixel
+// gets is float rounding. Only opposed normals show — a lit face fighting a
+// dark one; two flush outer faces share a normal and material, so the fight
+// draws the same pixel either way. So parts stay flush on the outside and are
+// separated only along the axis they join on: each pushes JOIN inside the
+// next, burying the end faces where they cannot be seen.
 const JOIN = 0.004;
 const LEG_X = SEAT_W / 2 - LEG / 2; // flush with the seat's sides
 const LEG_Z = SEAT_D / 2 - LEG / 2;
@@ -200,11 +147,8 @@ const CHAIR_PARTS = [
   // front legs, standing on the floor and running up inside the seat
   { size: [LEG, LEG_H + JOIN, LEG], pos: [ LEG_X, (LEG_H + JOIN) / 2, LEG_Z] },
   { size: [LEG, LEG_H + JOIN, LEG], pos: [-LEG_X, (LEG_H + JOIN) / 2, LEG_Z] },
-  // Back stiles: floor to top rail in one piece, passing through the seat on
-  // the way. The back leg and the post above it used to be two boxes meeting at
-  // the seat, which is a joint a chair does not have — the rear leg and the
-  // back upright are one length of timber. Made whole, there is nothing left to
-  // fight there and one less part to carry.
+  // Back stiles: floor to top rail in one piece, passing through the seat —
+  // one length of timber, with no coplanar joint at the seat to fight.
   { size: [LEG, CHAIR_H - JOIN, LEG], pos: [ LEG_X, (CHAIR_H - JOIN) / 2, -LEG_Z] },
   { size: [LEG, CHAIR_H - JOIN, LEG], pos: [-LEG_X, (CHAIR_H - JOIN) / 2, -LEG_Z] },
   // back slats, with gaps for legs to catch in; ends buried in the stiles
@@ -247,12 +191,50 @@ const contactUniforms = {
   uPcssSoftness: { value: PCSS_SOFTNESS },
   uPcssMaxBlur: { value: SHADOW_BLUR },
   uPcssTexel: { value: 0.002 }, // meters one shadow texel covers
+  uJointRadius: { value: JOINT_RADIUS },
+  uJointStrength: { value: JOINT_STRENGTH },
 };
 
-// three's own shadow sampling, with getShadow renamed out of the way so ours can
-// take the name. Lifting the chunk at runtime rather than transcribing it keeps
-// everything else in it — the varyings, the point and spot paths, the packing —
-// exactly as three wrote it, so only the one function is ours to get wrong.
+/**
+ * GLSL for the seam line: one unrolled block per chair part. A part darkens a
+ * fragment only when it pokes through the fragment's surface plane (h > 0) —
+ * two flush coplanar faces have h = 0, so the chair's flat outsides never
+ * show a line — and only within uJointRadius. The squared falloff
+ * concentrates the darkness at the seam; the h ramp keeps a part that barely
+ * crosses the plane from popping in.
+ */
+const JOINT_SHADE_CHUNK = `
+uniform float uJointRadius;
+uniform float uJointStrength;
+varying vec3 vChairPos;
+varying vec3 vChairNormal;
+
+float jointShade() {
+  vec3 n = normalize( vChairNormal );
+  vec3 p = vChairPos;
+  float shade = 0.0;
+${CHAIR_PARTS.map(({ size, pos }) => {
+    const c = [pos[0], pos[1] - CHAIR_MID, pos[2]];
+    const lo = c.map((v, i) => (v - size[i] / 2).toFixed(4)).join(', ');
+    const hi = c.map((v, i) => (v + size[i] / 2).toFixed(4)).join(', ');
+    return `  {
+    vec3 bmin = vec3( ${lo} );
+    vec3 bmax = vec3( ${hi} );
+    float h = dot( n, mix( bmin, bmax, step( vec3( 0.0 ), n ) ) ) - dot( n, p );
+    if ( h > 0.002 ) {
+      vec3 q = max( max( bmin - p, p - bmax ), vec3( 0.0 ) );
+      float w = 1.0 - smoothstep( 0.0, uJointRadius, length( q ) );
+      shade = max( shade, w * w * clamp( h / 0.01, 0.0, 1.0 ) );
+    }
+  }`;
+  }).join('\n')}
+  return 1.0 - uJointStrength * shade;
+}
+`;
+
+// three's own shadow chunk with getShadow renamed out of the way so ours can
+// take the name; lifting it at runtime keeps everything else in it — varyings,
+// point and spot paths, packing — exactly as three wrote it.
 const PCSS_SHADOW_CHUNK = THREE.ShaderChunk.shadowmap_pars_fragment.replace(
   'float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, float shadowRadius, vec4 shadowCoord ) {',
   'float getShadowUnused( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, float shadowRadius, vec4 shadowCoord ) {'
@@ -269,20 +251,12 @@ float chairShadowNoise( vec2 p ) {
 }
 
 /**
- * Percentage-closer soft shadows.
- *
- * The filter this replaces was a fixed width: the same blur whether a chair was
- * resting on a surface or a meter above it. That is wrong in both directions at
- * once. At a contact it spread an edge that should have been hard and black over
- * 15mm, which is what left a pale gap where a back post meets a seat; and it had
- * only nine taps to spend on that width, so the penumbra could take about ten
- * values and stepped between them in bands.
- *
- * So: find what is casting first, and let how far away it is set the width. A
- * caster touching the surface gets a single texel — hard. One well above it gets
- * the full blur. Both loops walk a Vogel disk, which needs no lookup table, and
- * both are rotated per pixel, which is what turns the residual quantization into
- * a faint noise instead of rings.
+ * Percentage-closer soft shadows: find what is casting, and let its distance
+ * set the filter width. A caster touching the surface gets a single texel —
+ * hard; one well above it gets the full blur. (The fixed-width filter this
+ * replaced blurred contacts that should be hard, and banded.) Both loops walk
+ * a Vogel disk, rotated per pixel so the residual quantization reads as faint
+ * noise instead of rings.
  */
 float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
   shadowCoord.xyz /= shadowCoord.w;
@@ -296,68 +270,99 @@ float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, floa
   float maxR = max( shadowRadius, 1.0 );
   float rot = chairShadowNoise( gl_FragCoord.xy ) * 6.2831853;
 
+  // Receiver-plane depth bias. A face lying nearly along the light has a
+  // depth slope so steep that a constant bias cannot cover it — one texel to
+  // the side is millimeters deeper, and the face self-shadows in texel-sized
+  // dashes. The screen-space derivatives give the receiver's true depth
+  // gradient in light space, so each tap can be compared against the plane's
+  // own depth at that offset: grazing faces get exactly the bias their slope
+  // demands, face-on surfaces get none, and contact shadows stay put. The
+  // clamp keeps the extrapolation sane across silhouettes, where the
+  // derivatives jump between surfaces.
+  vec3 dpx = dFdx( shadowCoord.xyz );
+  vec3 dpy = dFdy( shadowCoord.xyz );
+  float det = dpx.x * dpy.y - dpx.y * dpy.x;
+  vec2 grad = abs( det ) > 1e-16
+    ? vec2( dpy.y * dpx.z - dpx.y * dpy.z, dpx.x * dpy.z - dpy.x * dpx.z ) / det
+    : vec2( 0.0 );
+  float maxAdj = 0.02 / uShadowDepth; // never extrapolate more than 2cm of depth
+  #define CHAIR_Z_AT( off ) ( shadowCoord.z + clamp( dot( grad, off ), -maxAdj, maxAdj ) )
+
   // 1. What is above this point, and how far up? Search the widest penumbra we
-  // would ever draw, since a blocker further out than that cannot widen it more.
-  //
-  // The first tap must land on the fragment's own texel, and the disk is spaced
-  // to put it there. Starting the ring off-centre instead — which is what
-  // sqrt((i + 0.5)/n) does — leaves the one sample that matters most untaken:
-  // right at a contact the shadow is only a few millimeters wide while this
-  // search is the width of the WIDEST penumbra, so a ring of eight can step
-  // clean over a narrow band, find nothing, and take the early-out below. A
-  // point in shadow then comes back fully lit, and it does it along the inside
-  // of every corner, where the band is at its narrowest.
+  // would ever draw. The first tap must land on the fragment's own texel
+  // (fi = 0 is the disk center): near a contact the shadow band is only
+  // millimeters wide while this search is the widest penumbra, so a ring that
+  // starts off-center can step clean over the band, find nothing, and take the
+  // early-out below — returning fully lit along the inside of every corner.
   float sum = 0.0;
   float hits = 0.0;
   for ( int i = 0; i < 12; i ++ ) {
     float fi = float( i );
     float a = fi * 2.39996323 + rot;
-    float rr = sqrt( fi / 11.0 ) * maxR; // fi = 0 lands dead centre
-    vec2 uv = shadowCoord.xy + vec2( cos( a ), sin( a ) ) * rr * texel;
-    float d = unpackRGBAToDepth( texture2D( shadowMap, uv ) );
-    if ( d < shadowCoord.z ) { sum += d; hits += 1.0; }
+    vec2 off = vec2( cos( a ), sin( a ) ) * sqrt( fi / 11.0 ) * maxR * texel; // fi = 0 lands dead centre
+    float d = unpackRGBAToDepth( texture2D( shadowMap, shadowCoord.xy + off ) );
+    if ( d < CHAIR_Z_AT( off ) ) { sum += d; hits += 1.0; }
   }
-  // Safe to call it lit now: a shadow narrower than the centre texel is
-  // narrower than this map can draw at all.
+  // No blocker within the widest penumbra: lit. A shadow narrower than the
+  // center texel is narrower than this map can draw.
   if ( hits < 0.5 ) return 1.0;
 
   // 2. The gap, in meters, sets the width. Floor it at a texel so a contact is
   // as hard as this map can draw rather than blurring into a gap.
   float gap = ( shadowCoord.z - sum / hits ) * uShadowDepth;
   float blur = clamp( gap * uPcssSoftness, uPcssTexel, uPcssMaxBlur );
-  float pen = max( blur / uPcssTexel, 0.75 );
+  // Floored at ~2 texels, not 1: with the whole kernel inside a single texel
+  // every pixel reads that texel's binary answer and a shadow edge shows the
+  // map's raw staircase — at 2 texels the rotated taps straddle edges and
+  // average them into noise. Costs ~4mm of extra softness at a contact.
+  float pen = max( blur / uPcssTexel, 1.75 );
 
   // 3. Ordinary PCF, at that width, with enough taps to read as a gradient.
   float lit = 0.0;
   for ( int i = 0; i < 16; i ++ ) {
     float fi = float( i );
     float a = fi * 2.39996323 + rot;
-    float rr = sqrt( ( fi + 0.5 ) / 16.0 ) * pen;
-    vec2 uv = shadowCoord.xy + vec2( cos( a ), sin( a ) ) * rr * texel;
-    float d = unpackRGBAToDepth( texture2D( shadowMap, uv ) );
-    lit += ( d < shadowCoord.z ) ? 0.0 : 1.0;
+    vec2 off = vec2( cos( a ), sin( a ) ) * sqrt( ( fi + 0.5 ) / 16.0 ) * pen * texel;
+    float d = unpackRGBAToDepth( texture2D( shadowMap, shadowCoord.xy + off ) );
+    lit += ( d < CHAIR_Z_AT( off ) ) ? 0.0 : 1.0;
   }
   return lit / 16.0;
 }
 `;
 
 /**
- * Darken a surface where whatever is shadowing it is close by.
- *
- * The shadow camera is orthographic, so depth across it is linear and a
- * difference of stored depths is a distance in meters once multiplied back up
- * by the camera's range. The lit case needs no special handling: a surface that
- * is the frontmost thing from the light reads its own depth back out of the map,
- * so the epsilon test finds no blocker in front of it and nothing is darkened.
- * Only genuinely shadowed points have something above them to measure.
+ * Wire the shadow terms into a material: PCSS for everything, plus the
+ * floor's contact term. The shadow camera is orthographic, so a difference of
+ * stored depths is a distance in meters once multiplied by the camera's
+ * range; a lit surface reads its own depth back and finds no blocker, so the
+ * contact term darkens nothing there.
  */
-function tuneShadows(material, { contact = false } = {}) {
+function tuneShadows(material, { contact = false, joints = false } = {}) {
   material.onBeforeCompile = (shader) => {
     for (const name of Object.keys(contactUniforms)) shader.uniforms[name] = contactUniforms[name];
-    // Everything shadowed gets the soft-shadow filter; only the floor takes the
-    // contact term on top of it.
+    // Everything shadowed gets the soft-shadow filter; the chairs take the
+    // seam line on top of it, and the floor the contact term.
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <shadowmap_pars_fragment>', PCSS_SHADOW_CHUNK);
+    if (joints) {
+      shader.vertexShader = shader.vertexShader
+        .replace('void main() {', `
+          varying vec3 vChairPos;
+          varying vec3 vChairNormal;
+          void main() {`)
+        // The raw attributes, before the instance matrix: jointShade works in
+        // chair-local space, which every chair and bedrock instance shares.
+        .replace('#include <begin_vertex>', `
+          vChairPos = position;
+          vChairNormal = normal;
+          #include <begin_vertex>`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('void main() {', JOINT_SHADE_CHUNK + '\nvoid main() {')
+        // Before tone mapping, so it darkens in linear light.
+        .replace('#include <tonemapping_fragment>', `
+          gl_FragColor.rgb *= jointShade();
+          #include <tonemapping_fragment>`);
+    }
     if (!contact) return;
     shader.fragmentShader = shader.fragmentShader
       .replace('void main() {', `
@@ -371,11 +376,9 @@ function tuneShadows(material, { contact = false } = {}) {
         {
           vec3 sco = vDirectionalShadowCoord[ 0 ].xyz / vDirectionalShadowCoord[ 0 ].w;
           if ( sco.x >= 0.0 && sco.x <= 1.0 && sco.y >= 0.0 && sco.y <= 1.0 && sco.z <= 1.0 ) {
-            // Spread the taps as wide as the shadow filter itself. Narrower and
-            // this term is sharper than the shadow it sits on, which shows up
-            // on the chairs still falling: their shadow is a dither, thrown
-            // away fragment by fragment, so depth lands in a scatter of texels
-            // and a tight tap pattern turns that scatter into stripes.
+            // Taps as wide as the shadow filter: narrower, and this term is
+            // sharper than the shadow it sits on, which turns the falling
+            // chairs' dithered depth into stripes.
             vec2 t = directionalLightShadows[ 0 ].shadowRadius / directionalLightShadows[ 0 ].shadowMapSize;
             // 4mm, which keeps a surface from finding itself as its own blocker
             float eps = 0.004 / uShadowDepth;
@@ -391,11 +394,9 @@ function tuneShadows(material, { contact = false } = {}) {
             if ( n > 0.0 ) {
               float gap = ( sco.z - sum / n ) * uShadowDepth;
               float near = 1.0 - smoothstep( 0.0, uContactGap, gap );
-              // Scale by how much of the neighborhood was actually blocked, not
-              // merely whether any of it was. A half-dithered chair occludes
-              // half these taps and should darken half as much, which is both
-              // the truer answer and a continuous one — no threshold left for
-              // the dither to flicker across.
+              // Scale by how much of the neighborhood is blocked: a
+              // half-dithered chair darkens half as much, and there is no
+              // threshold for the dither to flicker across.
               float cover = n / 9.0;
               gl_FragColor.rgb *= 1.0 - uContactStrength * near * cover;
             }
@@ -404,20 +405,15 @@ function tuneShadows(material, { contact = false } = {}) {
         #endif
         #include <tonemapping_fragment>`);
   };
-  // Only ever appended to the key three builds anyway, but the two variants
-  // must not collide: the floor's program has a term the chairs' does not.
-  material.customProgramCacheKey = () => (contact ? 'chair-shadow-floor' : 'chair-shadow');
+  // The variants must not collide: each combination is its own program.
+  material.customProgramCacheKey = () =>
+    (contact ? 'chair-shadow-floor' : joints ? 'chair-shadow-joints' : 'chair-shadow');
 }
 
-// Colliders are this much bigger than the chair you can see, all round.
-//
-// A contact in cannon settles with the two bodies slightly inside each other —
-// measured, about 2mm here. Where two boxes overlap, their surfaces cross, and
-// the crossing is a crisp polygon shaded quite differently from the face it cuts
-// through: a hard little wedge of one chair showing inside another. Padding the
-// collider spends that overlap on empty space instead. The physics still sinks
-// 2mm into the padding, and the wood stops just short of touching, which at this
-// size reads as contact and cannot produce an intersection to light.
+// Colliders are padded because cannon settles contacts ~2mm inside each other,
+// and two visible boxes overlapping draw a crisp lit sliver of one chair
+// inside another. The padding spends that overlap on empty space: the wood
+// stops just short of touching, which at this size still reads as contact.
 const COLLIDER_SKIN = 0.003;
 
 /** The matching compound collider: one cannon Box per visible box. */
@@ -434,19 +430,13 @@ function addChairShapes(body) {
 
 // -------------------------------------------------------------------- scene
 // Cool near-black. The fog matches it exactly so the floor dissolves into the
-// background instead of ending at a line. Denser fog blurs that horizon further:
-// the floor fades out well before its true vanishing point, which spreads the
-// transition over a wide band of screen rather than compressing it into an edge.
+// background instead of ending at a line.
 const VOID = 0x070b14;
 
-// Fog is the one thing here measured from the camera rather than from the world,
-// so a fixed density reads as a bubble of visibility that travels with the
-// viewer — and the pile grows without bound while the framing pulls back to keep
-// up, so ANY fixed density eventually swallows it whole. Instead, hold the haze
-// on the pile constant and let the density fall as the camera retreats: at the
-// framing distance the pile always sits at the same slight remove, while the
-// floor's true horizon is always far enough beyond it to still dissolve.
-// density = FOG_HAZE / dist puts fog(dist) = 1 - exp(-FOG_HAZE^2), about 15%.
+// Fog is measured from the camera, and the framing pulls back as the pile
+// grows, so any fixed density would eventually swallow the pile. Hold the haze
+// on the pile constant instead: density = FOG_HAZE / dist keeps the pile at
+// the same slight remove (about 15%) at any framing distance.
 const FOG_HAZE = 0.4;
 const FOG_HOLD = 8; // stop thickening inside this: zoomed among the chairs, fog must not close in
 const scene = new THREE.Scene();
@@ -458,20 +448,60 @@ scene.fog = new THREE.FogExp2(VOID, FOG_HAZE / FOG_HOLD);
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.03, 200);
 camera.position.set(2.9, 2.1, 4.0);
 
+// Desktop-class or not, decided once: it gates the 4096 shadow map and the
+// ambient-occlusion pass below.
+const fineShadows = window.matchMedia('(pointer: fine)').matches;
+
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
-// PCF rather than PCFSoft, which is the sharper filter of the two and is the
-// reason for the swap: its kernel is a fixed couple of texels wide and takes no
-// radius, so an edge coarser than that steps and there is no dial to turn. Plain
-// PCF spreads its nine taps over shadow.radius, which aimKey sets from the texel
-// size — a shadow edge wants to be fuzzy here, not crisp, and a fuzzy edge is
-// one an undersampled staircase disappears into.
+// Plain PCF rather than PCFSoft: PCFSoft's kernel is a fixed couple of texels
+// and takes no radius, while PCF spreads its taps over shadow.radius, which
+// aimKey sets from the texel size. (Superseded in practice by the PCSS chunk,
+// which replaces getShadow; the radius still feeds its search width.)
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 document.body.appendChild(renderer.domElement);
+
+// Ambient occlusion (desktop only): the scene's fills — ambient, hemisphere,
+// and the fill light — ignore geometry, so without this every crevice gets
+// full skylight and the joints read hot; the seams where light really does
+// graze past a member's back edge stand out as leaks against surroundings
+// that are wrongly bright. GTAO darkens by actual concavity, per pixel, and
+// covers chair-to-chair contacts as well as joints within one chair.
+// Tone mapping moves to the OutputPass; materials render linear into the
+// composer's target, so the contact term above still runs in linear light.
+let composer = null;
+let gtao = null;
+if (fineShadows) {
+  const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+  // The composer bypasses the canvas's own antialiasing, so the target needs
+  // its own MSAA.
+  const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
+  composer = new EffectComposer(renderer, target);
+  composer.addPass(new RenderPass(scene, camera));
+  gtao = new GTAOPass(scene, camera, size.x, size.y);
+  // Radius on the scale of a chair member, not a room, and thickness well
+  // under one: the members are 50mm sticks, and the defaults assume meters of
+  // solid wall — they turn thin slats into deep caves.
+  gtao.updateGtaoMaterial({ radius: 0.15, thickness: 0.05, distanceExponent: 2, scale: 1.5 });
+  gtao.blendIntensity = 0.9;
+  composer.addPass(gtao);
+  composer.addPass(new OutputPass());
+}
+
+// AO runs at half resolution: occlusion is low-frequency and the denoise pass
+// smooths the upsampling, so nothing visible is lost — but the cost falls to
+// a quarter. Measured on an M1 Max at retina 2x with a 30-chair pile: 28.6fps
+// with full-res AO, 119.9 at half, indistinguishable from AO off entirely.
+// Called after every composer.setSize, which resets the pass to full size.
+function sizeGtao() {
+  const s = renderer.getDrawingBufferSize(new THREE.Vector2());
+  gtao.setSize(Math.ceil(s.x / 2), Math.ceil(s.y / 2));
+}
+if (gtao) sizeGtao();
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
@@ -493,49 +523,36 @@ controls.autoRotateSpeed = DEMO_ORBIT_SPEED;
 scene.add(new THREE.AmbientLight(0x9fb4c8, 0.29));
 scene.add(new THREE.HemisphereLight(0x9fb4c8, 0x15171d, 0.65));
 
-// A directional light is nothing but a direction — position only aims it and
-// places its shadow camera. So this is the whole of the light's character, set
-// once and never touched again: what makes a source read as fixed in the world
-// is that orbiting past it changes which face is lit, and that only holds if the
-// direction is constant. It has to ride up with the pile to keep the heap inside
-// its shadow frustum, which aimKey does by moving the light and its target
-// together, as one rigid pair.
-// 35 degrees up, and about 90 degrees around from where the camera starts. Both
-// halves matter: the low angle is what gives every chair a bright side and a
-// dark one, but a low light sitting behind the viewer would only flatten the
-// pile from the front and hide its own shadows behind it. Off to one side, the
-// shadows rake across the floor where they can be seen.
+// A directional light is only a direction — position aims it and places its
+// shadow camera. The direction is set once and never turned: a source reads as
+// fixed in the world only if orbiting past it changes which face is lit.
+// aimKey rides the light up with the pile by moving light and target together.
+// 35 degrees up, ~90 degrees around from the starting camera: low enough to
+// give every chair a bright side and a dark one, off to the side so the
+// shadows rake across the floor in view.
 const KEY_DIR = new THREE.Vector3(10, 8.5, -7).normalize(); // pile toward light
 const KEY_STANDOFF = 22; // how far back it rides, on top of the pile's own height
 
-// Brighter than the old overhead key at the same exposure. Light this low strikes
-// the seats and the floor at a glance, and the cosine falloff costs those faces
-// about a third of what a steeper light gave them; the vertical faces more than
-// make it back, which is the whole point, but the flat ones need the make-up.
+// Light this low strikes seats and floor at a glance; the intensity makes back
+// what the cosine falloff costs the flat faces.
 const key = new THREE.DirectionalLight(0xfff1dd, 3.0);
 key.castShadow = true;
-// A 4096 map is 64MB of depth texture, which is worth it on a desktop GPU and
-// is not on a phone — where it is also the least affordable, since the same
-// device is already paying for the physics. Touch devices keep the 2048.
-const fineShadows = window.matchMedia('(pointer: fine)').matches;
+// A 4096 map is 64MB of depth texture: worth it on a desktop GPU, not on a
+// phone that is already paying for the physics. Touch devices keep the 2048.
 key.shadow.mapSize.set(fineShadows ? 4096 : 2048, fineShadows ? 4096 : 2048);
-// Bias is in texels, morally, so it is set from the texel size the fitted
-// frustum actually achieves rather than picked as a bare number. normalBias
-// used to be 0.02 — 20mm, against a leg 50mm thick. It offsets the receiving
-// surface along its own normal before the lookup, so the floor was sampled 20mm
-// up, and at 35 degrees that walks the shadow's edge about 29mm back toward its
-// caster: well over half a leg's width, which is what unsticks a chair from its
-// own shadow. Under a foot standing on the floor it reads as the whole chair
-// hovering. Both are only affordable this small because the fit below buys the
-// resolution to pay for them.
-//
-// 0.0005 is a quarter of a texel, which is lower than it could safely go while
-// the filter was a fixed 15mm wide. PCSS changed what this number costs: a
-// contact shadow is now hard, so the couple of millimeters this offset walks the
-// edge back no longer disappears into a soft gradient — it draws a bright line
-// along the inside of every corner where two members meet. Acne is what it
-// exists to prevent, and with the contact hard and the depth range fitted, the
-// constant bias above is carrying that on its own; zero showed none either.
+// Both biases are tiny on purpose. normalBias offsets the receiving surface
+// along its normal, and at this light angle every millimeter walks the shadow
+// edge ~1.4mm back toward its caster — enough of it and a chair unsticks from
+// its own shadow, and with PCSS's hard contacts the walk-back no longer hides
+// in a soft gradient. The fitted, tight depth range (see aimKey) is what makes
+// values this small acne-free.
+// Startup values only: aimKey re-derives the constant bias in meters each
+// time the frustum refits. bias is a share of the depth range, so left as a
+// bare constant it would grow with the pile — ~3mm of shadow walk-back on a
+// small heap became ~5mm at 2,000 chairs, and the shadows visibly detached
+// from the members casting them. normalBias stays small: the receiver-plane
+// bias in getShadow covers grazing surfaces, which is what this was once
+// raised for.
 key.shadow.bias = -0.00025;
 key.shadow.normalBias = 0.0005;
 scene.add(key);
@@ -565,36 +582,21 @@ const LY_FLAT = Math.hypot(LIGHT_Y.x, LIGHT_Y.z), LY_UP = LIGHT_Y.y;
 const LZ_FLAT = Math.hypot(LIGHT_Z.x, LIGHT_Z.z), LZ_UP = LIGHT_Z.y;
 
 /**
- * Ride the light up with the pile without ever turning it. Both ends move by the
- * same vector, so the direction survives untouched however tall the heap gets —
- * moving them by different amounts is what quietly tips a side light into an
- * overhead one, and an overhead light lands the same on every face, so orbiting
- * it reveals nothing and the source seems to travel with the viewer.
+ * Ride the light up with the pile without ever turning it: both ends move by
+ * the same vector, so the direction survives however tall the heap gets.
  */
 function aimKey() {
-  // Fit the box to what actually casts, which is the whole of the resolution
-  // budget. It used to be sized as 10 + 1.1 * height, on the reasoning that the
-  // box must hold the receiving floor as well as the casters, since a floor
-  // outside it comes back lit and the shadow ends in a straight line. The floor
-  // needs no room of its own: an orthographic shadow camera looks along the
-  // light, so a caster and the shadow it throws land on the SAME light-space xy
-  // — that is what casting a shadow means here. Cover the casters and every
-  // floor point they can darken is covered with them, rake and all. The
-  // constant 10 was paying for a 20m box around a heap often 2m wide, and the
-  // whole of that went into texels that never saw a chair.
-  //
-  // What casts: everything settled, out to the widest chair that has not rolled
-  // clear, plus the drop disc the falling ones come down in, plus a chair's own
-  // reach however it is lying. Height only has to run up to where a falling
-  // chair's shadow has faded out entirely, since above that it casts nothing.
+  // Fit the box to what casts. The floor needs no room of its own: an
+  // orthographic shadow camera looks along the light, so a caster and the
+  // shadow it throws share the same light-space xy. What casts: everything
+  // settled out to the widest counted chair, the drop disc, a chair's own
+  // reach, and height up to where a falling chair's shadow has fully faded.
   const reach = Math.max(strayLimit(), pileRadius) + CHAIR_REACH;
   const top = pileTopY + SHADOW_FADE_FROM;
 
-  // That region in light space. x is horizontal, so it takes the radius as it
-  // is; y mixes the radius with the height, and is centered half way up rather
-  // than on the floor. The box is square, so the wider of the two wins: keeping
-  // one texel size in both axes keeps the PCF kernel round, and an oblong one
-  // would smear the softening along whichever axis was coarser.
+  // That region in light space: x is horizontal, y mixes radius with height
+  // and is centered half way up. The box stays square so the texel — and the
+  // filter kernel — stays round.
   const span = Math.max(reach, reach * LY_FLAT + LY_UP * top / 2);
   if (Math.abs(span - shadowSpan) > 0.25) { // resizing every frame rebuilds the matrix for nothing
     shadowSpan = span;
@@ -603,43 +605,32 @@ function aimKey() {
     cam.right = span;
     cam.top = span;
     cam.bottom = -span;
-    // Depth is measured about the aim, and the same region bounds it, so near
-    // can start just in front of the casters instead of at a token 0.5. The
-    // tighter the pair, the more of the depth buffer's precision lands on the
-    // chairs, which is the other half of what lets the bias above be so small.
+    // The same region bounds the depth, so near/far hug the casters and the
+    // depth precision lands on the chairs — the other half of what lets the
+    // bias be so small.
     const deep = reach * LZ_FLAT + LZ_UP * top / 2 + 0.5;
     cam.near = Math.max(0.1, KEY_STANDOFF + pileTopY - deep);
     cam.far = KEY_STANDOFF + pileTopY + deep;
     cam.updateProjectionMatrix();
 
-    // Hold the softness at a fixed width in the world rather than a fixed number
-    // of texels. The radius is counted in texels, and a texel is worth more
-    // meters the taller the heap gets, so a constant radius would quietly widen
-    // the penumbra as the pile grew — the shadows going softer for no reason
-    // anything in the scene could account for. Dividing by the texel size keeps
-    // the blur the same handful of millimeters throughout. The ceiling matters:
-    // nine taps spread wider than about this stop reading as one soft edge and
-    // start reading as nine, and the shadow washes out to nothing besides.
+    // Hold the softness at a fixed width in the world, not a fixed number of
+    // texels, or shadows would soften as the pile grows. The ceiling matters:
+    // taps spread much wider stop reading as one soft edge.
     key.shadow.radius = THREE.MathUtils.clamp(SHADOW_BLUR / ((2 * span) / key.shadow.mapSize.width), 1, 7);
     // The contact term reads depths out of this same camera, so it needs the
     // range to turn them back into meters.
     contactUniforms.uShadowDepth.value = cam.far - cam.near;
     contactUniforms.uPcssTexel.value = (2 * span) / key.shadow.mapSize.width;
+    // Hold the bias at 3mm whatever the pile has grown to; see the note where
+    // the startup value is set.
+    key.shadow.bias = -0.003 / (cam.far - cam.near);
   }
 
-  // Texel snapping. The shadow map's grid is fixed in light space, not world
-  // space, so sliding the light by a fraction of a texel redistributes every
-  // edge into different texels and the staircase of an undersampled edge
-  // reshuffles — which reads as a ripple crawling along the shadow. And the
-  // light never does stop sliding: pileTopY is an exponential approach, so it
-  // keeps closing on the measurement by ever-smaller amounts long after the pile
-  // looks still. Quantizing the aim to whole texels locks the grid to the world.
-  // The light still follows the pile, but in texel-sized hops, so an edge lands
-  // in the same texels frame after frame and the staircase holds still — which
-  // is all PCFSoftShadowMap needs to blur it into a soft edge.
-  // Half way up the casters, which is the center the span above was measured
-  // about — aiming anywhere else would leave the box needing to be bigger than
-  // it is to still hold them.
+  // Texel snapping. The map's grid is fixed in light space, and pileTopY keeps
+  // approaching its target by ever-smaller amounts, so an unquantized aim
+  // slides every edge across texels and the staircase ripples. Snapping the
+  // aim to whole texels keeps each edge in the same texels frame after frame.
+  // Aim half way up the casters — the center the span was measured about.
   const texel = (2 * shadowSpan) / key.shadow.mapSize.width;
   aimPoint.set(0, top / 2, 0);
   const x = Math.round(aimPoint.dot(LIGHT_X) / texel) * texel;
@@ -653,41 +644,18 @@ function aimKey() {
   key.position.copy(key.target.position).addScaledVector(KEY_DIR, KEY_STANDOFF + pileTopY);
 }
 
-// Swung round to sit opposite the key, and left low and weak. A key this low
-// leaves a genuinely dark side, which is the point — but with nothing coming the
-// other way it goes to flat black and takes the shape of the chair with it. Cool
-// against the key's warmth, and far too dim to compete: it says how deep the
-// shadow is, not where the light comes from. Casts nothing, as before.
+// Opposite the key, low and weak: keeps the dark side from going flat black.
+// It says how deep the shadow is, not where the light comes from. Cool against
+// the key's warmth, and casts nothing.
 const fill = new THREE.DirectionalLight(0x8fa6c4, 0.3);
 fill.position.set(-9, 4.5, 6);
 scene.add(fill);
 
-// There used to be a spot 9m up here, throwing a soft pool of light on the patch
-// of floor the pile grows on: decay=0 so it held as the heap rose, penumbra=1 so
-// it had no rim, and deliberately casting no shadow on the grounds that the key
-// already did and a second set would read as a mistake.
-//
-// Casting no shadow is what made it untenable. It was the brightest thing on the
-// floor by some way, and it reached that floor straight through the chairs — so
-// the ground under the densest part of the heap came out as bright as open floor
-// three meters away, and a patch hemmed in on all sides could read lighter than
-// one in the open, which is the exact opposite of what being surrounded by
-// chairs should look like. It also lit the inside of the pile as evenly as the
-// top of it, flattening the whole heap.
-//
-// None of that was visible while the shadows were soft and approximate. It only
-// became the thing standing in the way once everything else had been taught to
-// respect what is in front of it: one light that ignores geometry entirely
-// undoes the grounding the rest of them establish. So it is gone, and the key,
-// ambient and sky are each lifted a little to make up the exposure it was
-// carrying — light that answers to the geometry, in place of light that did not.
-
 /**
- * A tileable value-noise texture for the floor, drawn at runtime so the page
- * stays self-contained. Kept near white and low contrast: it multiplies the
- * floor color, so it reads as broad unevenness in the concrete rather than as a
- * pattern. Octaves are deliberately coarse — the smallest features still span
- * several chair-widths once it's stretched over the floor.
+ * A tileable value-noise texture for the floor, drawn at runtime. Near white
+ * and low contrast — it multiplies the floor color and reads as unevenness in
+ * the concrete. Octaves are coarse: the smallest features span several
+ * chair-widths.
  */
 function makeFloorTexture() {
   const SIZE = 512;
@@ -716,10 +684,8 @@ function makeFloorTexture() {
     for (let x = 0; x < SIZE; x++) {
       let n = 0;
       for (const [sample, weight] of layers) n += sample(x / SIZE, y / SIZE) * weight;
-      // Spread around the mean, not across the raw range. Summing octaves
-      // clusters n tightly about 0.5, so scaling [0,1] into a narrow band (the
-      // obvious way to keep it subtle) leaves only a couple of percent of actual
-      // variation and the mottling disappears entirely.
+      // Spread around the mean: summing octaves clusters n tightly about 0.5,
+      // and scaling the raw range instead would leave almost no variation.
       const shade = Math.min(1, Math.max(0, 0.9 + (n - 0.5) * 0.3));
       const v = Math.round(255 * shade);
       const i = (y * SIZE + x) * 4;
@@ -731,24 +697,19 @@ function makeFloorTexture() {
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  // ~10 units per tile, matching the floor's own size: 60 tiles over 600 units.
-  // Tiles any larger than this and the patch of floor around the pile is less
-  // than one tile wide, so the mottling flattens into a plain gradient and reads
-  // as no texture at all. Here the coarsest octave lands around 3 units —
-  // several chairs across, large but legible.
+  // ~10 units per tile. Larger and the patch of floor around the pile is less
+  // than one tile wide, and the mottling flattens into a plain gradient.
   texture.repeat.set(60, 60);
-  // Enough to keep the mottling from smearing at grazing angles near the
-  // horizon; the full 16x costs real sampling time on a floor this big for no
-  // visible gain on texture this soft.
+  // Enough to keep the mottling from smearing near the horizon; 16x costs real
+  // sampling time on a floor this big for no visible gain.
   texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
   return texture;
 }
 
 const floorTexture = makeFloorTexture();
-// Two triangles, so the size is free — and it has to outrun the fog. The haze
-// thins as the camera pulls back, which reaches further out into the floor, and
-// a plane that ends inside the visible range shows its edge as a hard line
-// against the void. This one always ends well past where the fog has closed.
+// Two triangles, so the size is free — and it has to outrun the fog, which
+// thins as the camera pulls back. A plane ending inside the visible range
+// shows its edge as a hard line against the void.
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(600, 600),
   new THREE.MeshStandardMaterial({
@@ -760,22 +721,11 @@ const floor = new THREE.Mesh(
   })
 );
 floor.rotation.x = -Math.PI / 2;
-// Drawn a few millimeters over the plane the chairs actually land on, so every
-// one of them stands a little into the ground rather than exactly on it.
-//
-// The problem it answers is that a foot resting exactly on a plane meets it
-// along a hairline, and every small error in the shadow shows up on that line
-// as a bright seam: the filter is 15mm wide and the bias still walks the edge a
-// couple of millimeters, and none of that has anywhere to hide when the contact
-// is infinitely thin. Sink the foot and the junction becomes an intersection
-// instead of a join — the underside, and the seam with it, are simply below the
-// floor. It does not make the shadow more correct; it puts the remaining error
-// somewhere it cannot be seen.
-//
-// Cheaper than it looks: raising the floor moves nothing else. The physics
-// plane stays at zero, so the simulation is untouched and no mesh parts company
-// with its collider, and since the chairs do not move relative to each other,
-// the pile is identical — it is only the ground that has come up to meet it.
+// Drawn a few millimeters over the plane the chairs land on, so every foot
+// stands slightly into the ground. A foot resting exactly on the plane meets
+// it along a hairline where every small shadow error shows as a bright seam;
+// sunk, the junction is an intersection and the error is below the floor. The
+// physics plane stays at zero, so the simulation is untouched.
 floor.position.y = 0.010;
 tuneShadows(floor.material, { contact: true });
 floor.receiveShadow = true;
@@ -790,14 +740,11 @@ world.solver.tolerance = 0.002;
 
 const chairMat = new CANNON.Material('chair');
 const floorMat = new CANNON.Material('floor');
-// High friction, near-zero bounce: chairs should grab and settle, not skate away.
-// Stiff contacts, and the reason is visual rather than physical. A contact in
-// cannon is a spring: the softer it is, the further two bodies sink into each
-// other before it pushes back. A few millimeters of that is invisible on its
-// own, but where two boxes overlap their surfaces intersect, and the
-// intersection is a crisp polygon lit differently from the face it cuts across
-// — a hard-edged sliver of one chair showing through another. Stiffening the
-// spring shortens the overlap and shrinks the sliver with it.
+// High friction, near-zero bounce: chairs grab and settle, not skate away.
+// Contacts are stiff for a visual reason: a contact is a spring, and the
+// softer it is the further two boxes sink into each other — and an
+// intersection of two boxes draws a crisp lit sliver of one chair inside
+// another. See COLLIDER_SKIN, which spends the remaining overlap on padding.
 const CONTACT_SPRING = { contactEquationStiffness: 1e8, contactEquationRelaxation: 3 };
 world.addContactMaterial(new CANNON.ContactMaterial(chairMat, chairMat, { friction: 0.6, restitution: 0.03, ...CONTACT_SPRING }));
 world.addContactMaterial(new CANNON.ContactMaterial(chairMat, floorMat, { friction: 0.7, restitution: 0.02, ...CONTACT_SPRING }));
@@ -809,7 +756,7 @@ world.addBody(floorBody);
 // -------------------------------------------------------------------- chairs
 const chairGeometry = buildChairGeometry();
 const materials = PALETTE.map((color) => new THREE.MeshStandardMaterial({ color, roughness: 0.68, metalness: 0.04 }));
-materials.forEach((m) => tuneShadows(m));
+materials.forEach((m) => tuneShadows(m, { joints: true }));
 
 const chairs = [];     // every dropped chair, in drop order
 let freezeIdx = 0;     // chairs before this index are already frozen
@@ -831,36 +778,24 @@ function isFrozen(chair) {
 
 /** Turn a physics contact into a knock, if it's worth hearing. */
 function onCollide(chair, event) {
-  // Bedrock has no rattle left in it — it cannot move, so there is nothing there
-  // to hear. It also puts a ceiling on the racket: every chair ever dropped
-  // stays in the world and stays able to answer, so without this the deeper the
-  // pile got the louder every landing would be, forever.
+  // Bedrock cannot move, so there is nothing to hear — and this caps the
+  // racket, since every chair ever dropped stays in the world.
   if (isFrozen(chair)) return;
 
   const speed = Math.abs(event.contact.getImpactVelocityAlongNormal());
   if (speed < HIT_MIN_SPEED) return; // a nudge, not a knock
 
-  // A ten-box chair makes several contacts per landing, and a chair resting on
-  // the pile keeps generating them forever. One knock per chair per cooldown
-  // collapses both into the single sound the eye expects.
+  // An eight-box chair makes several contacts per landing, and a resting chair
+  // keeps generating them; one knock per chair per cooldown collapses both
+  // into the single sound the eye expects.
   const now = performance.now();
   if (now - chair.lastHitAt < HIT_COOLDOWN_MS) return;
   chair.lastHitAt = now;
 
-  // Both chairs in a chair-on-chair hit are told about it, and both now answer.
-  //
-  // They didn't before, and which one was speaking was backwards: the tie-break
-  // gave the pair to the lower id, and the lower id is always the older chair —
-  // so what sounded on every landing was the chair already lying in the pile, at
-  // full strength, while the chair that actually fell was silenced. A landing was
-  // four or five settled chairs shouting at once, each at its own pitch, and no
-  // voice for the impact itself. That chord is where the mush came from.
-  //
-  // So keep both voices and let the fall decide the level. The arriving chair is
-  // still falling when it strikes, so it makes the knock; the chairs it lands on
-  // have come to rest, so they answer under it — quietly, each in its own voice,
-  // from its own place in the stereo field. Same count of voices, one of them now
-  // in front.
+  // Both chairs in a hit answer, and the fall decides the level: the arriving
+  // chair is still falling, so it makes the knock at full strength; the chairs
+  // it lands on have come to rest and answer under it, quietly, each in its
+  // own voice and place in the stereo field.
   const level = chair.landed ? BUMP_LEVEL : 1;
 
   // Pan by where the chair sits across the current view rather than in world
@@ -875,21 +810,12 @@ function onCollide(chair, event) {
 }
 
 /**
- * The stand-in for the depth material three.js would otherwise use in the shadow
- * pass, with one addition: it can throw away a share of its own fragments, and
- * so cast a partial shadow.
- *
- * Dithered rather than blended because a shadow map has nowhere to put a
- * half-shadow — a fragment is either the nearest thing to the light or it is
- * not. So discard a share of them in a fine pattern instead, and let the filter
- * that already softens every shadow edge average what survives back into a gray.
- * Interleaved gradient noise for the pattern: it scatters evenly at pixel scale,
- * costs two instructions, and needs no array to index into, which the shader
- * language makes awkward anyway.
- *
- * Every chair gets one of these, so each can fade on its own, but the cache key
- * is fixed so they all still share the one compiled program — the uniform is the
- * only thing that differs.
+ * The depth material for the shadow pass, with one addition: it can discard a
+ * share of its fragments and so cast a partial shadow. Dithered rather than
+ * blended because a shadow map has no place for a half-shadow; the filter that
+ * softens every edge averages the surviving fragments back into gray. Every
+ * chair gets its own so each can fade alone, but the cache key is fixed so
+ * they all share one compiled program.
  */
 function makeShadowFader() {
   const material = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
@@ -918,9 +844,8 @@ function shadowFade(chair) {
 }
 
 function makeChair() {
-  // Kept as an index, not just a material: when this chair freezes it stops
-  // being a mesh with a material of its own and becomes one instance among many,
-  // which carries its color as a value rather than as a reference.
+  // Kept as an index: when the chair freezes, its color becomes an instance
+  // value rather than a material reference.
   const tint = Math.floor(Math.random() * PALETTE.length);
   const mesh = new THREE.Mesh(chairGeometry, materials[tint]);
   mesh.castShadow = true;
@@ -962,16 +887,10 @@ function strayLimit() {
 }
 
 /**
- * How high a chair starts: out of sight, above the top of the frame.
- *
- * Worked out from the camera rather than from the pile, because "off screen" is
- * a fact about the frame and the frame keeps moving — it pulls back as the heap
- * grows and dives in when demo mode does. A fixed height over the pile would
- * hang chairs in plain sight at one zoom and bury them at another.
- *
- * The MIN_SKY_GAP floor is for exactly that second case: zoomed in among the
- * chairs the top of the frame can be lower than the top of the heap, and a chair
- * released there would appear inside the pile rather than over it.
+ * How high a chair starts: out of sight, above the top of the frame. Worked
+ * out from the camera because the frame keeps moving; a fixed height over the
+ * pile would hang chairs in plain sight at one zoom and bury them at another.
+ * MIN_SKY_GAP covers the case where the frame top is below the heap.
  */
 function skyHeight() {
   const dist = camera.position.distanceTo(controls.target);
@@ -987,9 +906,8 @@ function dropChair() {
 
   const chair = makeChair();
 
-  // Uniform over the disc, not over the radius: without the square root the
-  // middle gets crowded, since a ring's area grows with how far out it is, and
-  // the drop column this is meant to break up would quietly come back.
+  // Uniform over the disc, not the radius: without the square root the middle
+  // gets crowded and the drop column quietly comes back.
   const angle = Math.random() * Math.PI * 2;
   const r = spawnRadius() * Math.sqrt(Math.random());
   const x = Math.cos(angle) * r;
@@ -1020,26 +938,17 @@ function dropChair() {
 }
 
 // ------------------------------------------------------------------ bedrock
-// Every frozen chair, drawn in one call.
-//
-// A chair of its own costs two draw calls a frame forever — once into the shadow
-// map, once into the scene — and three.js spends real CPU on each one whether
-// the chair moved or not. Measured, a settled heap of ~2,200 chairs was 4,355
-// calls and about 50ms a frame, which is where "pile up forever" stopped being
-// true: the GPU was idle and the time went entirely on submitting the work.
-//
-// But a frozen chair is welded in place with its velocity zeroed and is never
-// read again, which is exactly the bargain an InstancedMesh asks for: one
-// transform, written once, never touched. So the whole of bedrock collapses into
-// a single call and stays there, however deep it gets, and the per-frame cost of
-// the pile becomes the couple of dozen chairs still moving on top of it.
+// Every frozen chair, drawn in one call. A mesh of its own costs two draw
+// calls a frame forever (shadow map and scene), and at ~2,200 chairs that was
+// 4,355 calls and ~50ms a frame of pure submission. A frozen chair is one
+// transform, written once and never touched — exactly what an InstancedMesh
+// asks for — so bedrock stays a single call however deep it gets.
 const BEDROCK_CHUNK = 256; // instances to allocate at a time; doubles from here
 
-// One material for all of it. The palette lives in each instance's own color
-// instead, which is why this one is white: three.js multiplies the two, so
-// anything else here would tint the whole heap.
+// One material for all of it, white because the palette lives in each
+// instance's own color and three multiplies the two.
 const bedrockMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.68, metalness: 0.04 });
-tuneShadows(bedrockMaterial);
+tuneShadows(bedrockMaterial, { joints: true });
 
 let bedrock = null;
 let bedrockCount = 0;
@@ -1088,9 +997,8 @@ function reserveBedrock(need) {
 function addToBedrock(chair) {
   reserveBedrock(bedrockCount + 1);
 
-  // Composed from the body rather than read off the mesh: the mesh's matrix is
-  // only refreshed at render, so it can be a frame stale, and this is the last
-  // chance to get the transform right — nothing will ever update it again.
+  // Composed from the body, not the mesh: the mesh can be a frame stale, and
+  // nothing will ever update this transform again.
   _pos.copy(chair.body.position);
   _quat.copy(chair.body.quaternion);
   _mat.compose(_pos, _quat, _one);
@@ -1102,26 +1010,16 @@ function addToBedrock(chair) {
   bedrock.instanceColor.needsUpdate = true;
 
   scene.remove(chair.mesh);
-  // Bedrock is solid and never fades, so the fader goes with the mesh. One per
-  // chair adds up over two thousand of them, and nothing is going to ask this one
-  // for a shadow again.
+  // Bedrock never fades, so the fader goes with the mesh.
   chair.mesh.customDepthMaterial.dispose();
   chair.mesh = null; // it is an instance now, and nothing may reach for it again
 }
 
 /**
- * Settled chairs deep in the pile become static: cheap, and the base stops
- * creeping. Prefers to freeze a chair that is actually at rest, so one still
- * tumbling is not locked in place mid-motion — it just gets frozen on a later
- * frame once it comes to rest. Deliberately tests rest rather than the physics
- * engine's sleep state: chairs this deep are pinned but get knocked awake by
- * every landing above them, so waiting for sleep could stall the queue for good
- * and let the per-frame work grow without bound.
- *
- * Past FREEZE_FORCE_BEHIND it stops preferring and just takes them, which is
- * what actually holds that promise — testing rest instead of sleep narrows the
- * stall but does not close it, since a chair can jitter below the sleep
- * threshold and above the rest one indefinitely.
+ * Settled chairs deep in the pile become static. Prefers chairs actually at
+ * rest — tested directly, not via the engine's sleep state, since chairs this
+ * deep are knocked awake by every landing above. Past FREEZE_FORCE_BEHIND it
+ * takes them regardless; see that constant for why.
  */
 function freezeSettled() {
   while (chairs.length - freezeIdx > FREEZE_BEHIND) {
@@ -1207,10 +1105,9 @@ let demo = false;
 const TIMBRE_KEY = 'chair-pile-timbre'; // which knock they settled on, kept for next time
 
 /**
- * fromButton says a real click opened this, which decides two things: whether
- * the audio context may be created (it may only be built inside a genuine
- * gesture, and the greeting on load is not one), and where focus goes on the way
- * back out.
+ * fromButton: a real click opened this, so audio may be created (it needs a
+ * genuine gesture, and the greeting on load is not one) and focus may return
+ * to the button on the way out.
  */
 function openMenu({ fromButton }) {
   menuOpen = true;
@@ -1222,28 +1119,19 @@ function openMenu({ fromButton }) {
 }
 
 /**
- * Close, and put focus somewhere the page still works from. A mouse click
- * leaves its control focused, and the keydown handler ignores keys aimed at a
- * button — so "press any key" would quietly stop dropping chairs. Blur for the
- * pointer, hand it back to the hamburger for the keyboard, where losing your
- * place is worse than losing a keystroke.
- *
- * Only ever back to the hamburger, though, if that is where they came from. The
- * greeting on load came from nowhere: parking focus on a button they never
- * pressed would leave the keyboard aimed at the menu, and every key they then
- * pressed to drop a chair would go to it instead and do nothing.
+ * Close, and put focus somewhere the page still works from: a focused button
+ * would swallow the any-key drop, so blur for the pointer and hand focus back
+ * to the hamburger for the keyboard — but only if that is where they came
+ * from; the greeting on load came from nowhere.
  */
 function closeMenu({ toButton }) {
   menuOpen = false;
   scrim.hidden = true;
   document.body.classList.remove('menu-open');
   menuBtn.setAttribute('aria-expanded', 'false');
-  // Every way out of here is a real gesture — a click on the scrim, Close, the
-  // close cross or the hamburger, or Escape — so this is the earliest the
-  // context may legally be built. It has to happen here now that demo ships on:
-  // the greeting is the only thing holding the chairs back, so the first one
-  // lands moments after this returns, and nothing else would have unlocked the
-  // audio in time for it to be heard.
+  // Every way out of here is a real gesture, so this is the earliest the audio
+  // context may be built — and with demo shipping on, the first chair lands
+  // moments after this returns.
   initAudio();
   if (toButton && openedFromButton) menuBtn.focus();
   else if (document.activeElement) document.activeElement.blur();
@@ -1256,10 +1144,8 @@ menuBtn.addEventListener('click', (e) => {
   else openMenu({ fromButton: true });
 });
 
-// Only the scrim itself: a click that lands on the overlay is not a dismissal.
-scrim.addEventListener('click', (e) => {
-  if (e.target === scrim) closeMenu({ toButton: false });
-});
+// The scrim swallows clicks so they cannot reach the canvas, but it is not a
+// dismissal: the overlay closes only from its own buttons (or Escape).
 
 doneBtn.addEventListener('click', (e) => closeMenu({ toButton: e.detail === 0 }));
 document.getElementById('close-btn')
@@ -1286,18 +1172,15 @@ demoToggle.addEventListener('change', () => {
 });
 
 /**
- * Demo waits for the overlay to be out of the way — it is switched on from
- * behind the very thing that would hide it, and the first chair down is the one
- * worth seeing. Both halves hold off: nothing falls, and the camera stays put.
+ * Demo holds off — chairs and camera both — until the overlay is out of the
+ * way: the first chair down is the one worth seeing.
  */
 function demoRunning() {
   return demo && !menuOpen;
 }
 
-// Deliberately not remembered between visits, where the knock is. The knock is a
-// taste; this is a thing to play with. Coming back to a sketch you left at 0.1
-// and finding chairs already falling faster than they can land is a fright, not
-// a preference being honored.
+// Deliberately not remembered between visits (the knock is): coming back to
+// chairs already falling faster than they can land is a fright.
 spawnEl.addEventListener('input', () => {
   const seconds = Number(spawnEl.value);
   demoDropMs = seconds * 1000;
@@ -1329,10 +1212,119 @@ timbreEl.addEventListener('click', (e) => {
   clatter(0.85, 1, 0); // hear the choice now, rather than waiting for a chair to land
 });
 
-// Open, every time, over an empty floor. The piece starts as a room with nothing
-// in it and a card explaining what it is; nothing falls, and demo mode holds,
-// until the card is out of the way. Whatever happens first should be watched
-// rather than missed behind the thing telling you about it.
+// ------------------------------------------------------------ scene fixtures
+// A scene is the pile plus the camera, and nothing else: the key light is a
+// fixed direction and everything about the shadow camera derives from the
+// pile, so chairs and camera reproduce the whole image. Loading rebuilds the
+// chairs welded still — an exact scene to look at, not a simulation to
+// continue — which is what makes run-to-run comparison possible.
+
+/** The pile and camera as a plain object, small enough to save as JSON. */
+function sceneSnapshot() {
+  const round = (n) => Math.round(n * 10000) / 10000;
+  return {
+    v: 1,
+    chairs: chairs.map((c) => {
+      const p = c.body.position, q = c.body.quaternion;
+      return [round(p.x), round(p.y), round(p.z), round(q.x), round(q.y), round(q.z), round(q.w), c.tint];
+    }),
+    camera: {
+      p: camera.position.toArray().map(round),
+      t: controls.target.toArray().map(round),
+      fov: camera.fov,
+    },
+  };
+}
+
+/** Remove every chair, live and bedrock, leaving an empty floor. */
+function clearPile() {
+  for (const chair of chairs) {
+    world.removeBody(chair.body);
+    if (chair.mesh) {
+      scene.remove(chair.mesh);
+      chair.mesh.customDepthMaterial.dispose();
+    }
+  }
+  chairs.length = 0;
+  freezeIdx = 0;
+  if (bedrock) {
+    scene.remove(bedrock);
+    bedrock.dispose();
+    bedrock = null;
+  }
+  bedrockCount = 0;
+  frozenTopY = 0;
+  frozenRadius = 0;
+  pileTopY = 0;
+  pileRadius = 0;
+  dropped = 0;
+  countEl.textContent = '0 chairs';
+}
+
+/** Rebuild a saved scene exactly: every chair static at its saved pose. */
+function loadSceneSnapshot(data) {
+  if (!data || data.v !== 1 || !Array.isArray(data.chairs)) return false;
+  clearPile();
+  for (const row of data.chairs) {
+    const [px, py, pz, qx, qy, qz, qw, tint] = row;
+    const chair = makeChair();
+    chair.tint = tint >= 0 && tint < PALETTE.length ? Math.floor(tint) : 0;
+    chair.mesh.material = materials[chair.tint];
+    chair.body.position.set(px, py, pz);
+    chair.body.quaternion.set(qx, qy, qz, qw);
+    chair.body.type = CANNON.Body.STATIC;
+    chair.body.mass = 0;
+    chair.body.updateMassProperties();
+    chair.landed = true;
+    chair.mesh.position.copy(chair.body.position);
+    chair.mesh.quaternion.copy(chair.body.quaternion);
+    world.addBody(chair.body);
+    chairs.push(chair);
+  }
+  dropped = chairs.length;
+  countEl.textContent = dropped === 1 ? '1 chair' : `${dropped} chairs`;
+
+  // Measure the loaded pile so the framing and the shadow fit start right,
+  // and pin the framing to it so nothing moves on the first frame.
+  for (const c of chairs) {
+    pileTopY = Math.max(pileTopY, c.body.position.y + CHAIR_MID);
+    pileRadius = Math.max(pileRadius, Math.hypot(c.body.position.x, c.body.position.z));
+  }
+  framedTop = pileTopY;
+  framedWide = pileRadius;
+  if (data.camera) {
+    camera.position.fromArray(data.camera.p);
+    controls.target.fromArray(data.camera.t);
+    camera.fov = data.camera.fov || 50;
+    camera.updateProjectionMatrix();
+    camFocusY = controls.target.y;
+    wantDist = camera.position.distanceTo(controls.target);
+  }
+  return true;
+}
+
+document.getElementById('save-scene').addEventListener('click', () => {
+  const blob = new Blob([JSON.stringify(sceneSnapshot())], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `chair-pile-scene-${chairs.length}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+const sceneFile = document.getElementById('scene-file');
+document.getElementById('load-scene').addEventListener('click', () => sceneFile.click());
+sceneFile.addEventListener('change', async () => {
+  const file = sceneFile.files[0];
+  sceneFile.value = ''; // the same file must be loadable twice in a row
+  if (!file) return;
+  try {
+    loadSceneSnapshot(JSON.parse(await file.text()));
+  } catch { /* not a scene file: leave the pile as it is */ }
+});
+
+// Open over an empty floor, every time: nothing falls, and demo mode holds,
+// until the card is out of the way.
 openMenu({ fromButton: false });
 
 // --------------------------------------------------------------------- loop
@@ -1343,30 +1335,20 @@ let framedWide = -1;                                   // and the width, which g
 let wantDist = camera.position.distanceTo(controls.target);
 const _dir = new THREE.Vector3();
 
-// Whether the viewer has taken themselves in among the chairs, which is the one
-// case where the framing must not pull back.
-//
-// Decided only when they stop touching it, never mid-flight. Reading it live off
-// the distance looks equivalent and is not: the framing trails its own fit
-// whenever the pile grows quickly, and a camera lagging behind the fit is
-// indistinguishable, by distance alone, from a camera someone drove in close. So
-// the shot would give up following exactly when the heap was growing fastest, and
-// stay given up, because the fit only runs further ahead from there. It went in
-// among the chairs and never came out.
+// Whether the viewer has taken themselves in among the chairs — the one case
+// where the framing must not pull back. Decided only when they stop touching
+// the controls: read live, a camera lagging the growing fit is
+// indistinguishable from one driven in close, and the framing would give up
+// exactly when the heap grows fastest.
 let viewerZoomed = false;
 controls.addEventListener('end', () => {
   viewerZoomed = camera.position.distanceTo(controls.target) < wantDist * EXPLORE_FRACTION;
 });
 
 /**
- * Keep the floor and the heap in frame as it grows, on both counts: it gets
- * taller, and it gets wider. Only re-fits when it actually gains one or the
- * other, and only ever pulls back — so orbiting is never fought.
- *
- * Stands down entirely once the camera is well inside the framing distance,
- * which means the viewer has deliberately zoomed in among the chairs. Otherwise
- * the next chair to land would grow the pile, widen the fit, and quietly drag
- * them back out of the pile they were exploring.
+ * Keep the heap in frame as it grows taller and wider. Only re-fits on real
+ * growth, only ever pulls back — so orbiting is never fought — and stands
+ * down once the viewer has deliberately zoomed in among the chairs.
  */
 function frame(dt, t) {
   const spanTop = pileTopY + PILE_AIR;
@@ -1375,8 +1357,7 @@ function frame(dt, t) {
     framedTop = pileTopY;
     framedWide = pileRadius;
     const vFov = THREE.MathUtils.degToRad(camera.fov);
-    // The horizontal field is the vertical one widened by the aspect, so on a
-    // wide screen the width is nearly free and on a tall one it is what decides.
+    // On a wide screen the width is nearly free; on a tall one it decides.
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * camera.aspect);
     const needTall = (spanTop * 0.5) / Math.tan(vFov / 2) * FRAME_MARGIN;
     const needWide = (spanWide * 0.5) / Math.tan(hFov / 2) * FRAME_MARGIN;
@@ -1387,20 +1368,15 @@ function frame(dt, t) {
   const dist = _dir.length();
 
   // Thin the haze as the camera retreats, so the pile keeps the same slight
-  // remove at any zoom instead of dissolving into the void. Held below FOG_HOLD:
-  // zoomed in among the chairs the orbit distance goes to almost nothing, and
-  // dividing by it would pack the whole pile into solid fog.
+  // remove at any zoom. Held below FOG_HOLD: zoomed in, the orbit distance
+  // goes to almost nothing and dividing by it would pack the pile into fog.
   scene.fog.density = FOG_HAZE / Math.max(dist, FOG_HOLD);
 
-  // The orbit center is both what the camera looks at and what it zooms toward.
-  // Framed from outside it belongs up in the air over the heap, where the shot is
-  // centered; but zooming toward that point just flies into that empty air.
-  // So as the viewer comes in, walk it down into the body of the pile — the
-  // closer they get, the more the pile itself is the subject, and zooming
-  // carries them in among the chairs.
-  // Measured from the explore threshold, not from wantDist itself: while the
-  // pile is growing the camera legitimately trails its fit distance, and reading
-  // that lag as "zoomed in" would sag the view downward on every drop.
+  // Walk the orbit center down into the pile as the viewer comes in, so
+  // zooming carries them in among the chairs instead of into the empty air the
+  // framed shot is centered on. Measured from the explore threshold, not
+  // wantDist: the camera legitimately trails the fit while the pile grows, and
+  // reading that lag as "zoomed in" would sag the view on every drop.
   const closeness = THREE.MathUtils.clamp(
     (wantDist * EXPLORE_FRACTION - dist) / (wantDist * 0.5), 0, 1);
   const framed = Math.max(1.1, spanTop * FOCUS_BIAS);
@@ -1412,12 +1388,9 @@ function frame(dt, t) {
   camera.position.y += delta;
   controls.target.y += delta;
 
-  // In demo mode the breath owns the distance. It has to run instead of the
-  // framing below rather than alongside it: that code exists to pull the camera
-  // back out to the fit, which is exactly what it would do to every zoom the
-  // demo tried to make. wantDist still tracks the growing pile above, so the
-  // breath stays proportional to it, and the focus walk has already read the
-  // closer distance — so diving in also tips the view down into the heap.
+  // In demo mode the breath owns the distance. It runs instead of the framing
+  // below, which would pull every dive back out; wantDist still tracks the
+  // pile, so the breath stays proportional to it.
   if (demoRunning()) {
     const breath = (Math.sin((t / DEMO_ZOOM_PERIOD) * Math.PI * 2) + 1) / 2;
     const want = wantDist * THREE.MathUtils.lerp(DEMO_ZOOM_NEAR, DEMO_ZOOM_FAR, breath);
@@ -1441,18 +1414,11 @@ function animate() {
 
   world.step(1 / 60, dt, 4);
 
-  // One pass over the live chairs: move their meshes, notice the ones that have
-  // landed, and measure the pile. Chairs before freezeIdx are frozen — their
-  // transforms and heights can never change, so they cost nothing per frame no
-  // matter how deep the pile gets.
-  //
-  // Only chairs that have landed count toward the height. A chair in mid-fall is
-  // briefly the highest thing in the scene, and counting it made the measurement
-  // dive from the spawn height down to the pile on every drop — which the camera
-  // faithfully followed, heaving the whole view like a swell. Note that landing
-  // is about being at rest, NOT about the physics engine putting the body to
-  // sleep: at this drop cadence chairs constantly knock each other awake, so a
-  // sleep-based test finds almost nothing settled and the pile reads as flat.
+  // One pass over the live chairs: move their meshes, notice landings, measure
+  // the pile. Frozen chairs can never change and cost nothing here. Only
+  // landed chairs count toward the height — counting one in mid-fall made the
+  // measurement, and the camera with it, heave on every drop. Landed means at
+  // rest, not asleep: chairs constantly knock each other awake.
   let measuredTop = frozenTopY;
   let measuredWide = frozenRadius;
   const limit = strayLimit();
@@ -1468,9 +1434,8 @@ function animate() {
       if (chair.fallTime > MIN_FALL_TIME && atRest(body)) chair.landed = true;
       continue; // still on its way down: not part of the pile yet
     }
-    // Strays that rolled clear are neither the top of the heap nor the width of
-    // it: one chair skittering away must not haul the framing out after it, nor
-    // widen the drop zone to somewhere no chair has actually settled.
+    // Strays that rolled clear count toward neither the height nor the width:
+    // one chair skittering away must not haul the framing out after it.
     const reach = Math.hypot(body.position.x, body.position.z);
     if (reach > limit) continue;
     measuredTop = Math.max(measuredTop, body.position.y + CHAIR_MID);
@@ -1497,13 +1462,16 @@ function animate() {
   aimKey();
 
   controls.update();
-  renderer.render(scene, camera);
+  if (composer) composer.render();
+  else renderer.render(scene, camera);
 }
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer?.setSize(window.innerWidth, window.innerHeight);
+  if (gtao) sizeGtao();
 });
 
 animate();
