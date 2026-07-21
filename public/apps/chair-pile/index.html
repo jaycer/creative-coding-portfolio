@@ -97,6 +97,7 @@
 
       .sheet {
         position: relative; /* the close button hangs off this */
+        zoom: 0.9; /* the whole card, text included, a tenth smaller */
         width: 100%;
         max-width: 320px;
         /* Taller than a phone held sideways, which is a real way to hold a phone.
@@ -235,6 +236,7 @@
         opacity: 0.7;
         border-top: 1px solid rgba(255,255,255,0.18);
       }
+      .sheet .actions { display: flex; gap: 8px; }
       .sheet .action {
         margin-top: 20px;
         width: 100%;
@@ -304,7 +306,14 @@
           <p class="desc">Tap or press any key to send another chair down. Drag to look around, scroll to zoom into the pile.</p>
         </div>
 
-        <button class="action" id="done-btn" type="button">Close</button>
+        <div class="actions">
+          <button class="action" id="save-scene" type="button">Save scene</button>
+          <button class="action" id="load-scene" type="button">Load scene</button>
+        </div>
+        <input type="file" id="scene-file" accept="application/json" hidden />
+        <p class="desc">Save writes the pile and camera to a JSON file. Load rebuilds that exact scene, welded still, so the same moment can be revisited or compared run to run.</p>
+
+        <button class="action" id="done-btn" type="button">Run Chair Pile</button>
       </div>
     </div>
 
