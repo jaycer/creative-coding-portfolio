@@ -1,15 +1,13 @@
 // Manifest for the gallery grid. Each entry is a self-contained sub-app served
-// at /apps/<slug>/. The numbered apps are Vite multi-page entries under /apps;
-// the named ones below are fully static pages under /public/apps/<slug>/ (they
-// load p5/Bootstrap from a CDN and fetch their own assets at runtime, so they
-// ship verbatim rather than going through the bundler). Static apps set
-// `entry: 'index.html'` so the gallery links straight to the file — Vite's dev
-// server only resolves bare directory URLs for its own registered entries, not
-// for static folders under /public. To add work: drop a folder in either place
-// and add a row here.
+// at /apps/<slug>/. The apps below are fully static pages under
+// /public/apps/<slug>/ (they load p5/Bootstrap from a CDN and fetch their own
+// assets at runtime, so they ship verbatim rather than going through the
+// bundler) and set `entry: 'index.html'` so the gallery links straight to the
+// file. Vite can also build multi-page entries dropped under /apps/<slug>/ —
+// its dev server only resolves bare directory URLs for those registered
+// entries, not for static folders under /public. To add work: drop a folder in
+// either place and add a row here.
 export const apps = [
-  // Flow Field (app-01) and Particle Swarm (app-02) are intentionally unlisted —
-  // still reachable by direct URL, just not shown in the gallery grid.
   { slug: 'chair-pile',             title: 'Chair Pile',             blurb: 'Chairs fall out of the dark and pile up forever. Tap or press any key to send another one down, then drag to look around what you built.', entry: 'index.html' },
   { slug: 'photo-gallery',          title: 'Photo Gallery',          blurb: 'Professional photography including real estate interiors and exteriors, and more.', entry: 'index.html' },
   { slug: 'ch4td1c3',               title: 'ch4td1c3',               blurb: 'A full set of DnD dice drawn by a raymarching shader, hearts and all. Tap a die to roll it, or rattle the whole set.', entry: 'index.html' },
