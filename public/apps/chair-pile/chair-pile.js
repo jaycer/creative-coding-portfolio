@@ -57,10 +57,24 @@ const SKY_MARGIN = 1.3;        // clearance over the top of the frame
 const SHADOW_FADE_FROM = 4.6;  // height over the heap where the shadow starts coming in
 const SHADOW_FADE_TO = 1.1;    // and where it is full strength
 
-// How wide a shadow edge is allowed to be, in meters — about a third of a leg.
-// Held constant in the world as the frustum grows; see where aimKey sets the
-// filter radius from it.
-const SHADOW_BLUR = 0.015;
+// Desktop-class or not, decided once at load. It already gates the shadow-map
+// size and the AO pass (see where the renderer is built); it also picks the
+// soft-shadow tier below. Kept here, above the shadow constants and the shader
+// chunk that bake it in, because both need it before the renderer exists.
+const SHADOW_HQ = window.matchMedia('(pointer: fine)').matches;
+
+// Soft-shadow budget, per tier. The penumbra widens with how far a caster sits
+// above what it lands on (PCSS, see getShadow), up to SHADOW_MAX_BLUR — so a
+// chair high in the pile throws a soft edge while a foot on the floor stays
+// crisp (contact hardening). The ceiling and the tap counts are the whole cost
+// knob: a wider ceiling needs more taps to stay smooth instead of banding, and
+// every tap is a shadow-map fetch per shadowed fragment. Desktop (4096 map)
+// gets the full treatment; phones (2048 map, fill-rate bound) get a lighter one
+// that still hardens at contact but spends far fewer taps.
+const SHADOW_MAX_BLUR = SHADOW_HQ ? 0.05 : 0.03; // meters, widest a shadow edge may spread
+const SHADOW_RADIUS_MAX = SHADOW_HQ ? 28 : 12;   // blocker search cap, in texels
+const PCSS_SEARCH_TAPS = SHADOW_HQ ? 24 : 12;    // taps that find the blocker + its distance
+const PCSS_PCF_TAPS = SHADOW_HQ ? 32 : 16;       // taps that draw the penumbra gradient
 
 // Contact darkening on the floor. Subtracting the shadow map's stored depth
 // from the receiver's gives the gap between a chair and what its shadow lands
@@ -70,8 +84,10 @@ const SHADOW_BLUR = 0.015;
 // the chairs do not: on them the gap changes too fast, and the nine-tap
 // coverage stepped across the pile in visible bands.
 // How fast a shadow softens as its caster lifts away, in blur-meters per meter
-// of gap: at 0.15 an edge reaches full SHADOW_BLUR with the caster ~10cm off
-// the surface, and is a single texel — hard — at contact.
+// of gap: at 0.15 an edge reaches the SHADOW_MAX_BLUR ceiling with the caster
+// ~33cm off the surface (desktop), scaling smoothly from a single texel — hard
+// — at contact. This is the contact-hardening curve; the tier only moves where
+// it tops out.
 const PCSS_SOFTNESS = 0.15;
 
 const CONTACT_GAP = 0.12;      // meters of separation before it fades out entirely
@@ -189,7 +205,7 @@ const contactUniforms = {
   uContactStrength: { value: CONTACT_STRENGTH },
   uShadowDepth: { value: 1 },   // far - near of the shadow camera, in meters
   uPcssSoftness: { value: PCSS_SOFTNESS },
-  uPcssMaxBlur: { value: SHADOW_BLUR },
+  uPcssMaxBlur: { value: SHADOW_MAX_BLUR },
   uPcssTexel: { value: 0.002 }, // meters one shadow texel covers
   uJointRadius: { value: JOINT_RADIUS },
   uJointStrength: { value: JOINT_STRENGTH },
@@ -296,10 +312,10 @@ float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, floa
   // early-out below — returning fully lit along the inside of every corner.
   float sum = 0.0;
   float hits = 0.0;
-  for ( int i = 0; i < 12; i ++ ) {
+  for ( int i = 0; i < ${PCSS_SEARCH_TAPS}; i ++ ) {
     float fi = float( i );
     float a = fi * 2.39996323 + rot;
-    vec2 off = vec2( cos( a ), sin( a ) ) * sqrt( fi / 11.0 ) * maxR * texel; // fi = 0 lands dead centre
+    vec2 off = vec2( cos( a ), sin( a ) ) * sqrt( fi / ${(PCSS_SEARCH_TAPS - 1).toFixed(1)} ) * maxR * texel; // fi = 0 lands dead centre
     float d = unpackRGBAToDepth( texture2D( shadowMap, shadowCoord.xy + off ) );
     if ( d < CHAIR_Z_AT( off ) ) { sum += d; hits += 1.0; }
   }
@@ -319,14 +335,14 @@ float getShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowBias, floa
 
   // 3. Ordinary PCF, at that width, with enough taps to read as a gradient.
   float lit = 0.0;
-  for ( int i = 0; i < 16; i ++ ) {
+  for ( int i = 0; i < ${PCSS_PCF_TAPS}; i ++ ) {
     float fi = float( i );
     float a = fi * 2.39996323 + rot;
-    vec2 off = vec2( cos( a ), sin( a ) ) * sqrt( ( fi + 0.5 ) / 16.0 ) * pen * texel;
+    vec2 off = vec2( cos( a ), sin( a ) ) * sqrt( ( fi + 0.5 ) / ${PCSS_PCF_TAPS.toFixed(1)} ) * pen * texel;
     float d = unpackRGBAToDepth( texture2D( shadowMap, shadowCoord.xy + off ) );
     lit += ( d < CHAIR_Z_AT( off ) ) ? 0.0 : 1.0;
   }
-  return lit / 16.0;
+  return lit / ${PCSS_PCF_TAPS.toFixed(1)};
 }
 `;
 
@@ -448,9 +464,9 @@ scene.fog = new THREE.FogExp2(VOID, FOG_HAZE / FOG_HOLD);
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.03, 200);
 camera.position.set(2.9, 2.1, 4.0);
 
-// Desktop-class or not, decided once: it gates the 4096 shadow map and the
-// ambient-occlusion pass below.
-const fineShadows = window.matchMedia('(pointer: fine)').matches;
+// Same tier that picked the soft-shadow budget up top gates the 4096 shadow map
+// and the ambient-occlusion pass below.
+const fineShadows = SHADOW_HQ;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -591,8 +607,8 @@ function aimKey() {
   // shadow it throws share the same light-space xy. What casts: everything
   // settled out to the widest counted chair, the drop disc, a chair's own
   // reach, and height up to where a falling chair's shadow has fully faded.
-  const reach = Math.max(strayLimit(), pileRadius) + CHAIR_REACH;
-  const top = pileTopY + SHADOW_FADE_FROM;
+  const reach = Math.max(strayLimit(), castRadius) + CHAIR_REACH;
+  const top = castTopY + SHADOW_FADE_FROM;
 
   // That region in light space: x is horizontal, y mixes radius with height
   // and is centered half way up. The box stays square so the texel — and the
@@ -605,18 +621,24 @@ function aimKey() {
     cam.right = span;
     cam.top = span;
     cam.bottom = -span;
-    // The same region bounds the depth, so near/far hug the casters and the
-    // depth precision lands on the chairs — the other half of what lets the
-    // bias be so small.
-    const deep = reach * LZ_FLAT + LZ_UP * top / 2 + 0.5;
-    cam.near = Math.max(0.1, KEY_STANDOFF + pileTopY - deep);
-    cam.far = KEY_STANDOFF + pileTopY + deep;
+    // Near/far must bracket, in light-Z, not just the casters but the whole
+    // floor the frustum sees — that is where the shadows land. The frustum is
+    // ±span in light-Y, and the flat floor tilts through light space so its far
+    // edge sits at light-Z ≈ (LY_UP/LZ_UP)·span; a tall pile pushes span past
+    // reach, so sizing the depth to reach alone clips the cast shadow along a
+    // hard line. Take whichever reaches deeper — floor edge or caster spread —
+    // about the aim at top/2, plus a little slack.
+    const deep = LZ_UP * top / 2 + Math.max(reach * LZ_FLAT, (LY_UP / LZ_UP) * span) + 0.5;
+    cam.near = Math.max(0.1, KEY_STANDOFF + castTopY - deep);
+    cam.far = KEY_STANDOFF + castTopY + deep;
     cam.updateProjectionMatrix();
 
-    // Hold the softness at a fixed width in the world, not a fixed number of
-    // texels, or shadows would soften as the pile grows. The ceiling matters:
-    // taps spread much wider stop reading as one soft edge.
-    key.shadow.radius = THREE.MathUtils.clamp(SHADOW_BLUR / ((2 * span) / key.shadow.mapSize.width), 1, 7);
+    // Set the blocker-search radius from SHADOW_MAX_BLUR in the world, not a
+    // fixed number of texels, so the widest penumbra stays the same real width
+    // as the pile grows and the frustum with it. Capped at SHADOW_RADIUS_MAX:
+    // the search must reach as far as the widest edge we will draw, or a soft
+    // edge finds no blocker past the search and snaps back to hard.
+    key.shadow.radius = THREE.MathUtils.clamp(SHADOW_MAX_BLUR / ((2 * span) / key.shadow.mapSize.width), 1, SHADOW_RADIUS_MAX);
     // The contact term reads depths out of this same camera, so it needs the
     // range to turn them back into meters.
     contactUniforms.uShadowDepth.value = cam.far - cam.near;
@@ -641,7 +663,7 @@ function aimKey() {
     .addScaledVector(LIGHT_Y, y)
     .addScaledVector(LIGHT_Z, z);
   key.target.updateMatrixWorld();
-  key.position.copy(key.target.position).addScaledVector(KEY_DIR, KEY_STANDOFF + pileTopY);
+  key.position.copy(key.target.position).addScaledVector(KEY_DIR, KEY_STANDOFF + castTopY);
 }
 
 // Opposite the key, low and weak: keeps the dark side from going flat black.
@@ -731,6 +753,19 @@ tuneShadows(floor.material, { contact: true });
 floor.receiveShadow = true;
 scene.add(floor);
 
+// Keep the floor out of the ambient-occlusion pass. A flat, empty ground plane
+// has nothing to occlude it, but screen-space AO reads its grazing recession
+// toward the horizon as false occlusion — a broad wash across the floor that
+// tracks the camera rather than the geometry. Its real contact darkening comes
+// from the PCSS contact term above, not here. GTAO hides points and lines for
+// its depth/normal prepass via overrideVisibility(); extend that to hide the
+// floor too, so the prepass sees only the chairs. restoreVisibility() cached
+// the floor as visible before this ran, so the beauty pass still draws it.
+if (gtao) {
+  const passOverrideVisibility = gtao.overrideVisibility.bind(gtao);
+  gtao.overrideVisibility = () => { passOverrideVisibility(); floor.visible = false; };
+}
+
 // ------------------------------------------------------------------ physics
 const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
 world.broadphase = new CANNON.SAPBroadphase(world);
@@ -764,6 +799,15 @@ let pileTopY = 0;
 let pileRadius = 0;    // how wide the heap has reached, which is what widens the drop zone
 let frozenTopY = 0;    // tallest frozen chair — fixed forever, so measured once
 let frozenRadius = 0;  // and the widest, likewise
+// The framing above deliberately ignores strays — a chair that rolled clear must
+// not haul the camera or the drop zone out after it. But the shadow still has to
+// COVER those strays, or its cast is cropped at the frustum edge (a hard straight
+// line on the floor). So the shadow frustum is sized from these, which count
+// every chair; grow-only, so a toppling chair never shrinks the cover.
+let castTopY = 0;
+let castRadius = 0;
+let frozenCastTopY = 0;   // frozen contribution to the above, folded in once, strays included
+let frozenCastRadius = 0;
 let dropped = 0;
 let lastDropAt = 0;    // demo's clock: it drops when this is old enough
 
@@ -805,7 +849,8 @@ function onCollide(chair, event) {
   clatter(
     (speed / HIT_LOUD_SPEED) * level,
     chair.pitch,
-    THREE.MathUtils.clamp(_pan.x / 3, -1, 1) * 0.7
+    THREE.MathUtils.clamp(_pan.x / 3, -1, 1) * 0.7,
+    _pan.length() // range from the camera, for distance depth
   );
 }
 
@@ -1039,6 +1084,9 @@ function freezeSettled() {
       frozenTopY = Math.max(frozenTopY, chair.body.position.y + CHAIR_MID);
       frozenRadius = Math.max(frozenRadius, reach);
     }
+    // The shadow cover counts strays too, so it folds in every frozen chair.
+    frozenCastTopY = Math.max(frozenCastTopY, chair.body.position.y + CHAIR_MID);
+    frozenCastRadius = Math.max(frozenCastRadius, reach);
     addToBedrock(chair); // after the body is settled and pinned: this reads its final transform
   }
 }
@@ -1186,6 +1234,35 @@ spawnEl.addEventListener('input', () => {
   demoDropMs = seconds * 1000;
   spawnValEl.textContent = `${seconds.toFixed(1)}s`;
 });
+// Show taps: a faint ring blooms at each pointer press, for screen recording.
+// Borrowed from Bloon Boon; the ring styling lives in the CSS. Off by default,
+// remembered across visits.
+const TAPS_KEY = 'chair-pile-show-taps';
+const tapsToggle = document.getElementById('taps-toggle');
+const ripplesEl = document.getElementById('ripples');
+let showTaps = false;
+try { showTaps = localStorage.getItem(TAPS_KEY) === '1'; } catch { /* storage off */ }
+tapsToggle.checked = showTaps;
+tapsToggle.addEventListener('change', () => {
+  showTaps = tapsToggle.checked;
+  try { localStorage.setItem(TAPS_KEY, showTaps ? '1' : '0'); } catch { /* nothing to do */ }
+});
+
+function spawnRipple(x, y) {
+  const r = document.createElement('div');
+  r.className = 'ripple';
+  r.style.left = x + 'px';
+  r.style.top = y + 'px';
+  ripplesEl.appendChild(r);
+  const done = () => r.remove();
+  r.addEventListener('animationend', done);
+  setTimeout(done, 700); // fallback if animationend never fires
+}
+// Capture phase, on window, so it marks every press — canvas, header, or sheet.
+window.addEventListener('pointerdown', (e) => {
+  if (showTaps) spawnRipple(e.clientX, e.clientY);
+}, true);
+
 function paintTimbre() {
   for (const btn of timbreEl.querySelectorAll('.choice-btn')) {
     const on = btn.dataset.timbre === getTimbre();
@@ -1255,6 +1332,10 @@ function clearPile() {
   bedrockCount = 0;
   frozenTopY = 0;
   frozenRadius = 0;
+  frozenCastTopY = 0;
+  frozenCastRadius = 0;
+  castTopY = 0;
+  castRadius = 0;
   pileTopY = 0;
   pileRadius = 0;
   dropped = 0;
@@ -1287,8 +1368,11 @@ function loadSceneSnapshot(data) {
   // Measure the loaded pile so the framing and the shadow fit start right,
   // and pin the framing to it so nothing moves on the first frame.
   for (const c of chairs) {
+    const reach = Math.hypot(c.body.position.x, c.body.position.z);
     pileTopY = Math.max(pileTopY, c.body.position.y + CHAIR_MID);
-    pileRadius = Math.max(pileRadius, Math.hypot(c.body.position.x, c.body.position.z));
+    pileRadius = Math.max(pileRadius, reach);
+    castTopY = Math.max(castTopY, c.body.position.y + CHAIR_MID);
+    castRadius = Math.max(castRadius, reach);
   }
   framedTop = pileTopY;
   framedWide = pileRadius;
@@ -1303,11 +1387,19 @@ function loadSceneSnapshot(data) {
   return true;
 }
 
+// Date + time stamp for download names, matching the other sub-apps
+// (sleep-noise, u17sv): YYYYMMDD-HHMM, so repeated saves never collide.
+function fileStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
 document.getElementById('save-scene').addEventListener('click', () => {
   const blob = new Blob([JSON.stringify(sceneSnapshot())], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `chair-pile-scene-${chairs.length}.json`;
+  a.download = `chair-pile-scene-${chairs.length}-${fileStamp()}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
 });
@@ -1421,6 +1513,8 @@ function animate() {
   // rest, not asleep: chairs constantly knock each other awake.
   let measuredTop = frozenTopY;
   let measuredWide = frozenRadius;
+  let castTop = frozenCastTopY;
+  let castWide = frozenCastRadius;
   const limit = strayLimit();
   for (let i = freezeIdx; i < chairs.length; i++) {
     const chair = chairs[i];
@@ -1434,9 +1528,12 @@ function animate() {
       if (chair.fallTime > MIN_FALL_TIME && atRest(body)) chair.landed = true;
       continue; // still on its way down: not part of the pile yet
     }
+    const reach = Math.hypot(body.position.x, body.position.z);
+    // The shadow must cover this chair wherever it lies, stray or not.
+    castTop = Math.max(castTop, body.position.y + CHAIR_MID);
+    castWide = Math.max(castWide, reach);
     // Strays that rolled clear count toward neither the height nor the width:
     // one chair skittering away must not haul the framing out after it.
-    const reach = Math.hypot(body.position.x, body.position.z);
     if (reach > limit) continue;
     measuredTop = Math.max(measuredTop, body.position.y + CHAIR_MID);
     measuredWide = Math.max(measuredWide, reach);
@@ -1450,6 +1547,10 @@ function animate() {
   // Width only ever grows: a heap does not pull itself back in, and frozenRadius
   // is a floor under this anyway.
   pileRadius = Math.max(pileRadius, measuredWide);
+  // The shadow cover grows only too: a chair toppling off the high point must not
+  // shrink the frustum and start cropping the shadow it still casts.
+  castRadius = Math.max(castRadius, castWide);
+  castTopY = Math.max(castTopY, castTop);
 
   freezeSettled(); // after the copies above, so a chair freezes at its final transform
 

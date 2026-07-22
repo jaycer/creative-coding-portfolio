@@ -58,16 +58,27 @@
       }
       .bar .menu {
         pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         color: #fff;
         background: none;
-        font: inherit;
-        font-size: 1rem;
-        line-height: 1;
-        padding: 6px 12px;
+        /* The bars are an SVG, not the ☰ glyph, whose ink is not centred in its
+           em box: three symmetric lines flex-centred sit dead centre in the pill. */
+        height: 30px;
+        padding: 0 13px;
         border: 1px solid rgba(255,255,255,0.35);
         border-radius: 999px;
         cursor: pointer;
         transition: background 0.15s ease;
+      }
+      .bar .menu svg {
+        display: block;
+        width: 17px;
+        height: 13px;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
       }
       .bar .menu:hover { background: rgba(255,255,255,0.15); }
       @media (max-width: 600px) {
@@ -115,16 +126,55 @@
         -webkit-backdrop-filter: blur(8px);
         animation: sheet-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.15);
       }
+      /* Title and the ⓘ / ✕ buttons share the top row: title left, buttons right. */
+      .sheet-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0 0 6px;
+      }
       .sheet h2 {
-        margin: 0 0 14px;
+        flex: 1;
+        min-width: 0;
+        margin: 0;
         font-size: 0.95rem;
         font-weight: 600;
         letter-spacing: -0.01em;
       }
+      /* One line to orient before the settings. */
+      .sheet .intro {
+        margin: 0 0 18px;
+        font-size: 0.8rem;
+        line-height: 1.45;
+        opacity: 0.6;
+      }
+      /* Info toggle: reveals the helper descriptions, which are hidden by default
+         so the resting sheet is just labels and controls. Pure CSS — the hidden
+         checkbox holds the state, the ⓘ is its label. */
+      .sheet .tips-check { position: absolute; opacity: 0; pointer-events: none; }
+      .sheet .info-btn {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        font-size: 1rem;
+        line-height: 1;
+        color: #fff;
+        border: 1px solid transparent;
+        border-radius: 50%;
+        opacity: 0.55;
+        cursor: pointer;
+        transition: background 0.15s ease, opacity 0.15s ease;
+      }
+      .sheet .info-btn:hover { background: rgba(255,255,255,0.14); opacity: 1; }
+      .sheet .tips-check:focus-visible + .info-btn { border-color: rgba(255,255,255,0.55); opacity: 1; }
+      /* :has() rather than a sibling combinator, so the reveal survives the
+         title and buttons living together in the flex header row above. */
+      .sheet:has(.tips-check:checked) .info-btn { opacity: 1; background: rgba(255,255,255,0.12); }
       .sheet .close {
-        position: absolute;
-        top: 12px;
-        right: 12px;
+        flex-shrink: 0;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -155,11 +205,14 @@
       }
       .sheet .setting + .setting { margin-top: 16px; }
       .sheet .desc {
+        display: none; /* hidden until the ⓘ toggle is on */
         margin: 8px 0 0;
         font-size: 0.78rem;
         line-height: 1.5;
         opacity: 0.7;
       }
+      .sheet:has(.tips-check:checked) .group .desc { display: block; }
+      .sheet #how .desc { display: block; } /* the how-to-play text is the point, always shown */
       .sheet .desc + .setting { margin-top: 16px; }
       .sheet input[type="checkbox"] {
         appearance: none;
@@ -207,6 +260,12 @@
         accent-color: #fff;
         cursor: pointer;
       }
+      /* Each settings group is ruled off from the next, with room to breathe. */
+      .sheet .group + .group {
+        margin-top: 22px;
+        padding-top: 22px;
+        border-top: 1px solid rgba(255,255,255,0.12);
+      }
       .sheet .choice { display: flex; gap: 8px; margin-top: 12px; }
       .sheet .choice-btn {
         flex: 1;
@@ -236,7 +295,24 @@
         opacity: 0.7;
         border-top: 1px solid rgba(255,255,255,0.18);
       }
-      .sheet .actions { display: flex; gap: 8px; }
+      /* Save/Load are power-user tools, demoted to quiet text links so they do
+         not compete with the green call to action. */
+      .sheet .actions { display: flex; gap: 20px; }
+      .sheet .actions .action {
+        width: auto;
+        margin-top: 0;
+        padding: 2px 0;
+        font-size: 0.8rem;
+        font-weight: 500;
+        background: none;
+        border: none;
+        border-radius: 0;
+        opacity: 0.65;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      .sheet .actions .action:hover { background: none; opacity: 1; }
+      .sheet .group + .action { margin-top: 22px; }
       .sheet .action {
         margin-top: 20px;
         width: 100%;
@@ -253,10 +329,51 @@
       }
       .sheet .action:hover { background: rgba(255,255,255,0.2); }
 
+      /* The one call to action: green, chunky, and softly breathing, so the eye
+         lands on where to start rather than wandering the settings above it. */
+      .sheet #done-btn {
+        margin-top: 26px;
+        padding: 15px 12px;
+        font-size: 1.425rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        color: #06210f;
+        background: #34d17a;
+        border-color: transparent;
+        animation: cta-breathe 2.6s ease-in-out infinite;
+      }
+      .sheet #done-btn:hover { background: #43e089; }
+
+      /* Show taps: a ring blooms where you touch. Borrowed from Bloon Boon, but
+         deliberately quieter for this dark room — thin, white, small, and quick,
+         with only a whisper of glow instead of a bold ring. Never blocks input. */
+      #ripples { position: fixed; inset: 0; z-index: 30; pointer-events: none; overflow: hidden; }
+      .ripple {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        border: 2px solid rgba(255,255,255,0.5);
+        box-shadow: 0 0 6px rgba(255,255,255,0.15);
+        animation: tap-ripple 0.55s ease-out forwards;
+        will-change: width, height, opacity;
+      }
+      @keyframes tap-ripple {
+        0%   { width: 6px;  height: 6px;  opacity: 0.9; }
+        100% { width: 46px; height: 46px; opacity: 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ripple { animation-duration: 0.28s; }
+      }
+
       @keyframes scrim-in { from { opacity: 0; } }
       @keyframes sheet-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+      @keyframes cta-breathe {
+        0%, 100% { opacity: 0.86; box-shadow: 0 0 0 0 rgba(52,209,122,0); }
+        50%      { opacity: 1;    box-shadow: 0 0 22px 2px rgba(52,209,122,0.5); }
+      }
       @media (prefers-reduced-motion: reduce) {
-        .scrim, .sheet { animation: none; }
+        .scrim, .sheet, .sheet #done-btn { animation: none; }
       }
 
     </style>
@@ -266,52 +383,80 @@
       <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
       <h1>Chair Pile</h1>
       <span class="count" id="count">0 chairs</span>
-      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false">☰</button>
+      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false">
+        <svg viewBox="0 0 24 18" aria-hidden="true" focusable="false">
+          <line x1="2" y1="3" x2="22" y2="3" />
+          <line x1="2" y1="9" x2="22" y2="9" />
+          <line x1="2" y1="15" x2="22" y2="15" />
+        </svg>
+      </button>
     </header>
+
+    <div id="ripples"></div>
 
     <div class="scrim" id="scrim" hidden>
       <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-        <button class="close" id="close-btn" type="button" aria-label="Close settings">✕</button>
-        <h2 id="sheet-title">Settings</h2>
-
-        <label class="setting">
-          Sound
-          <input type="checkbox" id="sound-toggle" checked />
-        </label>
-        <p class="desc">Wooden knocks as the chairs land, panned to wherever they fall across the view. Whatever they land on answers underneath, quietly, until it is buried too deep to move.</p>
-
-        <div class="choice" id="timbre" role="group" aria-label="Knock">
-          <button class="choice-btn" data-timbre="sharp" type="button" aria-pressed="true">Sharp</button>
-          <button class="choice-btn" data-timbre="mellow" type="button" aria-pressed="false">Mellow</button>
+        <div class="sheet-head">
+          <h2 id="sheet-title">Chair Pile Settings</h2>
+          <input type="checkbox" id="tips-toggle" class="tips-check" aria-label="Show descriptions" />
+          <label class="info-btn" for="tips-toggle" title="Show descriptions">ⓘ</label>
+          <button class="close" id="close-btn" type="button" aria-label="Close settings">✕</button>
         </div>
-        <p class="desc">Sharp leads with the crack of the strike. Mellow is the original: lower, and left to ring on. Tap either to hear it.</p>
+        <p class="intro">Chairs fall from the dark and pile up forever. Set the scene, then run it.</p>
 
-        <label class="setting">
-          Demo mode
-          <input type="checkbox" id="demo-toggle" checked />
-        </label>
-        <p class="desc">Drops the chairs on its own and drifts the camera around the pile, diving in among the chairs and back out. Turn it off to take the controls back.</p>
-
-        <div id="rate">
-          <label class="slider-label" for="spawn">
-            Drop every
-            <span class="val" id="spawn-val">2.0s</span>
+        <section class="group">
+          <label class="setting">
+            Sound
+            <input type="checkbox" id="sound-toggle" checked />
           </label>
-          <input type="range" id="spawn" min="0.1" max="2" step="0.1" value="2" aria-label="Seconds between chairs in demo mode" />
-          <p class="desc">How often demo mode sends one down. Wind it right down and they come faster than they can land. Your own taps are never held back.</p>
-        </div>
+          <p class="desc">Knocks as chairs land, panned across the view. Whatever they hit answers quietly underneath.</p>
 
-        <div id="how" hidden>
-          <p class="how-title">How to play</p>
-          <p class="desc">Tap or press any key to send another chair down. Drag to look around, scroll to zoom into the pile.</p>
-        </div>
+          <div class="choice" id="timbre" role="group" aria-label="Knock">
+            <button class="choice-btn" data-timbre="sharp" type="button" aria-pressed="true">Sharp</button>
+            <button class="choice-btn" data-timbre="mellow" type="button" aria-pressed="false">Mellow</button>
+            <button class="choice-btn" data-timbre="metal" type="button" aria-pressed="false">Metal</button>
+          </div>
+          <p class="desc">Sharp cracks, Mellow rings, Metal clangs.</p>
+        </section>
 
-        <div class="actions">
-          <button class="action" id="save-scene" type="button">Save scene</button>
-          <button class="action" id="load-scene" type="button">Load scene</button>
-        </div>
-        <input type="file" id="scene-file" accept="application/json" hidden />
-        <p class="desc">Save writes the pile and camera to a JSON file. Load rebuilds that exact scene, welded still, so the same moment can be revisited or compared run to run.</p>
+        <section class="group">
+          <label class="setting">
+            Demo mode
+            <input type="checkbox" id="demo-toggle" checked />
+          </label>
+          <p class="desc">Drops chairs and drifts the camera on its own. Turn it off to take control.</p>
+
+          <div id="rate">
+            <label class="slider-label" for="spawn">
+              Chair interval
+              <span class="val" id="spawn-val">2.0s</span>
+            </label>
+            <input type="range" id="spawn" min="0.1" max="6" step="0.1" value="2" aria-label="Seconds between chairs in demo mode" />
+            <p class="desc">Controls how often demo mode adds a chair.</p>
+          </div>
+
+          <div id="how" hidden>
+            <p class="how-title">How to play</p>
+            <p class="desc">Tap or press any key to add a chair. Drag to change camera angle. Scroll to zoom.</p>
+          </div>
+        </section>
+
+        <section class="group">
+          <label class="setting">
+            Show taps
+            <input type="checkbox" id="taps-toggle" />
+          </label>
+          <p class="desc">Blooms a faint ring where you tap. Handy when recording.</p>
+        </section>
+
+        <section class="group">
+          <div class="actions">
+            <button class="action" id="save-scene" type="button">Save scene</button>
+            <button class="action" id="load-scene" type="button">Load scene</button>
+          </div>
+          <input type="file" id="scene-file" accept="application/json" hidden />
+          <p class="desc">Save a scene to a file, Load it later.</p>
+        </section>
 
         <button class="action" id="done-btn" type="button">Run Chair Pile</button>
       </div>
