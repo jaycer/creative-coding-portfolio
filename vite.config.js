@@ -37,8 +37,10 @@ if (existsSync(appsDir)) {
 
 export default defineConfig({
   // Project page lives under /<repo>/ on github.io. Relative asset links keep
-  // dev (/) and prod (/creative-coding-portfolio/) both working.
-  base: '/creative-coding-portfolio/',
+  // dev (/) and prod (/creative-coding-portfolio/) both working. Preview builds
+  // live under a different repo/subpath, so BASE_PATH overrides it when set
+  // (the preview workflow passes e.g. /creative-coding-portfolio-preview/<branch>/).
+  base: process.env.BASE_PATH || '/creative-coding-portfolio/',
   // This is a true multi-page site: the gallery links to real sub-app pages.
   // 'mpa' disables Vite's SPA index.html fallback so a directory request like
   // /apps/<slug>/ resolves to that folder's index.html (including the static

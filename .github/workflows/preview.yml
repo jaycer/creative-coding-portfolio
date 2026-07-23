@@ -1,0 +1,90 @@
+# Preview deploys — publish a branch to a SEPARATE repo's GitHub Pages site, so
+# you can view work-in-progress on a real URL without touching the production
+# site (which deploys from `main` via deploy.yml).
+#
+# Each branch is published into its own subfolder of the preview repo, so
+# several previews can coexist:
+#
+#   https://<owner>.github.io/<preview-repo>/<branch-slug>/
+#
+# ── One-time setup (nothing here runs until you finish this) ──────────────────
+# 1. Create an empty public repo for previews, e.g. `creative-coding-portfolio-preview`.
+# 2. Generate a deploy key:  ssh-keygen -t ed25519 -C "ccp-preview" -f ccp_preview -N ""
+#    - In the PREVIEW repo → Settings → Deploy keys → add `ccp_preview.pub`,
+#      and CHECK "Allow write access".
+#    - In THIS repo → Settings → Secrets and variables → Actions → New secret:
+#      name `PREVIEW_DEPLOY_KEY`, value = contents of the private key `ccp_preview`.
+# 3. In THIS repo → Settings → Secrets and variables → Actions → Variables:
+#    - `PREVIEW_ENABLED` = `true`   (the switch that turns this workflow on)
+#    - `PREVIEW_REPO`    = `<owner>/<preview-repo>`  (optional; defaults below)
+# 4. Push any branch. This workflow builds it and publishes to the preview repo.
+#    After the first publish, enable Pages on the PREVIEW repo:
+#      Settings → Pages → Source: "Deploy from a branch" → `gh-pages` / root.
+# 5. The run's Summary prints the exact preview URL.
+#
+# Delete the `PREVIEW_ENABLED` variable at any time to switch previews back off.
+
+name: Preview deploy
+
+on:
+  push:
+    branches-ignore:
+      - main        # main is production; never preview it
+  workflow_dispatch:
+
+concurrency:
+  group: preview-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    # Dormant until you opt in with the PREVIEW_ENABLED variable, so branches
+    # don't rack up failed runs before the one-time setup above is done.
+    if: vars.PREVIEW_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_REPO: ${{ vars.PREVIEW_REPO || 'jaycer/creative-coding-portfolio-preview' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Compute preview path
+        id: prep
+        run: |
+          slug="${GITHUB_REF_NAME//\//-}"        # branch name -> folder-safe slug
+          repo_name="${PREVIEW_REPO#*/}"          # strip owner/
+          owner="${PREVIEW_REPO%%/*}"
+          echo "slug=$slug"                                   >> "$GITHUB_OUTPUT"
+          echo "base=/$repo_name/$slug/"                      >> "$GITHUB_OUTPUT"
+          echo "url=https://$owner.github.io/$repo_name/$slug/" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: npm run build
+        env:
+          BASE_PATH: ${{ steps.prep.outputs.base }}
+
+      - name: Publish to preview repo
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          deploy_key: ${{ secrets.PREVIEW_DEPLOY_KEY }}
+          external_repository: ${{ env.PREVIEW_REPO }}
+          publish_dir: ./dist
+          destination_dir: ${{ steps.prep.outputs.slug }}   # one subfolder per branch
+          keep_files: true                                   # keep other branches' previews
+          commit_message: "preview: ${{ github.ref_name }} @ ${{ github.sha }}"
+
+      - name: Print preview URL
+        run: |
+          echo "### 🪑 Preview deployed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[${{ steps.prep.outputs.url }}](${{ steps.prep.outputs.url }})" >> "$GITHUB_STEP_SUMMARY"
