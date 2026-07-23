@@ -23,7 +23,7 @@ const START_CHAIRS = 90;       // how many are already adrift on load
 const FIELD_RADIUS = 22;
 
 // The singularity and the planetoid growing on it.
-const CORE_RADIUS = 0.55;      // the dark core's visible radius
+const CORE_RADIUS = 0.3;       // the dark core's visible radius — a small point
 const BASE_PLANETOID_R = 1.1;  // the accretion surface before any chairs land
 // The surface grows like the cube root of the count, so equal chairs add equal
 // volume and the pile stays a ball rather than ballooning. PACK sets how loose
@@ -141,8 +141,8 @@ scene.add(fill);
 scene.add(new THREE.HemisphereLight(0x2a3358, 0x0a0a12, 0.4));
 
 // ---------------------------------------------------------------- singularity
-// A black core, a faint hot photon ring around it, and a soft halo — subtle,
-// but enough to mark the center the whole scene falls toward.
+// A small black core with a soft halo — subtle, but enough to mark the center
+// the whole scene falls toward. No photon ring: just the dark point and glow.
 const singularity = new THREE.Group();
 
 const core = new THREE.Mesh(
@@ -150,17 +150,6 @@ const core = new THREE.Mesh(
   new THREE.MeshBasicMaterial({ color: 0x000000 }),
 );
 singularity.add(core);
-
-// The photon ring: a thin bright torus, tipped a little off the eye.
-const ring = new THREE.Mesh(
-  new THREE.TorusGeometry(CORE_RADIUS * 1.35, CORE_RADIUS * 0.06, 16, 96),
-  new THREE.MeshBasicMaterial({
-    color: 0xbcd2ff, transparent: true, opacity: 0.9,
-    blending: THREE.AdditiveBlending, depthWrite: false,
-  }),
-);
-ring.rotation.x = Math.PI * 0.5 - 0.35;
-singularity.add(ring);
 
 // A soft radial halo sprite, so the core glows rather than sitting as a flat
 // black dot on black.
@@ -265,7 +254,6 @@ const _v = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _axis = new THREE.Vector3();
 const _spin = new THREE.Quaternion();
-const _up = new THREE.Vector3(0, 1, 0);
 
 function randomUnit(out) {
   const u = Math.random() * 2 - 1;
@@ -331,25 +319,22 @@ let lastLandSound = -1;
 
 /**
  * A chair has reached the surface: fix it to the planetoid. Its incoming
- * direction is kept but its distance is snapped to the current surface, and it
- * is turned to sit with its seat facing outward (plus a random twist), then
- * reparented so it turns with the planetoid as one body. The surface then grows
- * a hair for the next arrival.
+ * direction is kept but its distance is snapped to the current surface. Its
+ * orientation is frozen exactly as it was tumbling — no radial alignment — so
+ * the chairs sit at every which angle, the way a pile of jostled chairs would,
+ * rather than all pointing the same way. It is then reparented so it turns with
+ * the planetoid as one body, and the surface grows a hair for the next arrival.
  */
 function settle(mesh) {
   _dir.copy(mesh.position).normalize();
-
-  // World orientation: seat up (+Y) pointed outward, with a random spin about
-  // the radial so the chairs don't all face the same way.
-  const worldQ = new THREE.Quaternion().setFromUnitVectors(_up, _dir);
-  const twist = new THREE.Quaternion().setFromAxisAngle(_dir, Math.random() * Math.PI * 2);
-  worldQ.premultiply(twist);
 
   // The planetoid spins, so convert the world placement into its local frame.
   const inv = planetoid.quaternion.clone().invert();
   mesh.position.copy(_dir).applyQuaternion(inv)
     .multiplyScalar(planetoidRadius + (Math.random() - 0.5) * 0.15); // slight jitter, so layers interlock
-  mesh.quaternion.copy(worldQ).premultiply(inv);
+  // Keep the chair's current tumbled orientation; just carry it into the
+  // planetoid's frame so it rides along as the body turns.
+  mesh.quaternion.premultiply(inv);
 
   scene.remove(mesh);
   planetoid.add(mesh);
@@ -418,7 +403,6 @@ function frame(dt) {
 
   // The planetoid turns slowly on its axis; the far starfield drifts a hair.
   planetoid.rotation.y += dt * 0.06;
-  ring.rotation.z += dt * 0.25;      // the photon ring shimmers round
   stars.rotation.y += dt * 0.002;
 
   if (demoOn) {
