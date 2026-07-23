@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chairs in Space — Jayce Renner</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="description" content="Plain dining chairs adrift in zero gravity, tumbling through a starfield past a hazy planet. Tap or press a key to send another one out, then drag to look around." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="Chairs in Space" />
+    <meta property="og:description" content="Plain dining chairs adrift in zero gravity, tumbling through a starfield past a hazy planet. Tap or press a key to send another one out, then drag to look around." />
+    <meta property="og:url" content="https://jaycer.github.io/creative-coding-portfolio/apps/chairs-in-space/" />
+    <meta property="og:image" content="https://jaycer.github.io/creative-coding-portfolio/og/chairs-in-space.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Chairs in Space" />
+    <meta name="twitter:description" content="Plain dining chairs adrift in zero gravity, tumbling through a starfield past a hazy planet. Tap or press a key to send another one out, then drag to look around." />
+    <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/chairs-in-space.jpg" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #04050c; }
+      canvas { position: fixed; inset: 0; display: block; touch-action: none; }
+
+      .bar {
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 12px 18px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0));
+        pointer-events: none;
+      }
+      .bar h1 { margin: 0 auto 0 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+      .bar .back {
+        pointer-events: auto;
+        color: #fff;
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        padding: 6px 12px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        white-space: nowrap;
+        transition: background 0.15s ease;
+      }
+      .bar .back:hover { background: rgba(255,255,255,0.15); }
+      .bar .count {
+        font-size: 0.9rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.8;
+      }
+      .bar .menu {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        background: none;
+        height: 30px;
+        padding: 0 13px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .bar .menu svg {
+        display: block;
+        width: 17px;
+        height: 13px;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+      }
+      .bar .menu:hover { background: rgba(255,255,255,0.15); }
+      @media (max-width: 600px) {
+        .back-label { display: none; }
+      }
+      body.idle.menu-open .bar { opacity: 1; pointer-events: auto; }
+
+      .scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        background: rgba(4,5,12,0.55);
+        backdrop-filter: blur(3px);
+        -webkit-backdrop-filter: blur(3px);
+        animation: scrim-in 0.18s ease;
+      }
+      .scrim[hidden] { display: none; }
+
+      .sheet {
+        position: relative;
+        zoom: 0.9;
+        width: 100%;
+        max-width: 320px;
+        max-height: 100%;
+        overflow-y: auto;
+        padding: 18px 20px 20px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: rgba(0,0,0,0.6);
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 16px;
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        animation: sheet-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+      }
+      .sheet-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0 0 6px;
+      }
+      .sheet h2 {
+        flex: 1;
+        min-width: 0;
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      .sheet .intro {
+        margin: 0 0 18px;
+        font-size: 0.8rem;
+        line-height: 1.45;
+        opacity: 0.6;
+      }
+      .sheet .tips-check { position: absolute; opacity: 0; pointer-events: none; }
+      .sheet .info-btn {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        font-size: 1rem;
+        line-height: 1;
+        color: #fff;
+        border: 1px solid transparent;
+        border-radius: 50%;
+        opacity: 0.55;
+        cursor: pointer;
+        transition: background 0.15s ease, opacity 0.15s ease;
+      }
+      .sheet .info-btn:hover { background: rgba(255,255,255,0.14); opacity: 1; }
+      .sheet .tips-check:focus-visible + .info-btn { border-color: rgba(255,255,255,0.55); opacity: 1; }
+      .sheet:has(.tips-check:checked) .info-btn { opacity: 1; background: rgba(255,255,255,0.12); }
+      .sheet .close {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        font: inherit;
+        font-size: 1.05rem;
+        line-height: 1;
+        color: #fff;
+        background: none;
+        border: 1px solid transparent;
+        border-radius: 50%;
+        opacity: 0.6;
+        cursor: pointer;
+        transition: background 0.15s ease, opacity 0.15s ease;
+      }
+      .sheet .close:hover { background: rgba(255,255,255,0.14); opacity: 1; }
+      .sheet .close:focus-visible { border-color: rgba(255,255,255,0.55); opacity: 1; }
+      .sheet .setting {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .sheet .setting + .setting { margin-top: 16px; }
+      .sheet .desc {
+        display: none;
+        margin: 8px 0 0;
+        font-size: 0.78rem;
+        line-height: 1.5;
+        opacity: 0.7;
+      }
+      .sheet:has(.tips-check:checked) .group .desc { display: block; }
+      .sheet #how .desc { display: block; }
+      .sheet .desc + .setting { margin-top: 16px; }
+      .sheet input[type="checkbox"] {
+        appearance: none;
+        -webkit-appearance: none;
+        position: relative;
+        width: 38px;
+        height: 22px;
+        margin: 0;
+        flex-shrink: 0;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        background: rgba(255,255,255,0.1);
+        cursor: pointer;
+        transition: background 0.2s ease;
+      }
+      .sheet input[type="checkbox"]::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        background: #fff;
+        transition: transform 0.2s ease;
+      }
+      .sheet input[type="checkbox"]:checked { background: rgba(255,255,255,0.55); }
+      .sheet input[type="checkbox"]:checked::after { transform: translateX(16px); }
+      .sheet .slider-label {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 16px 0 0;
+        font-size: 0.9rem;
+        font-weight: 500;
+      }
+      .sheet .slider-label .val {
+        opacity: 0.7;
+        font-variant-numeric: tabular-nums;
+      }
+      .sheet input[type="range"] {
+        width: 100%;
+        margin: 10px 0 0;
+        accent-color: #fff;
+        cursor: pointer;
+      }
+      .sheet .group + .group {
+        margin-top: 22px;
+        padding-top: 22px;
+        border-top: 1px solid rgba(255,255,255,0.12);
+      }
+      .sheet .how-title {
+        margin: 18px 0 0;
+        padding-top: 14px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        opacity: 0.7;
+        border-top: 1px solid rgba(255,255,255,0.18);
+      }
+      .sheet .action {
+        margin-top: 20px;
+        width: 100%;
+        padding: 7px 12px;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #fff;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .sheet .action:hover { background: rgba(255,255,255,0.2); }
+
+      /* The one call to action: a cool star-blue button, softly breathing, so
+         the eye lands on where to start rather than wandering the settings. */
+      .sheet #done-btn {
+        margin-top: 26px;
+        padding: 15px 12px;
+        font-size: 1.425rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        color: #04122a;
+        background: #6fb2ff;
+        border-color: transparent;
+        animation: cta-breathe 2.6s ease-in-out infinite;
+      }
+      .sheet #done-btn:hover { background: #8ac4ff; }
+
+      /* Show taps: a faint ring blooms where you touch. */
+      #ripples { position: fixed; inset: 0; z-index: 30; pointer-events: none; overflow: hidden; }
+      .ripple {
+        position: absolute;
+        transform: translate(-50%, -50%);
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        border: 2px solid rgba(255,255,255,0.5);
+        box-shadow: 0 0 6px rgba(255,255,255,0.15);
+        animation: tap-ripple 0.55s ease-out forwards;
+        will-change: width, height, opacity;
+      }
+      @keyframes tap-ripple {
+        0%   { width: 6px;  height: 6px;  opacity: 0.9; }
+        100% { width: 46px; height: 46px; opacity: 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ripple { animation-duration: 0.28s; }
+      }
+
+      @keyframes scrim-in { from { opacity: 0; } }
+      @keyframes sheet-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+      @keyframes cta-breathe {
+        0%, 100% { opacity: 0.86; box-shadow: 0 0 0 0 rgba(111,178,255,0); }
+        50%      { opacity: 1;    box-shadow: 0 0 22px 2px rgba(111,178,255,0.5); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .scrim, .sheet, .sheet #done-btn { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bar">
+      <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
+      <h1>Chairs in Space</h1>
+      <span class="count" id="count">0 chairs</span>
+      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false">
+        <svg viewBox="0 0 24 18" aria-hidden="true" focusable="false">
+          <line x1="2" y1="3" x2="22" y2="3" />
+          <line x1="2" y1="9" x2="22" y2="9" />
+          <line x1="2" y1="15" x2="22" y2="15" />
+        </svg>
+      </button>
+    </header>
+
+    <div id="ripples"></div>
+
+    <div class="scrim" id="scrim" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <div class="sheet-head">
+          <h2 id="sheet-title">Chairs in Space</h2>
+          <input type="checkbox" id="tips-toggle" class="tips-check" aria-label="Show descriptions" />
+          <label class="info-btn" for="tips-toggle" title="Show descriptions">ⓘ</label>
+          <button class="close" id="close-btn" type="button" aria-label="Close settings">✕</button>
+        </div>
+        <p class="intro">Plain chairs, adrift in zero gravity. Set the drift, then let them go.</p>
+
+        <section class="group">
+          <label class="setting">
+            Sound
+            <input type="checkbox" id="sound-toggle" checked />
+          </label>
+          <p class="desc">A soft bell each time a chair drifts into view — a little shimmer of consonant notes.</p>
+        </section>
+
+        <section class="group">
+          <label class="setting">
+            Demo mode
+            <input type="checkbox" id="demo-toggle" checked />
+          </label>
+          <p class="desc">Sends chairs out and orbits the camera on its own. Turn it off to take control.</p>
+
+          <div id="rate">
+            <label class="slider-label" for="spawn">
+              Send interval
+              <span class="val" id="spawn-val">2.6s</span>
+            </label>
+            <input type="range" id="spawn" min="0.3" max="6" step="0.1" value="2.6" aria-label="Seconds between chairs in demo mode" />
+            <p class="desc">How often demo mode sends another chair out.</p>
+          </div>
+
+          <div id="how">
+            <p class="how-title">How to play</p>
+            <p class="desc">Tap or press any key to send a chair out. Drag to look around. Scroll to move in and out.</p>
+          </div>
+        </section>
+
+        <section class="group">
+          <label class="slider-label" for="drift">
+            Drift speed
+            <span class="val" id="drift-val">1.0×</span>
+          </label>
+          <input type="range" id="drift" min="0" max="2.5" step="0.1" value="1" aria-label="Overall drift and tumble speed" />
+          <p class="desc">Scales how fast every chair drifts and tumbles. Zero holds them still.</p>
+        </section>
+
+        <section class="group">
+          <label class="setting">
+            Starfield
+            <input type="checkbox" id="stars-toggle" checked />
+          </label>
+          <p class="desc">The two shells of stars behind the chairs. Off leaves them in plain void.</p>
+
+          <label class="setting" style="margin-top:16px;">
+            Show taps
+            <input type="checkbox" id="taps-toggle" />
+          </label>
+          <p class="desc">Blooms a faint ring where you tap. Handy when recording.</p>
+        </section>
+
+        <button class="action" id="done-btn" type="button">Enter Space</button>
+      </div>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="./chairs-in-space.js"></script>
+    <script src="../shared/autohide.js"></script>
+  </body>
+</html>
