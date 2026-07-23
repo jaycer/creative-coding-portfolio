@@ -24,12 +24,13 @@ const FIELD_RADIUS = 22;
 
 // The singularity and the planetoid growing on it.
 const CORE_RADIUS = 0.3;       // the dark core's visible radius — a small point
-const BASE_PLANETOID_R = 1.1;  // the accretion surface before any chairs land
+const BASE_PLANETOID_R = 0.7;  // first chairs settle right up against the core
 // The surface grows like the cube root of the count, so equal chairs add equal
-// volume and the pile stays a ball rather than ballooning. PACK sets how loose
-// that packing looks.
-const PACK = 0.9;
-const LAND_MARGIN = 0.35;      // how close to the surface before a chair sticks
+// volume and the pile stays a ball rather than ballooning. PACK is kept low so
+// the ball stays tight and the chairs pack in and interlock around the core
+// rather than freezing far out in a loose, roomy shell.
+const PACK = 0.42;
+const LAND_MARGIN = 0.2;       // how close to the surface before a chair sticks
 
 // Gravity. Softened inverse-square (r^2 + soften^2) so the pull stays finite
 // near the middle, plus a little drag so orbits decay and every chair is
@@ -331,7 +332,7 @@ function settle(mesh) {
   // The planetoid spins, so convert the world placement into its local frame.
   const inv = planetoid.quaternion.clone().invert();
   mesh.position.copy(_dir).applyQuaternion(inv)
-    .multiplyScalar(planetoidRadius + (Math.random() - 0.5) * 0.15); // slight jitter, so layers interlock
+    .multiplyScalar(planetoidRadius + (Math.random() - 0.5) * 0.35); // jitter, so layers overlap and interlock
   // Keep the chair's current tumbled orientation; just carry it into the
   // planetoid's frame so it rides along as the body turns.
   mesh.quaternion.premultiply(inv);
