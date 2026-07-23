@@ -9,7 +9,7 @@
 // either place and add a row here.
 export const apps = [
   { slug: 'chair-pile',             title: 'Chair Pile',             blurb: 'Chairs fall out of the dark and pile up forever. Tap or press any key to send another one down, then drag to look around what you built.', entry: 'index.html' },
-  { slug: 'chairs-in-space',        title: 'Chairs in Space',        blurb: 'The same plain chairs, pulled into a singularity and piling up into a slowly turning planetoid. Tap or press any key to send another one in; orbit the center and zoom.', entry: 'index.html' },
+  { slug: 'chairs-in-space',        title: 'Chairs In Space!',       blurb: 'The same plain chairs, pulled into a singularity and piling up into a slowly turning planetoid. Tap or press any key to send another one in; orbit the center and zoom.', entry: 'index.html' },
   { slug: 'photo-gallery',          title: 'Photo Gallery',          blurb: 'Professional photography including real estate interiors and exteriors, and more.', entry: 'index.html' },
   { slug: 'ch4td1c3',               title: 'ch4td1c3',               blurb: 'A full set of DnD dice drawn by a raymarching shader, hearts and all. Tap a die to roll it, or rattle the whole set.', entry: 'index.html' },
   { slug: 'bloon-boon',             title: 'Bloon Boon',             blurb: 'A shader-bloon juggling game. Tap and flick glossy 3D bloons to keep them aloft, and each color sings its own sound.', entry: 'index.html' },
