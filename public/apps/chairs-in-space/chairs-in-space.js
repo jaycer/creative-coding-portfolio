@@ -16,14 +16,23 @@ import { initAudio, resumeAudio, chime, land, setMuted, isMuted } from './audio.
 
 // Total chairs (drifting + settled). Each is a lit mesh; a few hundred packs a
 // convincing planetoid and still runs smooth on a phone.
-const MAX_CHAIRS = 440;
-const START_CHAIRS = 90;       // how many are already adrift on load
+const MAX_CHAIRS = 2000;
+const START_CHAIRS = 0;        // how many are already adrift on load
 
 // The field the chairs live in. They spawn out near FIELD_RADIUS and fall in.
 const FIELD_RADIUS = 22;
+// A chair is never seen appearing: it must spawn beyond the edge of the screen
+// and only ever drift into view. This is how far past the frustum edge (in NDC,
+// so 1 is the exact edge) a shell point must sit to count as safely off-screen.
+const OFFSCREEN_MARGIN = 1.15;
 
 // The singularity and the planetoid growing on it.
 const CORE_RADIUS = 0.3;       // the dark core's visible radius — a small point
+// Closest the camera may dolly in free-fly (demo off): right up to the
+// singularity, where the black core dominates the view ringed by its glow.
+// Held a little off the core itself, since pressing against a black sphere just
+// fills the screen with black and hides the halo behind it.
+const MIN_ZOOM = CORE_RADIUS * 2.5;
 const BASE_PLANETOID_R = 0.7;  // first chairs settle right up against the core
 // The surface grows like the cube root of the count, so equal chairs add equal
 // volume and the pile stays a ball rather than ballooning. PACK is kept low so
@@ -53,6 +62,21 @@ let elapsed = 0;               // seconds since the last reset
 const DEMO_SPAWN_MS = 900;     // how often demo mode sends another chair in
 let demoSpawnMs = DEMO_SPAWN_MS;
 const DEMO_ORBIT_SPEED = 0.35; // OrbitControls autoRotate units
+
+// The demo camera also breathes through the full sphere the floorless scene
+// affords: it dollies in and out and, on a slower and separately-timed beat,
+// rises over one pole and dips under the other. Chair Pile keeps its camera
+// above the floor; here there is nothing to clear, so the sweep is free to pass
+// straight overhead and underneath. Azimuth stays with autoRotate; only the
+// distance and elevation are driven here. The two periods differ so the vantage
+// drifts over the sphere instead of retracing one ring.
+const DEMO_DIST_NEAR = 12;              // closest the breath dollies in
+const DEMO_DIST_FAR = 30;               // farthest it drifts back out
+const DEMO_DIST_PERIOD = 24;            // seconds for one in-and-out
+const DEMO_POLAR_HIGH = 0.28 * Math.PI; // small phi: looking down from above
+const DEMO_POLAR_LOW = 0.72 * Math.PI;  // large phi: looking up from below
+const DEMO_POLAR_PERIOD = 31;           // seconds for one over-and-under
+const DEMO_CAM_EASE = 0.5;              // how firmly the camera chases the breath
 
 // ---------------------------------------------------------------- chair shape
 // The exact chair from Chair Pile: a plain four-leg dining chair, in meters,
@@ -202,6 +226,7 @@ function makeStarfield() {
   const count = 1600;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
   const tmp = new THREE.Color();
   for (let i = 0; i < count; i++) {
     const u = Math.random() * 2 - 1;
@@ -211,11 +236,26 @@ function makeStarfield() {
     positions[i * 3 + 0] = Math.cos(t) * r * radius;
     positions[i * 3 + 1] = u * radius;
     positions[i * 3 + 2] = Math.sin(t) * r * radius;
-    // Nearly white with the faintest cool or warm bias, kept dim on purpose.
-    const h = 0.58 + (Math.random() - 0.5) * 0.12;
-    const s = 0.06 + Math.random() * 0.12;
-    const l = 0.55 + Math.random() * 0.35;
-    tmp.setHSL(h, s, l).multiplyScalar(0.6); // dim: subtle, not glaring
+
+    // A rough apparent magnitude, skewed so most stars are small and faint and
+    // only a handful are big and bright, the way a real sky reads. Size and
+    // brightness ride the same value: a brighter star also shows larger, and the
+    // brightest push past 1 so the tone map blooms their cores toward white.
+    const m = Math.pow(Math.random(), 2.5);
+    sizes[i] = 0.8 + m * 4.2;         // ~0.8 to 5 px across
+    const intensity = 0.45 + m * 1.3;
+
+    // A spread of surface temperatures: mostly blue-white and white, a scatter
+    // of gold, and a few orange and red, like real stellar color classes.
+    const temp = Math.random();
+    let h, s;
+    if (temp < 0.50)      { h = 0.60; s = 0.10 + Math.random() * 0.22; } // blue-white
+    else if (temp < 0.72) { h = 0.58; s = 0.02 + Math.random() * 0.05; } // near white
+    else if (temp < 0.88) { h = 0.12; s = 0.25 + Math.random() * 0.30; } // gold
+    else if (temp < 0.96) { h = 0.07; s = 0.40 + Math.random() * 0.35; } // orange
+    else                  { h = 0.02; s = 0.55 + Math.random() * 0.35; } // red
+    const l = 0.62 + Math.random() * 0.12;
+    tmp.setHSL(h, s, l).multiplyScalar(intensity);
     colors[i * 3 + 0] = tmp.r;
     colors[i * 3 + 1] = tmp.g;
     colors[i * 3 + 2] = tmp.b;
@@ -223,16 +263,22 @@ function makeStarfield() {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
   const mat = new THREE.PointsMaterial({
-    size: 1.7,
+    size: 2.0,                      // fallback; the real per-star size is the aSize attribute
     map: STAR_SPRITE,
     vertexColors: true,
     transparent: true,
-    opacity: 0.85,
+    opacity: 1.0,
     depthWrite: false,
     blending: THREE.NormalBlending, // not additive: keeps them from piling into glare
     sizeAttenuation: false,         // fixed pixel size, so distance can't twinkle them
   });
+  // Give each star its own pixel size: feed the aSize attribute into gl_PointSize.
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = 'attribute float aSize;\n' +
+      shader.vertexShader.replace('gl_PointSize = size;', 'gl_PointSize = aSize;');
+  };
   return new THREE.Points(geo, mat);
 }
 const stars = makeStarfield();
@@ -255,6 +301,28 @@ const _v = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _axis = new THREE.Vector3();
 const _spin = new THREE.Quaternion();
+const _camOff = new THREE.Vector3();
+const _camSph = new THREE.Spherical();
+const _shellP = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
+let demoCamT = 0;              // seconds of demo-camera breath, advanced in demo
+
+/** True when a shell point (direction d, given radius) sits safely off-screen. */
+function offScreenShell(d, radius) {
+  _shellP.copy(d).multiplyScalar(radius);
+  camera.getWorldDirection(_fwd);
+  if (_v.subVectors(_shellP, camera.position).dot(_fwd) <= 0) return true; // behind the camera
+  _shellP.project(camera); // -> normalized device coords; edge of screen is 1
+  return Math.abs(_shellP.x) > OFFSCREEN_MARGIN || Math.abs(_shellP.y) > OFFSCREEN_MARGIN;
+}
+
+/** A direction ~90 deg off the view axis: always outside the frustum. Last resort. */
+function offScreenFallback() {
+  camera.getWorldDirection(_fwd);
+  const s = new THREE.Vector3().crossVectors(_fwd, camera.up);
+  if (s.lengthSq() < 1e-6) s.set(1, 0, 0);
+  return s.normalize();
+}
 
 function randomUnit(out) {
   const u = Math.random() * 2 - 1;
@@ -288,8 +356,17 @@ function spawnChair(dir) {
   if (totalChairs() >= MAX_CHAIRS) return;
   const mesh = newChairMesh();
 
-  const d = dir || randomUnit(new THREE.Vector3());
-  mesh.position.copy(d).multiplyScalar(FIELD_RADIUS * (0.9 + Math.random() * 0.2));
+  // Where it drifts in from — always beyond the edge of the screen, so a chair
+  // is never caught blinking into being. An aimed direction (a tap) is honored
+  // when it already lands off-screen; otherwise draw random shell points until
+  // one does, falling back to a point square off the side of the view.
+  let d = dir || randomUnit(new THREE.Vector3());
+  let radius = FIELD_RADIUS * (0.9 + Math.random() * 0.2);
+  for (let i = 0; !offScreenShell(d, radius) && i < 24; i++) {
+    d = i === 23 ? offScreenFallback() : randomUnit(new THREE.Vector3());
+    radius = FIELD_RADIUS * (0.9 + Math.random() * 0.2);
+  }
+  mesh.position.copy(d).multiplyScalar(radius);
 
   // A tangent to the shell at this point: cross the radial with a random axis.
   const radial = mesh.position.clone().normalize();
@@ -326,6 +403,12 @@ let lastLandSound = -1;
  * rather than all pointing the same way. It is then reparented so it turns with
  * the planetoid as one body, and the surface grows a hair for the next arrival.
  */
+// The zoom-in floor depends on the mode: demo keeps the camera framed outside
+// the pile, free-fly lets you go all the way in to the singularity.
+function applyMinDistance() {
+  controls.minDistance = demoOn ? Math.max(2.5, planetoidRadius + 1.5) : MIN_ZOOM;
+}
+
 function settle(mesh) {
   _dir.copy(mesh.position).normalize();
 
@@ -344,11 +427,12 @@ function settle(mesh) {
 
   // Nudge the zoom-in floor out past the growing surface, so you can't dolly
   // inside the planetoid.
-  controls.minDistance = Math.max(2.5, planetoidRadius + 1.5);
+  applyMinDistance();
 
   const t = performance.now();
   if (t - lastLandSound > 55) { land(); lastLandSound = t; }
-  updateCount();
+  // Note: the count is refreshed by the caller after this chair leaves `free`,
+  // not here — inside settle it is still in both `free` and settledCount.
 }
 
 // --------------------------------------------------------------------- counter
@@ -366,6 +450,7 @@ let demoAccMs = 0;
 function stepChairs(dt) {
   const G = gravityStrength();
   const landAt = planetoidRadius + LAND_MARGIN;
+  let landed = false;
   for (let i = free.length - 1; i >= 0; i--) {
     const mesh = free[i];
     const pos = mesh.position;
@@ -374,7 +459,8 @@ function stepChairs(dt) {
 
     if (r <= landAt) {
       settle(mesh);
-      free.splice(i, 1);
+      free.splice(i, 1);   // out of `free` before the count is read
+      landed = true;
       continue;
     }
 
@@ -396,6 +482,28 @@ function stepChairs(dt) {
       mesh.quaternion.premultiply(_spin).normalize();
     }
   }
+  if (landed) updateCount(); // once per step, after every landing has left `free`
+}
+
+// The demo camera breath: dolly and pole sweep around the fixed target, using
+// the whole space (no floor to stay above). Azimuth is left to autoRotate and
+// the viewer's own drag; only distance and elevation are driven here, and eased
+// so a hand on the controls can still swing the view without a fight.
+function demoCamera(dt) {
+  demoCamT += dt;
+  const distB = (Math.sin((demoCamT / DEMO_DIST_PERIOD) * Math.PI * 2) + 1) / 2;
+  const polarB = (Math.sin((demoCamT / DEMO_POLAR_PERIOD) * Math.PI * 2) + 1) / 2;
+  const wantR = THREE.MathUtils.lerp(DEMO_DIST_NEAR, DEMO_DIST_FAR, distB);
+  const wantPhi = THREE.MathUtils.lerp(DEMO_POLAR_HIGH, DEMO_POLAR_LOW, polarB);
+
+  _camOff.subVectors(camera.position, controls.target);
+  _camSph.setFromVector3(_camOff);
+  const k = Math.min(1, dt * DEMO_CAM_EASE);
+  _camSph.radius += (wantR - _camSph.radius) * k;
+  _camSph.phi += (wantPhi - _camSph.phi) * k;
+  _camSph.makeSafe();
+  _camOff.setFromSpherical(_camSph);
+  camera.position.copy(controls.target).add(_camOff); // autoRotate spins azimuth after
 }
 
 function frame(dt) {
@@ -407,20 +515,22 @@ function frame(dt) {
   stars.rotation.y += dt * 0.002;
 
   if (demoOn) {
+    demoCamera(dt);
     demoAccMs += dt * 1000;
     if (demoAccMs >= demoSpawnMs) {
       demoAccMs = 0;
       spawnChair();
     }
   }
-  controls.autoRotate = demoOn;
-  controls.update();
 }
 
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05); // clamp so a tab-out doesn't lurch
-  frame(dt);
+  // Frozen while the settings sheet is open: nothing drifts or spawns until it closes.
+  if (!menuOpen) frame(dt);
+  controls.autoRotate = demoOn && !menuOpen;
+  controls.update();
   renderer.render(scene, camera);
 }
 
@@ -496,7 +606,7 @@ function resetField() {
   planetoid.rotation.set(0, 0, 0);
   settledCount = 0;
   planetoidRadius = BASE_PLANETOID_R;
-  controls.minDistance = 2.5;
+  applyMinDistance();
   elapsed = 0;
   seedField(START_CHAIRS);
   updateCount();
@@ -539,6 +649,7 @@ const spawnVal = document.getElementById('spawn-val');
 function syncDemo() {
   demoOn = demoToggle.checked;
   rateWrap.style.display = demoOn ? '' : 'none';
+  applyMinDistance(); // free-fly unlocks the full zoom-in; demo re-frames outside the pile
 }
 demoToggle.addEventListener('change', syncDemo);
 spawn.addEventListener('input', () => {
@@ -574,4 +685,5 @@ resetBtn.addEventListener('click', () => { resetField(); closeMenu(); });
 // ---------------------------------------------------------------------- go
 initAudio();
 seedField(START_CHAIRS);
+openMenu();
 animate();
