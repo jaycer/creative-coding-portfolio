@@ -315,7 +315,143 @@ const BloonAudio = (function () {
     cleanup([o, vib, vg, bp, bp2, g], t0 + dur + 0.02);
   }
 
-  const VOICES = { bird, horn, slide, piano, bell, kazoo };
+  // --- Level 2 voices: brighter, more electronic ------------------------------
+
+  // Laser zap: a fast downward pitch sweep on a sawtooth, quick decay.
+  function zap(out, t0) {
+    const f0 = pick([1400, 1800, 2200]);
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(f0, t0);
+    o.frequency.exponentialRampToValueAtTime(f0 * 0.14, t0 + 0.18);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 3200;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.3, t0 + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+    o.connect(lp); lp.connect(g); g.connect(out);
+    o.start(t0); o.stop(t0 + 0.22);
+    cleanup([o, lp, g], t0 + 0.22);
+  }
+
+  // Water droplet: a sine that drops fast in pitch, short and round.
+  function drop(out, t0) {
+    const f = pick([900, 1100, 1300, 1600]);
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f, t0);
+    o.frequency.exponentialRampToValueAtTime(f * 0.32, t0 + 0.1);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.45, t0 + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+    o.connect(g); g.connect(out);
+    o.start(t0); o.stop(t0 + 0.24);
+    cleanup([o, g], t0 + 0.24);
+  }
+
+  // Marimba: warm wooden mallet — a fundamental with a strong 4th-harmonic
+  // overtone (the marimba's signature), fast attack, medium decay.
+  function marimba(out, t0) {
+    const f = pick([330, 392, 440, 523]);
+    [[1.0, 0.5, 0.5], [4.0, 0.18, 0.28], [9.2, 0.05, 0.12]].forEach(([mult, amp, dur]) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f * mult;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(amp, t0 + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g); g.connect(out);
+      o.start(t0); o.stop(t0 + dur + 0.02);
+      cleanup([o, g], t0 + dur + 0.02);
+    });
+  }
+
+  // Bubble: a sine that pops up in pitch, very short.
+  function boop(out, t0) {
+    const f = pick([400, 500, 600, 720]);
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(f * 0.6, t0);
+    o.frequency.exponentialRampToValueAtTime(f * 1.7, t0 + 0.06);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
+    o.connect(g); g.connect(out);
+    o.start(t0); o.stop(t0 + 0.12);
+    cleanup([o, g], t0 + 0.12);
+  }
+
+  // Siren: a nasal triangle sweeping up then down through a resonant bandpass.
+  function siren(out, t0) {
+    const f = pick([500, 600, 700]);
+    const dur = 0.3;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(f, t0);
+    o.frequency.linearRampToValueAtTime(f * 1.5, t0 + 0.12);
+    o.frequency.linearRampToValueAtTime(f, t0 + 0.26);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = f * 2; bp.Q.value = 4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.28, t0 + 0.02);
+    g.gain.setValueAtTime(0.28, t0 + dur - 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(bp); bp.connect(g); g.connect(out);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+    cleanup([o, bp, g], t0 + dur + 0.02);
+  }
+
+  // Cowbell: the classic 808 — two square tones a fifth-ish apart through a
+  // bandpass, with a fast metallic decay.
+  function cowbell(out, t0) {
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.45, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.18);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 2640; bp.Q.value = 1.2;
+    bp.connect(g); g.connect(out);
+    [540, 800].forEach((fr) => {
+      const o = ctx.createOscillator();
+      o.type = 'square'; o.frequency.value = fr;
+      o.connect(bp);
+      o.start(t0); o.stop(t0 + 0.2);
+      cleanup([o], t0 + 0.2);
+    });
+    cleanup([bp, g], t0 + 0.2);
+  }
+
+  // Level-up fanfare: a quick bright ascending arpeggio (played on clearing a
+  // level), each note a triangle + a detuned square for a synthy shimmer.
+  function levelup(out, t0) {
+    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
+    notes.forEach((f, i) => {
+      const t = t0 + i * 0.09;
+      const o = ctx.createOscillator();
+      const o2 = ctx.createOscillator();
+      const o2g = ctx.createGain();
+      const g = ctx.createGain();
+      o.type = 'triangle'; o.frequency.value = f;
+      o2.type = 'square'; o2.frequency.value = f; o2.detune.value = 7;
+      o2g.gain.value = 0.35;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      o.connect(g); o2.connect(o2g); o2g.connect(g); g.connect(out);
+      o.start(t); o2.start(t);
+      o.stop(t + 0.32); o2.stop(t + 0.32);
+      cleanup([o, o2, o2g, g], t + 0.32);
+    });
+  }
+
+  const VOICES = {
+    bird, horn, slide, piano, bell, kazoo,           // Level 1
+    zap, drop, marimba, boop, siren, cowbell,        // Level 2
+    levelup,                                          // transitions
+  };
 
   // Play a voice. `vol` (0..1) scales it — collisions blend voices softly.
   function play(voice, vol) {

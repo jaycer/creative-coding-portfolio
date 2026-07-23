@@ -11,7 +11,16 @@
 // uniform arrays and drawn as fake-3D lit spheres by balloons.frag.glsl.
 
 const MAX = BLOON_CONFIG.maxBalloons;          // single source of truth (config.js)
-const PALETTE = BLOON_CONFIG.palette;
+
+// Level palette + fall speed. Levels cycle through the palettes and get faster;
+// paletteForLevel/fallScaleForLevel derive each level's look and speed.
+function paletteForLevel(lvl) {
+  const ps = BLOON_CONFIG.palettes;
+  return ps[(lvl - 1) % ps.length];
+}
+function fallScaleForLevel(lvl) {
+  return 1 + (lvl - 1) * BLOON_CONFIG.levelFallStep;
+}
 
 // --- physics tuning (pixels, seconds) ---
 const GRAVITY   = 120;   // downward accel; small — these barely sink
@@ -55,15 +64,20 @@ let balloons = [];
 let baseRadiusPx = 60;
 
 // --- game state ---
-// Score is the most balloons you kept aloft at once. Balloons only leave a
-// round by falling off the bottom (which ends it), so the live count only
-// climbs — the peak is simply how many were up when you lost.
+// Fill the screen with MAX balloons to clear a level and advance; each level is
+// faster with a new palette. Progress = the level you reach; Best is the
+// furthest level ever reached.
 let state = 'ready';         // 'ready' | 'playing' | 'over'
-let startMs = 0;             // millis() when the round began (for spawn timing)
-let peakAloft = 0;           // most balloons up at once this round
+let level = 1;               // current level
+let currentPalette = paletteForLevel(1);
+let gravityNow = 0;          // effective downward accel for this level (set by applyLevel)
+let leveling = false;        // mid level-up transition (balloons rocketing away)
+let levelupEndMs = 0;        // when the transition ends
+let levelStartMs = 0;        // millis() the current level began (for spawn cadence)
+let peakAloft = 0;           // most balloons up at once this level
 let finalAloft = 0;          // peak frozen at game over
-let bestAloft = Number(localStorage.getItem('bloon-boon-best-count') || 0);
-let spawnQueue = [];         // scheduled spawn times (ms, relative to round start)
+let bestLevel = Number(localStorage.getItem('bloon-boon-best-level') || 1);
+let spawnQueue = [];         // scheduled spawn times (ms, relative to level start)
 let nextRandomSpawnMs = 0;   // when the next random spawn fires
 
 // --- input / flick tracking ---
@@ -73,7 +87,7 @@ let pVX = 0, pVY = 0;        // smoothed pointer velocity (px/s)
 
 // DOM refs (populated on load)
 let elStart, elOver, elScore, elBest, elFinal, elOverBest, elStartBtn, elRestartBtn;
-let elRipples, elTapToggles;
+let elRipples, elTapToggles, elLevel, elBanner;
 let tapViz = false;               // show taps as expanding green rings
 
 function preload() {
@@ -111,25 +125,61 @@ function windowResized() {
 // ---------------------------------------------------------------------------
 function startRound() {
   BloonAudio.init();               // (re)confirm audio inside the gesture
-  balloons = [];
   state = 'playing';
-  startMs = millis();
+  level = 1;
+  leveling = false;
+  hideBanner();
+  beginLevel();
+  hideOverlays();
+}
+
+// Apply the current level's palette + fall speed.
+function applyLevel() {
+  currentPalette = paletteForLevel(level);
+  gravityNow = GRAVITY * fallScaleForLevel(level);
+}
+
+// (Re)start the current level: clear the room, reset the color bag and spawn
+// schedule (the difficulty ramp restarts each level).
+function beginLevel() {
+  applyLevel();
+  balloons = [];
   peakAloft = 0;
-  colorBag = []; lastColorIdx = -1;   // fresh shuffle each round
-  // Scripted opening so the room isn't empty, then hand off to random cadence.
+  colorBag = []; lastColorIdx = -1;
+  levelStartMs = millis();
   spawnQueue = BLOON_CONFIG.firstSpawnsSeconds.map((s) => s * 1000);
   const last = spawnQueue[spawnQueue.length - 1] || 0;
   nextRandomSpawnMs = last + randomSpawnGap(last);
-  hideOverlays();
+}
+
+// Screen full: send every balloon rocketing off the top, flash the banner and
+// play a fanfare. finishLevelUp() actually advances once they've cleared.
+function startLevelUp() {
+  leveling = true;
+  levelupEndMs = millis() + 1300;
+  for (const b of balloons) {
+    b.vy = -random(650, 1000);
+    b.vx += random(-260, 260);
+    b.angVel = constrain(b.angVel + random(-6, 6), -ANGVEL_MAX, ANGVEL_MAX);
+  }
+  BloonAudio.play('levelup');
+  showBanner('Level ' + (level + 1));
+}
+
+function finishLevelUp() {
+  leveling = false;
+  level += 1;
+  if (level > bestLevel) {
+    bestLevel = level;
+    localStorage.setItem('bloon-boon-best-level', String(bestLevel));
+  }
+  beginLevel();
+  hideBanner();
 }
 
 function endRound() {
   state = 'over';
   finalAloft = peakAloft;
-  if (finalAloft > bestAloft) {
-    bestAloft = finalAloft;
-    localStorage.setItem('bloon-boon-best-count', String(bestAloft));
-  }
   showOver();
 }
 
@@ -157,7 +207,7 @@ let lastColorIdx = -1;
 function nextColorIdx() {
   if (colorBag.length === 0) {
     colorBag = [];
-    for (let s = 0; s < BAG_SETS; s++) PALETTE.forEach((_, i) => colorBag.push(i));
+    for (let s = 0; s < BAG_SETS; s++) currentPalette.forEach((_, i) => colorBag.push(i));
     for (let i = colorBag.length - 1; i > 0; i--) { // Fisher–Yates shuffle
       const j = floor(random(i + 1));
       [colorBag[i], colorBag[j]] = [colorBag[j], colorBag[i]];
@@ -177,7 +227,7 @@ function nextColorIdx() {
 function spawnBalloon() {
   if (balloons.length >= MAX) return;
   const idx = nextColorIdx();
-  const p = PALETTE[idx];
+  const p = currentPalette[idx];
   const z = random(0.72, 1.2);     // size + depth: smaller balloons sit behind, bigger in front
   const b = {
     x: random(width * 0.15, width * 0.85),
@@ -205,8 +255,9 @@ function spawnBalloon() {
 // for effect, but a bloon leaving the bottom must not re-trigger endRound.
 function updateBalloons(dt, tSec, checkLoss) {
   for (const b of balloons) {
-    // Non-helium float: gentle gravity, heavy drag, lazy horizontal sway.
-    b.vy += GRAVITY * dt;
+    // Non-helium float: gentle gravity (faster on higher levels), heavy drag,
+    // lazy horizontal sway.
+    b.vy += gravityNow * dt;
     b.vx += Math.sin(tSec * SWAY_FREQ * TWO_PI + b.swayPhase) * SWAY_ACC * dt;
     // Bigger balloons catch more air: more drag → they drift down slower and
     // sway more calmly, while the little ones fall faster and dart around.
@@ -377,27 +428,31 @@ function draw() {
   lastFrameMs = now;
   if (!isFinite(dt) || dt > 0.1) dt = 0.016; // clamp huge gaps (tab switch)
 
-  if (state === 'playing') {
-    const roundMs = now - startMs;
+  if (state === 'playing' && leveling) {
+    // Level-up: bloons rocket away, no spawning, no loss. Drop each once it has
+    // fully left the screen (top or bottom), then start the next level.
+    updateBalloons(dt, now / 1000, false);
+    balloons = balloons.filter((b) => b.y + b.radius > 0 && b.y - b.radius < height);
+    if (now >= levelupEndMs) finishLevelUp();
+    updateHud();
+  } else if (state === 'playing') {
+    const levelMs = now - levelStartMs;
     // Fire scripted opening spawns, then random cadence.
-    while (spawnQueue.length && roundMs >= spawnQueue[0]) {
+    while (spawnQueue.length && levelMs >= spawnQueue[0]) {
       spawnQueue.shift();
       spawnBalloon();
     }
-    if (roundMs >= nextRandomSpawnMs) {
+    if (levelMs >= nextRandomSpawnMs) {
       spawnBalloon();
-      nextRandomSpawnMs = roundMs + randomSpawnGap(roundMs);
+      nextRandomSpawnMs = levelMs + randomSpawnGap(levelMs);
     }
     // Record the peak before stepping physics, so a balloon lost this frame is
-    // still counted in the final score.
+    // still counted.
     if (balloons.length > peakAloft) peakAloft = balloons.length;
-    // Live record: once you pass your stored best, Best climbs with the count.
-    if (peakAloft > bestAloft) {
-      bestAloft = peakAloft;
-      localStorage.setItem('bloon-boon-best-count', String(bestAloft));
-    }
     updateBalloons(dt, now / 1000, true);
     updateHud();
+    // Screen full → clear the level and move up.
+    if (balloons.length >= MAX) startLevelUp();
   } else if (state === 'over') {
     // Keep the bloons falling behind the game-over screen; drop each once it has
     // fully left the bottom so they drift away instead of freezing in place.
@@ -445,10 +500,12 @@ function cacheDom() {
   elOver       = document.getElementById('over');
   elScore      = document.getElementById('score');
   elBest       = document.getElementById('best');
-  elFinal      = document.getElementById('final-count');
+  elFinal      = document.getElementById('final-level');
   elOverBest   = document.getElementById('over-best');
   elStartBtn   = document.getElementById('start-btn');
   elRestartBtn = document.getElementById('restart-btn');
+  elLevel      = document.getElementById('level');
+  elBanner     = document.getElementById('level-banner');
   // The buttons are the only way to (re)start a round.
   elStartBtn.addEventListener('click', startRound);
   elRestartBtn.addEventListener('click', startRound);
@@ -496,15 +553,19 @@ function spawnRipple(x, y) {
 function updateHud() {
   // Only touch the DOM when a value actually changes — updateHud runs every
   // frame, and constant redundant writes can trip iOS WebKit's repaint bug.
+  const lv = 'Lv ' + level;
+  if (elLevel.textContent !== lv) elLevel.textContent = lv;
   const s = String(balloons.length);
   if (elScore.textContent !== s) elScore.textContent = s;
-  const b = bestAloft ? 'Best: ' + bestAloft : '';
+  const b = 'Best ' + bestLevel;
   if (elBest.textContent !== b) elBest.textContent = b;
 }
 
 function showReady() {
   state = 'ready';
-  elBest.textContent = bestAloft ? 'Best: ' + bestAloft : '';
+  level = 1;
+  elLevel.textContent = 'Lv 1';
+  elBest.textContent = 'Best ' + bestLevel;
   elScore.textContent = '0';
   elStart.classList.remove('hidden');
   elOver.classList.add('hidden');
@@ -512,13 +573,22 @@ function showReady() {
   elRestartBtn.disabled = true;
 }
 function showOver() {
-  elFinal.textContent = finalAloft;
-  elOverBest.textContent = 'Best: ' + bestAloft;
+  elFinal.textContent = 'Level ' + level;
+  elOverBest.textContent = 'Best: Level ' + bestLevel;
   elOver.classList.remove('hidden');
   // Ignore taps for a moment so a mid-round tapping frenzy can't instantly
   // dismiss the game-over screen — the restart button wakes up after 1.5s.
   elRestartBtn.disabled = true;
   setTimeout(() => { elRestartBtn.disabled = false; }, 1500);
+}
+
+// Level-up banner (a big transient flash during the transition).
+function showBanner(text) {
+  elBanner.textContent = text;
+  elBanner.classList.remove('hidden');
+}
+function hideBanner() {
+  elBanner.classList.add('hidden');
 }
 function hideOverlays() {
   elStart.classList.add('hidden');

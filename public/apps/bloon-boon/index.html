@@ -68,6 +68,7 @@
          vertical line) on iOS WebKit. */
       #score { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.02em;
                display: inline-block; min-width: 1.5em; text-align: center; }
+      .hud-level { font-size: 0.85rem; font-weight: 700; opacity: 0.9; margin-right: 4px; }
       .hud-label { font-size: 0.7rem; opacity: 0.6; margin-right: 6px; }
       /* Fixed width (fits "Best: 24") so it doesn't reflow the HUD — and thus
          won't ghost on iOS — when Best ticks up live and crosses 9 -> 10. */
@@ -111,6 +112,28 @@
       @media (prefers-reduced-motion: reduce) {
         .ripple { animation-duration: 0.3s; }
       }
+
+      /* Level-up banner: a big gradient flash centered on screen during the
+         clear-the-level transition. */
+      #level-banner {
+        position: fixed; inset: 0; z-index: 22; pointer-events: none;
+        display: flex; align-items: center; justify-content: center;
+        font-family: var(--font); font-weight: 800; letter-spacing: -0.02em;
+        font-size: clamp(2.4rem, 13vw, 5.5rem);
+        color: transparent;
+        background: linear-gradient(90deg, #ff5b64, #ffd23e 32%, #5ed46f 60%, #4db8ff);
+        -webkit-background-clip: text; background-clip: text;
+        filter: drop-shadow(0 6px 24px rgba(0,0,0,0.5));
+        opacity: 1; transition: opacity 0.3s ease;
+      }
+      #level-banner.hidden { opacity: 0; }
+      #level-banner:not(.hidden) { animation: banner-pop 0.45s ease-out; }
+      @keyframes banner-pop {
+        0%   { transform: scale(0.6); }
+        55%  { transform: scale(1.08); }
+        100% { transform: scale(1); }
+      }
+      @media (prefers-reduced-motion: reduce) { #level-banner:not(.hidden) { animation: none; } }
 
       /* Overlays. pointer-events:none so the tap passes through to the canvas,
          which owns start/restart. */
@@ -171,6 +194,7 @@
       <a class="back" href="../../" aria-label="Back to gallery">←<span class="back-label"> Gallery</span></a>
       <h1>Bloon Boon</h1>
       <div class="hud">
+        <span id="level" class="hud-level">Lv 1</span>
         <span id="score">0</span>
         <span class="hud-label">aloft</span>
         <span id="best"></span>
@@ -178,6 +202,7 @@
     </header>
 
     <div id="ripples"></div>
+    <div id="level-banner" class="hidden"></div>
 
     <div id="start" class="overlay">
       <div class="panel">
@@ -191,7 +216,7 @@
     <div id="over" class="overlay hidden">
       <div class="panel">
         <h2>A bloon got away!!!</h2>
-        <p class="stat">You kept <b id="final-count">0</b> bloons aloft at once</p>
+        <p class="stat">Reached <b id="final-level">Level 1</b></p>
         <p id="over-best" class="best"></p>
         <button id="restart-btn" class="cue-btn" type="button">Tap here to play again</button>
         <button class="tap-toggle" type="button" aria-pressed="false">Show Taps</button>
