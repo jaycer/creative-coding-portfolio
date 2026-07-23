@@ -1,37 +1,57 @@
-// Chairs in Space — plain dining chairs, adrift in zero gravity.
+// Chairs in Space — chairs fall into a singularity and pile up into a planetoid.
 //
-// A sibling to Chair Pile: the same four-leg chair, but with the floor and the
-// gravity taken away. Chairs tumble and drift through a starfield, each on its
-// own slow spin. Tap or press a key to send another one out; drag to look
-// around, scroll to move in and out. Nothing ever lands — it just keeps
-// turning, out past a hazy planet and a low sun.
+// A dark core sits at the center of a subtle starfield. Chairs drift in the
+// void around it, pulled inward by its gravity; they spiral down and, once they
+// reach the growing surface, settle and stick — layer on layer — into a slowly
+// turning planetoid built entirely of chairs. The singularity's pull can climb
+// over time, so the longer you watch, the more hungrily it draws them in.
+//
+// The camera is always trained on the singularity: you can orbit around it and
+// zoom in and out, but never point away.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { initAudio, resumeAudio, chime, setMuted, isMuted } from './audio.js';
+import { initAudio, resumeAudio, chime, land, setMuted, isMuted } from './audio.js';
 
-// How many chairs may be adrift at once. Each is a lit mesh with its own
-// transform; a few hundred stays smooth on a phone and already fills the void.
-const MAX_CHAIRS = 260;
-const START_CHAIRS = 46;       // how many are already out there on load
+// Total chairs (drifting + settled). Each is a lit mesh; a few hundred packs a
+// convincing planetoid and still runs smooth on a phone.
+const MAX_CHAIRS = 440;
+const START_CHAIRS = 90;       // how many are already adrift on load
 
-// The chairs live inside a sphere this big. A chair that drifts past it is
-// wrapped back in from the far side (see recycle), so the field never empties
-// and never thins out on one side — it reads as an endless, even drift.
-const FIELD_RADIUS = 26;
+// The field the chairs live in. They spawn out near FIELD_RADIUS and fall in.
+const FIELD_RADIUS = 22;
 
-// Motion, in the chairs' own units. Drift is meters per second, tumble is
-// radians per second. Both are scaled live by the Drift slider.
-const DRIFT_BASE = 0.55;       // typical linear speed of a chair
-const TUMBLE_BASE = 0.5;       // typical spin rate
-let motionScale = 1;           // the slider multiplies both of the above
+// The singularity and the planetoid growing on it.
+const CORE_RADIUS = 0.55;      // the dark core's visible radius
+const BASE_PLANETOID_R = 1.1;  // the accretion surface before any chairs land
+// The surface grows like the cube root of the count, so equal chairs add equal
+// volume and the pile stays a ball rather than ballooning. PACK sets how loose
+// that packing looks.
+const PACK = 0.9;
+const LAND_MARGIN = 0.35;      // how close to the surface before a chair sticks
 
-// Demo mode: chairs launch themselves and the camera makes a slow, wide orbit.
-const DEMO_SPAWN_MS = 2600;
+// Gravity. Softened inverse-square (r^2 + soften^2) so the pull stays finite
+// near the middle, plus a little drag so orbits decay and every chair is
+// eventually drawn in rather than slingshotting back out to infinity.
+const GRAV_BASE = 58;          // strength at the slider's 1.0
+const GRAV_SOFTEN = 1.6;       // meters; smooths the pull near the core
+const DRAG = 0.05;             // per second; bleeds energy so orbits spiral in
+const MAX_SPEED = 16;          // clamp, so a close pass can't fling a chair away
+let gravityScale = 1;          // the Gravity slider multiplies GRAV_BASE
+
+// Gravity over time: when on, the pull ramps from 1x up to RAMP_CAP across
+// RAMP_SECONDS, so the field tightens the longer it runs.
+let gravityRamp = true;
+const RAMP_CAP = 3.2;
+const RAMP_SECONDS = 50;
+let elapsed = 0;               // seconds since the last reset
+
+// Demo mode: chairs launch themselves and the camera makes a slow, locked orbit
+// around the singularity.
+const DEMO_SPAWN_MS = 900;     // how often demo mode sends another chair in
 let demoSpawnMs = DEMO_SPAWN_MS;
-const DEMO_ORBIT_SPEED = 0.16; // radians/sec of camera yaw
-const DEMO_TILT = 0.12;        // how far the camera nods up and down
+const DEMO_ORBIT_SPEED = 0.35; // OrbitControls autoRotate units
 
 // ---------------------------------------------------------------- chair shape
 // The exact chair from Chair Pile: a plain four-leg dining chair, in meters,
@@ -40,26 +60,21 @@ const SEAT_W = 0.46, SEAT_D = 0.44, SEAT_T = 0.05, SEAT_Y = 0.44;
 const LEG = 0.05, LEG_H = 0.44;
 const BACK_H = 0.55;
 
-// Butt joints put two coplanar faces at the same depth; nudging each part a
-// hair into the next buries the shared end faces so they can't z-fight.
+// Butt joints put two coplanar faces at the same depth, so each part is nudged
+// a hair into the next to bury the shared end faces and stop them z-fighting.
 const JOIN = 0.004;
 const LEG_X = SEAT_W / 2 - LEG / 2;
 const LEG_Z = SEAT_D / 2 - LEG / 2;
 const CHAIR_H = SEAT_Y + SEAT_T + BACK_H;
 
 const CHAIR_PARTS = [
-  // seat
   { size: [SEAT_W, SEAT_T, SEAT_D], pos: [0, SEAT_Y + SEAT_T / 2, 0] },
-  // front legs
   { size: [LEG, LEG_H + JOIN, LEG], pos: [ LEG_X, (LEG_H + JOIN) / 2, LEG_Z] },
   { size: [LEG, LEG_H + JOIN, LEG], pos: [-LEG_X, (LEG_H + JOIN) / 2, LEG_Z] },
-  // back stiles: floor to top rail in one piece, through the seat
   { size: [LEG, CHAIR_H - JOIN, LEG], pos: [ LEG_X, (CHAIR_H - JOIN) / 2, -LEG_Z] },
   { size: [LEG, CHAIR_H - JOIN, LEG], pos: [-LEG_X, (CHAIR_H - JOIN) / 2, -LEG_Z] },
-  // back slats
   { size: [SEAT_W - LEG * 2 + JOIN * 2, 0.07, LEG], pos: [0, 0.66, -LEG_Z] },
   { size: [SEAT_W - LEG * 2 + JOIN * 2, 0.07, LEG], pos: [0, 0.80, -LEG_Z] },
-  // top rail
   { size: [SEAT_W, 0.07, LEG], pos: [0, CHAIR_H - 0.035, -LEG_Z] },
 ];
 
@@ -92,50 +107,73 @@ document.body.appendChild(canvas);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;
+renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x04050c);
+scene.background = new THREE.Color(0x03040a);
 
-const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 2000);
-camera.position.set(0, 1.6, 12);
+const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 3000);
+camera.position.set(0, 4, 17);
 
+// The camera is locked onto the singularity: orbit and zoom only, never pan, so
+// it can never point away from the center.
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.enablePan = false;
-controls.minDistance = 3;
-controls.maxDistance = 60;
 controls.target.set(0, 0, 0);
+controls.minDistance = 2.5;
+controls.maxDistance = 90;
+controls.autoRotateSpeed = DEMO_ORBIT_SPEED;
 
 // --------------------------------------------------------------------- lights
-// A low, warm sun on one side and a cool fill on the other — the standard
-// "sunlit object in orbit" key/fill, so faces read as lit rather than flat.
-const sun = new THREE.DirectionalLight(0xfff0dc, 2.6);
-sun.position.set(6, 3, 4);
-scene.add(sun);
+// A cool key from one side and a warmer fill from the other, so the chairs read
+// as lit bodies in space. No sun disc — the singularity is the only landmark.
+const key = new THREE.DirectionalLight(0xdfe7ff, 2.3);
+key.position.set(6, 5, 4);
+scene.add(key);
 
-const fill = new THREE.DirectionalLight(0x5f7bd6, 0.7);
-fill.position.set(-5, -2, -3);
+const fill = new THREE.DirectionalLight(0xffcf9a, 0.55);
+fill.position.set(-6, -3, -4);
 scene.add(fill);
 
-// Faint sky/ground hemisphere so the shadowed sides never go fully black.
-scene.add(new THREE.HemisphereLight(0x2a3358, 0x0a0a14, 0.45));
+scene.add(new THREE.HemisphereLight(0x2a3358, 0x0a0a12, 0.4));
 
-// -------------------------------------------------------------------- the sun
-// A soft glowing disc far off, roughly where the key light comes from, so the
-// warm side of every chair has a source you can see.
-function makeSunSprite() {
+// ---------------------------------------------------------------- singularity
+// A black core, a faint hot photon ring around it, and a soft halo — subtle,
+// but enough to mark the center the whole scene falls toward.
+const singularity = new THREE.Group();
+
+const core = new THREE.Mesh(
+  new THREE.SphereGeometry(CORE_RADIUS, 48, 32),
+  new THREE.MeshBasicMaterial({ color: 0x000000 }),
+);
+singularity.add(core);
+
+// The photon ring: a thin bright torus, tipped a little off the eye.
+const ring = new THREE.Mesh(
+  new THREE.TorusGeometry(CORE_RADIUS * 1.35, CORE_RADIUS * 0.06, 16, 96),
+  new THREE.MeshBasicMaterial({
+    color: 0xbcd2ff, transparent: true, opacity: 0.9,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }),
+);
+ring.rotation.x = Math.PI * 0.5 - 0.35;
+singularity.add(ring);
+
+// A soft radial halo sprite, so the core glows rather than sitting as a flat
+// black dot on black.
+function haloSprite() {
   const size = 128;
   const cv = document.createElement('canvas');
   cv.width = cv.height = size;
   const ctx = cv.getContext('2d');
   const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  g.addColorStop(0.0, 'rgba(255,247,225,1)');
-  g.addColorStop(0.25, 'rgba(255,231,180,0.9)');
-  g.addColorStop(0.6, 'rgba(255,180,120,0.25)');
-  g.addColorStop(1.0, 'rgba(255,160,90,0)');
+  g.addColorStop(0.0, 'rgba(150,180,255,0.0)');   // hollow center, so the core stays black
+  g.addColorStop(0.32, 'rgba(150,180,255,0.45)');
+  g.addColorStop(0.5, 'rgba(120,150,240,0.16)');
+  g.addColorStop(1.0, 'rgba(90,120,220,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
   const tex = new THREE.CanvasTexture(cv);
@@ -143,16 +181,16 @@ function makeSunSprite() {
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
     map: tex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true,
   }));
-  sprite.scale.setScalar(70);
-  sprite.position.set(120, 60, 80);
+  sprite.scale.setScalar(CORE_RADIUS * 6);
   return sprite;
 }
-scene.add(makeSunSprite());
+singularity.add(haloSprite());
+scene.add(singularity);
 
 // ------------------------------------------------------------------- starfield
-// Two shells of points: a dense faint field and a sparse bright one, on a soft
-// round sprite so the stars are dots, not squares. Colors ride a blue→white→
-// amber temperature ramp for a little variety without looking tinted.
+// Subtle and still: small, dim, mostly-white points on a soft round sprite, so
+// the stars read as faint pinpricks rather than bright confetti. They never
+// twinkle — the layer only drifts, imperceptibly, for the barest parallax.
 function starTexture() {
   const size = 64;
   const cv = document.createElement('canvas');
@@ -160,7 +198,7 @@ function starTexture() {
   const ctx = cv.getContext('2d');
   const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
   g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.35, 'rgba(255,255,255,0.65)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.5)');
   g.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
@@ -170,27 +208,24 @@ function starTexture() {
 }
 const STAR_SPRITE = starTexture();
 
-// Deterministic pseudo-random so the field is stable across reloads within a
-// session (no dependence on Math.random ordering elsewhere).
-function makeStarLayer({ count, near, far, size, brightness }) {
+function makeStarfield() {
+  const count = 1600;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const tmp = new THREE.Color();
   for (let i = 0; i < count; i++) {
-    // A random direction on the unit sphere, pushed out to a random radius in
-    // the shell — an even scatter across the whole sky.
     const u = Math.random() * 2 - 1;
     const t = Math.random() * Math.PI * 2;
     const r = Math.sqrt(1 - u * u);
-    const radius = near + Math.random() * (far - near);
+    const radius = 300 + Math.random() * 500; // far off, so they never parallax past the chairs
     positions[i * 3 + 0] = Math.cos(t) * r * radius;
     positions[i * 3 + 1] = u * radius;
     positions[i * 3 + 2] = Math.sin(t) * r * radius;
-    // Temperature: mostly white, some cool, a few warm.
-    const h = 0.55 + (Math.random() - 0.5) * 0.22; // blue-ish to amber
-    const s = 0.15 + Math.random() * 0.35;
-    const l = 0.75 + Math.random() * 0.25;
-    tmp.setHSL(h, s, l).multiplyScalar(brightness);
+    // Nearly white with the faintest cool or warm bias, kept dim on purpose.
+    const h = 0.58 + (Math.random() - 0.5) * 0.12;
+    const s = 0.06 + Math.random() * 0.12;
+    const l = 0.55 + Math.random() * 0.35;
+    tmp.setHSL(h, s, l).multiplyScalar(0.6); // dim: subtle, not glaring
     colors[i * 3 + 0] = tmp.r;
     colors[i * 3 + 1] = tmp.g;
     colors[i * 3 + 2] = tmp.b;
@@ -199,164 +234,141 @@ function makeStarLayer({ count, near, far, size, brightness }) {
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   const mat = new THREE.PointsMaterial({
-    size,
+    size: 1.7,
     map: STAR_SPRITE,
     vertexColors: true,
     transparent: true,
+    opacity: 0.85,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    sizeAttenuation: true,
+    blending: THREE.NormalBlending, // not additive: keeps them from piling into glare
+    sizeAttenuation: false,         // fixed pixel size, so distance can't twinkle them
   });
   return new THREE.Points(geo, mat);
 }
-
-const starGroup = new THREE.Group();
-starGroup.add(makeStarLayer({ count: 1400, near: 140, far: 320, size: 1.1, brightness: 0.9 }));
-starGroup.add(makeStarLayer({ count: 220,  near: 120, far: 260, size: 2.6, brightness: 1.0 }));
-scene.add(starGroup);
-
-// --------------------------------------------------------------------- planet
-// A hazy world low in the frame for depth and scale. Lit by the same sun, so
-// its terminator lines up with the chairs' shadowed sides.
-function makePlanet() {
-  const group = new THREE.Group();
-  const geo = new THREE.SphereGeometry(40, 64, 48);
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0x2b4a7a, roughness: 1.0, metalness: 0.0,
-    emissive: 0x0a1730, emissiveIntensity: 0.5,
-  });
-  group.add(new THREE.Mesh(geo, mat));
-
-  // A thin atmospheric rim: a slightly larger back-side shell that glows where
-  // it grazes the edge, faked with additive blending and a soft falloff.
-  const atmoMat = new THREE.MeshBasicMaterial({
-    color: 0x6fa8ff, transparent: true, opacity: 0.14,
-    side: THREE.BackSide, blending: THREE.AdditiveBlending, depthWrite: false,
-  });
-  group.add(new THREE.Mesh(new THREE.SphereGeometry(43, 48, 32), atmoMat));
-
-  group.position.set(-30, -46, -70);
-  return group;
-}
-const planet = makePlanet();
-scene.add(planet);
+const stars = makeStarfield();
+scene.add(stars);
 
 // ------------------------------------------------------------------ the chairs
 const chairGeometry = buildChairGeometry();
 const materials = PALETTE.map((color) =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.62, metalness: 0.08 }));
 
-const chairs = [];
-const _spin = new THREE.Quaternion();
-const _axis = new THREE.Vector3();
+// Free chairs still falling in: each { mesh, vel, omega }. Settled chairs are
+// reparented into `planetoid` and no longer simulated.
+const free = [];
+const planetoid = new THREE.Group();
+scene.add(planetoid);
+let settledCount = 0;
+let planetoidRadius = BASE_PLANETOID_R;
 
-/** A random point on the surface of the field sphere. */
-function randomShellPoint(radius, out) {
+const _v = new THREE.Vector3();
+const _dir = new THREE.Vector3();
+const _axis = new THREE.Vector3();
+const _spin = new THREE.Quaternion();
+const _up = new THREE.Vector3(0, 1, 0);
+
+function randomUnit(out) {
   const u = Math.random() * 2 - 1;
   const t = Math.random() * Math.PI * 2;
   const r = Math.sqrt(1 - u * u);
-  return out.set(Math.cos(t) * r, u, Math.sin(t) * r).multiplyScalar(radius);
+  return out.set(Math.cos(t) * r, u, Math.sin(t) * r);
 }
 
 function newChairMesh() {
   const tint = Math.floor(Math.random() * materials.length);
   const mesh = new THREE.Mesh(chairGeometry, materials[tint]);
-  const s = 0.85 + Math.random() * 0.6; // a little variety in size/distance feel
-  mesh.scale.setScalar(s);
-  mesh.userData.vel = new THREE.Vector3();
-  mesh.userData.omega = new THREE.Vector3();  // angular velocity, radians/sec
+  mesh.scale.setScalar(0.8 + Math.random() * 0.5);
   return mesh;
 }
 
-/** Point a chair somewhere sensible with a fresh drift and tumble. */
-function seedMotion(mesh) {
-  mesh.userData.vel.set(
-    (Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5),
-  ).normalize().multiplyScalar(DRIFT_BASE * (0.4 + Math.random() * 1.2));
-  mesh.userData.omega.set(
-    (Math.random() - 0.5), (Math.random() - 0.5), (Math.random() - 0.5),
-  ).normalize().multiplyScalar(TUMBLE_BASE * (0.3 + Math.random() * 1.4));
-  mesh.quaternion.set(Math.random(), Math.random(), Math.random(), Math.random()).normalize();
+function totalChairs() { return free.length + settledCount; }
+
+/** How strong the pull is right now, folding in the slider and the time ramp. */
+function gravityStrength() {
+  const ramp = gravityRamp ? 1 + (RAMP_CAP - 1) * Math.min(elapsed / RAMP_SECONDS, 1) : 1;
+  return GRAV_BASE * gravityScale * ramp;
 }
 
-/** Fill the field with chairs already scattered and drifting, as if long adrift. */
+/**
+ * Send one chair into the field. `dir` (a unit vector from the center) is where
+ * it comes in; with none, a random point on the shell. It gets a mostly
+ * tangential velocity so it swings around and spirals down rather than dropping
+ * straight into the core.
+ */
+function spawnChair(dir) {
+  if (totalChairs() >= MAX_CHAIRS) return;
+  const mesh = newChairMesh();
+
+  const d = dir || randomUnit(new THREE.Vector3());
+  mesh.position.copy(d).multiplyScalar(FIELD_RADIUS * (0.9 + Math.random() * 0.2));
+
+  // A tangent to the shell at this point: cross the radial with a random axis.
+  const radial = mesh.position.clone().normalize();
+  const tangent = new THREE.Vector3().crossVectors(radial, randomUnit(_v)).normalize();
+  if (tangent.lengthSq() < 1e-6) tangent.set(1, 0, 0); // radial happened to be parallel
+  // Sub-orbital speed, so drag wins and the orbit decays inward.
+  const vCirc = Math.sqrt(gravityStrength() / mesh.position.length());
+  const speed = vCirc * (0.45 + Math.random() * 0.5);
+  mesh.userData.vel = tangent.multiplyScalar(speed)
+    .addScaledVector(radial, -0.15 * speed)          // a touch of initial infall
+    .add(randomUnit(_v).multiplyScalar(0.08 * speed)); // and a little scatter
+  mesh.userData.omega = randomUnit(new THREE.Vector3())
+    .multiplyScalar(0.4 + Math.random() * 1.6);       // its own tumble
+
+  scene.add(mesh);
+  free.push(mesh);
+  updateCount();
+}
+
+/** Scatter the field with chairs already drifting, as if long adrift. */
 function seedField(n) {
-  for (let i = 0; i < n; i++) {
-    if (chairs.length >= MAX_CHAIRS) break;
-    const mesh = newChairMesh();
-    // Scatter through the whole volume, denser toward the middle so the edges
-    // fade rather than forming a hard shell.
-    randomShellPoint(FIELD_RADIUS * Math.cbrt(Math.random()), mesh.position);
-    seedMotion(mesh);
-    scene.add(mesh);
-    chairs.push(mesh);
-  }
-  updateCount();
+  for (let i = 0; i < n && totalChairs() < MAX_CHAIRS; i++) spawnChair();
 }
 
+// A chair falling in only makes a sound now and then, so a shower of them
+// arriving at once stays a soft patter rather than a roar.
+let lastLandSound = -1;
+
 /**
- * Launch one chair. With no aim, it appears just off-camera to one side and
- * drifts across the view — the resting animation. When the user taps, it comes
- * in from behind the camera and heads out toward where they aimed, so a tap
- * reads as "sending one out there".
+ * A chair has reached the surface: fix it to the planetoid. Its incoming
+ * direction is kept but its distance is snapped to the current surface, and it
+ * is turned to sit with its seat facing outward (plus a random twist), then
+ * reparented so it turns with the planetoid as one body. The surface then grows
+ * a hair for the next arrival.
  */
-function launchChair(aim) {
-  let mesh;
-  if (chairs.length >= MAX_CHAIRS) {
-    mesh = chairs.shift();   // recycle the oldest rather than grow without bound
-    scene.add(mesh);
-    chairs.push(mesh);
-  } else {
-    mesh = newChairMesh();
-    scene.add(mesh);
-    chairs.push(mesh);
-  }
+function settle(mesh) {
+  _dir.copy(mesh.position).normalize();
 
-  seedMotion(mesh);
+  // World orientation: seat up (+Y) pointed outward, with a random spin about
+  // the radial so the chairs don't all face the same way.
+  const worldQ = new THREE.Quaternion().setFromUnitVectors(_up, _dir);
+  const twist = new THREE.Quaternion().setFromAxisAngle(_dir, Math.random() * Math.PI * 2);
+  worldQ.premultiply(twist);
 
-  if (aim) {
-    // Come from just in front of the camera, heading toward the aim point.
-    const forward = aim.clone().sub(camera.position).normalize();
-    mesh.position.copy(camera.position).addScaledVector(forward, 4.5);
-    mesh.userData.vel.copy(forward).multiplyScalar(DRIFT_BASE * 2.2);
-    // A brisk tumble on a tap, so a fresh chair is visibly livelier.
-    mesh.userData.omega.multiplyScalar(1.6);
-    chime();
-  } else {
-    randomShellPoint(FIELD_RADIUS * (0.75 + Math.random() * 0.25), mesh.position);
-    // Aim its drift roughly back through the middle so it crosses the view.
-    mesh.userData.vel.copy(mesh.position).multiplyScalar(-1).normalize()
-      .multiplyScalar(DRIFT_BASE * (0.5 + Math.random()));
-  }
+  // The planetoid spins, so convert the world placement into its local frame.
+  const inv = planetoid.quaternion.clone().invert();
+  mesh.position.copy(_dir).applyQuaternion(inv)
+    .multiplyScalar(planetoidRadius + (Math.random() - 0.5) * 0.15); // slight jitter, so layers interlock
+  mesh.quaternion.copy(worldQ).premultiply(inv);
+
+  scene.remove(mesh);
+  planetoid.add(mesh);
+  settledCount++;
+  planetoidRadius = BASE_PLANETOID_R + PACK * Math.cbrt(settledCount);
+
+  // Nudge the zoom-in floor out past the growing surface, so you can't dolly
+  // inside the planetoid.
+  controls.minDistance = Math.max(2.5, planetoidRadius + 1.5);
+
+  const t = performance.now();
+  if (t - lastLandSound > 55) { land(); lastLandSound = t; }
   updateCount();
-}
-
-/**
- * Keep a chair inside the field. Once it passes the boundary it is wrapped to
- * the opposite side and re-aimed inward, so it re-enters the view instead of
- * sailing off forever — an endless drift on a finite budget.
- */
-function recycle(mesh) {
-  const d = mesh.position.length();
-  if (d <= FIELD_RADIUS) return;
-  // Reflect the position through the origin and pull it just inside the edge.
-  mesh.position.multiplyScalar(-(FIELD_RADIUS - 0.5) / d);
-  // Re-aim the drift generally inward, keeping most of its speed.
-  const speed = mesh.userData.vel.length();
-  mesh.userData.vel.copy(mesh.position).multiplyScalar(-1).normalize()
-    .multiplyScalar(speed)
-    // plus a sideways wobble so they don't all funnel through dead center
-    .add(new THREE.Vector3(
-      (Math.random() - 0.5) * DRIFT_BASE,
-      (Math.random() - 0.5) * DRIFT_BASE,
-      (Math.random() - 0.5) * DRIFT_BASE,
-    ));
 }
 
 // --------------------------------------------------------------------- counter
 const countEl = document.getElementById('count');
 function updateCount() {
-  const n = chairs.length;
+  const n = totalChairs();
   countEl.textContent = `${n} chair${n === 1 ? '' : 's'}`;
 }
 
@@ -364,43 +376,60 @@ function updateCount() {
 const clock = new THREE.Clock();
 let demoOn = true;
 let demoAccMs = 0;
-let demoYaw = 0;
 
-function frame(dt) {
-  const m = motionScale;
-  for (const mesh of chairs) {
-    mesh.position.addScaledVector(mesh.userData.vel, dt * m);
-    // Integrate the tumble: build the small rotation for this step and premul.
+function stepChairs(dt) {
+  const G = gravityStrength();
+  const landAt = planetoidRadius + LAND_MARGIN;
+  for (let i = free.length - 1; i >= 0; i--) {
+    const mesh = free[i];
+    const pos = mesh.position;
+    const r2 = pos.lengthSq();
+    const r = Math.sqrt(r2);
+
+    if (r <= landAt) {
+      settle(mesh);
+      free.splice(i, 1);
+      continue;
+    }
+
+    // Softened inverse-square pull toward the center.
+    const a = G / (r2 + GRAV_SOFTEN * GRAV_SOFTEN);
+    const vel = mesh.userData.vel;
+    vel.addScaledVector(_dir.copy(pos).multiplyScalar(-1 / r), a * dt);
+    vel.multiplyScalar(1 - DRAG * dt);          // drag, so orbits decay inward
+    const sp = vel.length();
+    if (sp > MAX_SPEED) vel.multiplyScalar(MAX_SPEED / sp);
+    pos.addScaledVector(vel, dt);
+
+    // Tumble as it falls.
     const w = mesh.userData.omega;
-    const angle = w.length() * dt * m;
+    const angle = w.length() * dt;
     if (angle > 1e-6) {
       _axis.copy(w).normalize();
       _spin.setFromAxisAngle(_axis, angle);
       mesh.quaternion.premultiply(_spin).normalize();
     }
-    recycle(mesh);
   }
+}
 
-  // The whole starfield turns very slowly, so even a still camera never feels
-  // frozen. The planet spins on its own axis at a hair's pace.
-  starGroup.rotation.y += dt * 0.004;
-  planet.rotation.y += dt * 0.02;
+function frame(dt) {
+  elapsed += dt;
+  stepChairs(dt);
+
+  // The planetoid turns slowly on its axis; the far starfield drifts a hair.
+  planetoid.rotation.y += dt * 0.06;
+  ring.rotation.z += dt * 0.25;      // the photon ring shimmers round
+  stars.rotation.y += dt * 0.002;
 
   if (demoOn) {
-    demoYaw += dt * DEMO_ORBIT_SPEED;
-    const r = camera.position.length();
-    camera.position.x = Math.sin(demoYaw) * r;
-    camera.position.z = Math.cos(demoYaw) * r;
-    camera.position.y = Math.sin(demoYaw * 0.5) * r * DEMO_TILT;
-    controls.update();
     demoAccMs += dt * 1000;
     if (demoAccMs >= demoSpawnMs) {
       demoAccMs = 0;
-      launchChair(null);
+      spawnChair();
     }
-  } else {
-    controls.update();
   }
+  controls.autoRotate = demoOn;
+  controls.update();
 }
 
 function animate() {
@@ -421,17 +450,20 @@ window.addEventListener('resize', resize);
 resize();
 
 // ------------------------------------------------------------ pointer / keys
-// A tap that isn't a drag launches a chair toward where it was aimed. We tell a
-// tap from a drag by how far the pointer moved between down and up.
+// A tap that isn't a drag sends a chair in from the direction it was aimed. Tap
+// vs. drag is told by how far the pointer moved between down and up.
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
-const aimPlaneDist = 10; // how far out a tap aims, along the camera ray
 let downX = 0, downY = 0, downT = 0;
 
-function aimFromEvent(x, y) {
+/** Turn a screen tap into a unit direction from the center to throw a chair in. */
+function aimDir(x, y) {
   ndc.set((x / window.innerWidth) * 2 - 1, -(y / window.innerHeight) * 2 + 1);
   raycaster.setFromCamera(ndc, camera);
-  return raycaster.ray.at(aimPlaneDist, new THREE.Vector3());
+  // A point well down the ray, then its direction from the center.
+  const p = raycaster.ray.at(FIELD_RADIUS, new THREE.Vector3());
+  if (p.lengthSq() < 1e-4) return null;
+  return p.normalize();
 }
 
 canvas.addEventListener('pointerdown', (e) => {
@@ -440,21 +472,20 @@ canvas.addEventListener('pointerdown', (e) => {
 canvas.addEventListener('pointerup', (e) => {
   if (menuOpen) return;
   const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
-  const quick = performance.now() - downT < 500;
-  if (moved < 8 && quick) {
+  if (moved < 8 && performance.now() - downT < 500) {
     resumeAudio();
-    launchChair(aimFromEvent(e.clientX, e.clientY));
+    spawnChair(aimDir(e.clientX, e.clientY));
+    chime();
     spawnRipple(e.clientX, e.clientY);
   }
 });
 
 window.addEventListener('keydown', (e) => {
-  if (menuOpen) return;
-  if (e.key === 'Escape') return;
-  // Ignore modifier combos and repeats so held keys don't spray chairs.
+  if (menuOpen) { if (e.key === 'Escape') closeMenu(); return; }
   if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
   resumeAudio();
-  launchChair(null);
+  spawnChair();
+  chime();
 });
 
 // ----------------------------------------------------------------- tap ripple
@@ -468,6 +499,22 @@ function spawnRipple(x, y) {
   dot.style.top = y + 'px';
   rippleLayer.appendChild(dot);
   dot.addEventListener('animationend', () => dot.remove());
+}
+
+// ------------------------------------------------------------------ reset
+function resetField() {
+  for (const mesh of free) scene.remove(mesh);
+  free.length = 0;
+  for (let i = planetoid.children.length - 1; i >= 0; i--) {
+    planetoid.remove(planetoid.children[i]);
+  }
+  planetoid.rotation.set(0, 0, 0);
+  settledCount = 0;
+  planetoidRadius = BASE_PLANETOID_R;
+  controls.minDistance = 2.5;
+  elapsed = 0;
+  seedField(START_CHAIRS);
+  updateCount();
 }
 
 // -------------------------------------------------------------- settings sheet
@@ -493,7 +540,6 @@ menuBtn.addEventListener('click', openMenu);
 closeBtn.addEventListener('click', closeMenu);
 doneBtn.addEventListener('click', () => { resumeAudio(); closeMenu(); });
 scrim.addEventListener('click', (e) => { if (e.target === scrim) closeMenu(); });
-window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && menuOpen) closeMenu(); });
 
 // Sound
 const soundToggle = document.getElementById('sound-toggle');
@@ -516,21 +562,29 @@ spawn.addEventListener('input', () => {
 });
 syncDemo();
 
-// Drift speed
-const drift = document.getElementById('drift');
-const driftVal = document.getElementById('drift-val');
-drift.addEventListener('input', () => {
-  motionScale = parseFloat(drift.value);
-  driftVal.textContent = motionScale.toFixed(1) + '×';
+// Gravity strength
+const grav = document.getElementById('grav');
+const gravVal = document.getElementById('grav-val');
+grav.addEventListener('input', () => {
+  gravityScale = parseFloat(grav.value);
+  gravVal.textContent = gravityScale.toFixed(1) + '×';
 });
 
-// Stars
+// Gravity climbs over time
+const rampToggle = document.getElementById('ramp-toggle');
+rampToggle.addEventListener('change', () => { gravityRamp = rampToggle.checked; });
+
+// Starfield
 const starsToggle = document.getElementById('stars-toggle');
-starsToggle.addEventListener('change', () => { starGroup.visible = starsToggle.checked; });
+starsToggle.addEventListener('change', () => { stars.visible = starsToggle.checked; });
 
 // Show taps
 const tapsToggle = document.getElementById('taps-toggle');
 tapsToggle.addEventListener('change', () => { ripplesOn = tapsToggle.checked; });
+
+// Reset
+const resetBtn = document.getElementById('reset-btn');
+resetBtn.addEventListener('click', () => { resetField(); closeMenu(); });
 
 // ---------------------------------------------------------------------- go
 initAudio();

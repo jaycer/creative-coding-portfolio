@@ -5,18 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chairs in Space — Jayce Renner</title>
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
-    <meta name="description" content="Plain dining chairs adrift in zero gravity, tumbling through a starfield past a hazy planet. Tap or press a key to send another one out, then drag to look around." />
+    <meta name="description" content="," />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
     <meta property="og:title" content="Chairs in Space" />
-    <meta property="og:description" content="Plain dining chairs adrift in zero gravity, tumbling through a starfield past a hazy planet. Tap or press a key to send another one out, then drag to look around." />
+    <meta property="og:description" content="," />
     <meta property="og:url" content="https://jaycer.github.io/creative-coding-portfolio/apps/chairs-in-space/" />
     <meta property="og:image" content="https://jaycer.github.io/creative-coding-portfolio/og/chairs-in-space.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Chairs in Space" />
-    <meta name="twitter:description" content="Plain dining chairs adrift in zero gravity, tumbling through a starfield past a hazy planet. Tap or press a key to send another one out, then drag to look around." />
+    <meta name="twitter:description" content="," />
     <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/chairs-in-space.jpg" />
     <style>
       * { box-sizing: border-box; }
@@ -344,14 +344,14 @@
           <label class="info-btn" for="tips-toggle" title="Show descriptions">ⓘ</label>
           <button class="close" id="close-btn" type="button" aria-label="Close settings">✕</button>
         </div>
-        <p class="intro">Plain chairs, adrift in zero gravity. Set the drift, then let them go.</p>
+        <p class="intro">Chairs fall into a singularity and pile up into a planetoid. Set the pull, then watch it draw them in.</p>
 
         <section class="group">
           <label class="setting">
             Sound
             <input type="checkbox" id="sound-toggle" checked />
           </label>
-          <p class="desc">A soft bell each time a chair drifts into view — a little shimmer of consonant notes.</p>
+          <p class="desc">A bright bell as a chair is launched in, and a soft, low one each time one settles onto the planetoid.</p>
         </section>
 
         <section class="group">
@@ -359,30 +359,36 @@
             Demo mode
             <input type="checkbox" id="demo-toggle" checked />
           </label>
-          <p class="desc">Sends chairs out and orbits the camera on its own. Turn it off to take control.</p>
+          <p class="desc">Sends chairs in and slowly orbits the camera on its own. Turn it off to take control.</p>
 
           <div id="rate">
             <label class="slider-label" for="spawn">
               Send interval
-              <span class="val" id="spawn-val">2.6s</span>
+              <span class="val" id="spawn-val">0.9s</span>
             </label>
-            <input type="range" id="spawn" min="0.3" max="6" step="0.1" value="2.6" aria-label="Seconds between chairs in demo mode" />
-            <p class="desc">How often demo mode sends another chair out.</p>
+            <input type="range" id="spawn" min="0.2" max="4" step="0.1" value="0.9" aria-label="Seconds between chairs in demo mode" />
+            <p class="desc">How often demo mode sends another chair in.</p>
           </div>
 
           <div id="how">
             <p class="how-title">How to play</p>
-            <p class="desc">Tap or press any key to send a chair out. Drag to look around. Scroll to move in and out.</p>
+            <p class="desc">Tap or press any key to send a chair in. Drag to orbit the singularity. Scroll to zoom. The view always stays trained on the center.</p>
           </div>
         </section>
 
         <section class="group">
-          <label class="slider-label" for="drift">
-            Drift speed
-            <span class="val" id="drift-val">1.0×</span>
+          <label class="slider-label" for="grav">
+            Gravity
+            <span class="val" id="grav-val">1.0×</span>
           </label>
-          <input type="range" id="drift" min="0" max="2.5" step="0.1" value="1" aria-label="Overall drift and tumble speed" />
-          <p class="desc">Scales how fast every chair drifts and tumbles. Zero holds them still.</p>
+          <input type="range" id="grav" min="0.2" max="3" step="0.1" value="1" aria-label="Strength of the singularity's pull" />
+          <p class="desc">How hard the singularity draws the chairs in. Higher tightens the spiral.</p>
+
+          <label class="setting" style="margin-top:16px;">
+            Climb over time
+            <input type="checkbox" id="ramp-toggle" checked />
+          </label>
+          <p class="desc">Lets the pull grow the longer it runs, so the field tightens as chairs gather.</p>
         </section>
 
         <section class="group">
@@ -390,13 +396,18 @@
             Starfield
             <input type="checkbox" id="stars-toggle" checked />
           </label>
-          <p class="desc">The two shells of stars behind the chairs. Off leaves them in plain void.</p>
+          <p class="desc">Faint, still stars far behind the scene. Off leaves the singularity in plain void.</p>
 
           <label class="setting" style="margin-top:16px;">
             Show taps
             <input type="checkbox" id="taps-toggle" />
           </label>
           <p class="desc">Blooms a faint ring where you tap. Handy when recording.</p>
+        </section>
+
+        <section class="group">
+          <button class="action" id="reset-btn" type="button">Reset the field</button>
+          <p class="desc">Clears the planetoid and scatters a fresh set of chairs to begin again.</p>
         </section>
 
         <button class="action" id="done-btn" type="button">Enter Space</button>
