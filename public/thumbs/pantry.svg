@@ -43,6 +43,7 @@
     </g>
   </g>
 
-  <text x="40" y="52" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="30" font-weight="700" fill="#ffffff">Cleveland Food Finder</text>
-  <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="15" fill="#bfe6cf">~370 pantries &amp; meal sites · filter, check eligibility, print</text>
+  <text x="40" y="34" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="25" font-weight="800" fill="#ffffff">Food Access Directory</text>
+  <text x="40" y="57" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="17" font-weight="600" fill="#bfe6cf">for Greater Cleveland</text>
+  <text x="40" y="362" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="15" fill="#bfe6cf">~370 pantries &amp; meal sites · filter, check eligibility, print</text>
 </svg>

@@ -88,7 +88,7 @@ const app = document.getElementById("app")!;
 app.innerHTML = `
   <header class="bar">
     <a class="back" href="../../">← Gallery</a>
-    <h1>Cleveland Food Finder</h1>
+    <h1>Food Access Directory for Greater Cleveland</h1>
     <span class="count" id="count"></span>
   </header>
   <div class="wrap">
