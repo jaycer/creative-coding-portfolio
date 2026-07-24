@@ -36,6 +36,7 @@ export interface PantryRecord {
   phone: string | null;
   region: "east" | "west" | null;
   residency_cities: string[] | null;
+  residency_zips: string[] | null;
   eligibility_note: string | null;
   monday_hours: string | null;
   tuesday_hours: string | null;
@@ -111,7 +112,7 @@ export function buildModel(records: PantryRecord[]): RegionGroup[] {
               address: `${rec.address}, ${rec.city}, OH ${rec.zip}`,
               phone: rec.phone,
               hours,
-              residency: residencyLabel(rec.residency_cities),
+              residency: residencyLabel(rec.residency_cities, rec.residency_zips),
               note: rec.eligibility_note,
             } as Entry;
           })

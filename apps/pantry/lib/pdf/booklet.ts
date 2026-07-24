@@ -12,8 +12,14 @@ const HALF_H = 612; // 8.5 in
 const SHEET_W = 792; // 11 in — landscape sheet holding two half-pages
 const SHEET_H = 612; // 8.5 in
 
-export async function buildBookletPdf(records: PantryRecord[]): Promise<Uint8Array> {
+export async function buildBookletPdf(
+  records: PantryRecord[],
+  meta?: { scrapedAt?: string | null }
+): Promise<Uint8Array> {
   const model = buildModel(records);
+  const asOf = meta?.scrapedAt
+    ? ` · source as of ${new Date(meta.scrapedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}`
+    : "";
 
   // 1. Render the content as ordinary sequential half-Letter pages.
   const logical = await renderModel(model, {
@@ -22,7 +28,7 @@ export async function buildBookletPdf(records: PantryRecord[]): Promise<Uint8Arr
     columns: 1,
     margin: 30,
     title: "Greater Cleveland Food Resources",
-    subtitle: `${records.length} locations · grouped by area and city, listed by day.`,
+    subtitle: `${records.length} locations · grouped by area and city, listed by day${asOf}.`,
   });
   const logicalBytes = await logical.save();
 

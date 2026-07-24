@@ -1,12 +1,13 @@
 import "./style.css";
 import data from "./data.json";
 import type { PantryRecord } from "./lib/pdf/model";
-import { residencyLabel } from "./lib/eligibility-format";
+import { residencyLabel, provenanceLabel } from "./lib/eligibility-format";
 
 // A record carries everything PantryRecord needs plus id/notes for the UI.
 interface Loc extends PantryRecord {
   id: number;
   notes: string | null;
+  eligibility_source: string | null;
 }
 
 const RECORDS = data.locations as unknown as Loc[];
@@ -61,14 +62,17 @@ const regionKey = (loc: Loc) => (loc.region === "west" || loc.region === "east" 
 const regionLabel = (loc: Loc) =>
   loc.region === "west" ? "West Side" : loc.region === "east" ? "East Side" : "—";
 
-const state = { q: "", category: "", region: "", day: "", city: "", reside: "" };
+const state = { q: "", category: "", region: "", day: "", city: "", reside: "", resideZip: "" };
 
 function matches(loc: Loc): boolean {
   if (state.category && loc.category !== state.category) return false;
   if (state.region && regionKey(loc) !== state.region) return false;
   if (state.day && !hoursOf(loc, state.day as Day)) return false;
   if (state.city && loc.city !== state.city) return false;
+  // Residence: each dimension only constrains locations restricted on it, so a
+  // ZIP-restricted pantry isn't hidden when you filter only by city, and vice versa.
   if (state.reside && loc.residency_cities && !loc.residency_cities.includes(state.reside)) return false;
+  if (state.resideZip && loc.residency_zips && !loc.residency_zips.includes(state.resideZip)) return false;
   if (state.q) {
     const q = state.q.toLowerCase();
     if (![loc.title, loc.city, loc.address].some((f) => f.toLowerCase().includes(q))) return false;
@@ -83,6 +87,11 @@ function option(v: string, label: string, sel: string) {
   return `<option value="${esc(v)}"${v === sel ? " selected" : ""}>${esc(label)}</option>`;
 }
 
+const fmtDate = (s: string | null | undefined) =>
+  s ? new Date(s).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "unknown";
+const META = data as unknown as { scrapedAt?: string | null; compiledAt?: string | null };
+const freshness = `Source as of ${fmtDate(META.scrapedAt)} · compiled ${fmtDate(META.compiledAt)}. Hours change — call ahead.`;
+
 // ---- shell -----------------------------------------------------------------
 const app = document.getElementById("app")!;
 app.innerHTML = `
@@ -94,7 +103,7 @@ app.innerHTML = `
   <div class="wrap">
     <p class="intro">${esc(data.count + "")} free food sources — pantries, hot meals, and mobile pantries — cleansed from ${esc(
       data.source
-    )} data. Hours change; call ahead.</p>
+    )} data.<br/>${esc(freshness)}</p>
     <div class="controls">
       <div class="row">
         <div class="field"><label>Search</label><input id="f-q" type="search" placeholder="name, city, address" /></div>
@@ -113,6 +122,7 @@ app.innerHTML = `
         <div class="field"><label>You live in</label><select id="f-reside"><option value="">Anywhere</option>${RESIDE_CITIES.map(
           (c) => option(c, c, "")
         ).join("")}</select></div>
+        <div class="field"><label>…or your ZIP</label><input id="f-resideZip" type="text" inputmode="numeric" maxlength="5" placeholder="e.g. 44113" style="min-width:100px" /></div>
       </div>
       <div class="row">
         <div class="exports">
@@ -146,7 +156,7 @@ function render() {
     html += `<div class="cat">${esc(cat)}<span class="n">${rows.length}</span></div>`;
     html += `<table class="table"><thead><tr><th>Name</th><th>Area</th><th>City</th><th>Days open</th><th>Phone</th></tr></thead><tbody>`;
     for (const loc of rows) {
-      const badge = residencyLabel(loc.residency_cities);
+      const badge = residencyLabel(loc.residency_cities, loc.residency_zips);
       const days = openDays(loc).map((d) => DAY_SHORT[d]).join(", ") || "—";
       html += `<tr data-id="${loc.id}">
         <td class="name-cell"><span class="name">${esc(loc.title)}</span>${
@@ -168,7 +178,8 @@ const scrim = document.getElementById("scrim")!;
 const sheet = document.getElementById("sheet")!;
 
 function openDetail(loc: Loc) {
-  const residency = residencyLabel(loc.residency_cities);
+  const residency = residencyLabel(loc.residency_cities, loc.residency_zips);
+  const provenance = provenanceLabel(loc.eligibility_source);
   const maps = `https://maps.google.com/?q=${encodeURIComponent(`${loc.address}, ${loc.city}, OH ${loc.zip}`)}`;
   const hours = DAYS.map((d) => {
     const h = hoursOf(loc, d);
@@ -192,7 +203,9 @@ function openDetail(loc: Loc) {
       residency || loc.eligibility_note
         ? `<div class="callout"><h3>Eligibility</h3>${
             residency ? `<p><strong>${esc(residency)}</strong></p>` : ""
-          }${loc.eligibility_note ? `<p>${esc(loc.eligibility_note)}</p>` : ""}</div>`
+          }${loc.eligibility_note ? `<p>${esc(loc.eligibility_note)}</p>` : ""}${
+            provenance ? `<p style="font-size:0.72rem;opacity:0.65;font-style:italic;margin-top:6px">${esc(provenance)}</p>` : ""
+          }</div>`
         : ""
     }
     <ul class="hours">${hours}</ul>
@@ -229,6 +242,7 @@ bind("f-region", "region");
 bind("f-day", "day");
 bind("f-city", "city");
 bind("f-reside", "reside");
+bind("f-resideZip", "resideZip", "input");
 
 // ---- PDF export ------------------------------------------------------------
 async function exportPdf(kind: "full" | "booklet", btn: HTMLButtonElement) {
@@ -236,10 +250,11 @@ async function exportPdf(kind: "full" | "booklet", btn: HTMLButtonElement) {
   btn.disabled = true;
   btn.textContent = "Building…";
   try {
+    const meta = { scrapedAt: META.scrapedAt };
     const bytes =
       kind === "full"
-        ? await (await import("./lib/pdf/full-pager")).buildFullPagerPdf(RECORDS)
-        : await (await import("./lib/pdf/booklet")).buildBookletPdf(RECORDS);
+        ? await (await import("./lib/pdf/full-pager")).buildFullPagerPdf(RECORDS, meta)
+        : await (await import("./lib/pdf/booklet")).buildBookletPdf(RECORDS, meta);
     const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
