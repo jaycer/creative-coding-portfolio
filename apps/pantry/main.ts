@@ -69,8 +69,9 @@ const REGION_LABEL: Record<Lang, { west: string; east: string; other: string }> 
 // ---- i18n dictionary -------------------------------------------------------
 const T = {
   en: {
-    back: "← Gallery",
+    back: "Gallery",
     title: "Food Access Directory for Greater Cleveland",
+    headerTitle: "Food Directory",
     intro: (n: number, source: string) =>
       `${n} free food sources — pantries, hot meals, and mobile pantries — cleansed from ${source} data.`,
     freshness: (asOf: string, compiled: string) =>
@@ -108,8 +109,9 @@ const T = {
     localeTag: "en-US",
   },
   es: {
-    back: "← Galería",
+    back: "Galería",
     title: "Directorio de Acceso a Alimentos del Gran Cleveland",
+    headerTitle: "Directorio de Alimentos",
     intro: (n: number, source: string) =>
       `${n} fuentes de alimentos gratis — despensas, comidas calientes y despensas móviles — depurados de datos de ${source}.`,
     freshness: (asOf: string, compiled: string) =>
@@ -214,14 +216,13 @@ function mount() {
   const freshness = tr.freshness(fmtDate(META.scrapedAt), fmtDate(META.compiledAt));
   app.innerHTML = `
   <header class="bar">
-    <a class="back" href="../../">${esc(tr.back)}</a>
-    <h1>${esc(tr.title)}</h1>
+    <a class="back" href="../../" aria-label="${esc(tr.back)}"><span class="back-arrow" aria-hidden="true">←</span><span class="back-label">${esc(tr.back)}</span></a>
+    <h1>${esc(tr.headerTitle)}</h1>
     <div class="bar-right">
       <div class="lang" role="group" aria-label="Language">
         <button class="lang-btn${lang === "en" ? " on" : ""}" data-lang="en">EN</button>
         <button class="lang-btn${lang === "es" ? " on" : ""}" data-lang="es">ES</button>
       </div>
-      <span class="count" id="count"></span>
     </div>
   </header>
   <div class="wrap">
@@ -266,6 +267,7 @@ function mount() {
         </div>
       </div>
     </div>
+    <div class="count-line" id="count"></div>
     <div id="results"></div>
   </div>
   <div class="scrim" id="scrim" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
