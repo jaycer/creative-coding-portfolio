@@ -10,6 +10,7 @@
 export const apps = [
   { slug: 'chair-pile',             title: 'Chair Pile',             blurb: 'Chairs fall out of the dark and pile up forever. Tap or press any key to send another one down, then drag to look around what you built.', entry: 'index.html' },
   { slug: 'chairs-in-space',        title: 'Chairs In Space!',       blurb: 'The chairs are pulled into a singularity. Slowly they form a planetoid. Tap to add a chair. Orbit the center and zoom.', entry: 'index.html' },
+  { slug: 'pantry',                 title: 'Food Access Directory for Greater Cleveland',  blurb: 'A filterable directory of ~370 free food sources around Cleveland, cleansed from Greater Cleveland Food Bank data. Filter by area, day, and the city you live in; eligibility shown upfront; export a printable full-pager or a fold-up booklet.', entry: 'index.html' },
   { slug: 'photo-gallery',          title: 'Photo Gallery',          blurb: 'Professional photography including real estate interiors and exteriors, and more.', entry: 'index.html' },
   { slug: 'ch4td1c3',               title: 'ch4td1c3',               blurb: 'A full set of DnD dice drawn by a raymarching shader, hearts and all. Tap a die to roll it, or rattle the whole set.', entry: 'index.html' },
   { slug: 'bloon-boon',             title: 'Bloon Boon',             blurb: 'A shader-bloon juggling game. Tap and flick glossy 3D bloons to keep them aloft, each color singing its own sound, until 30 are up at once and you win.', entry: 'index.html' },
