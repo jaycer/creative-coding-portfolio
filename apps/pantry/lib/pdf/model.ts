@@ -3,7 +3,7 @@
 // dependency on the app, the DB, or pdf-lib — so it can be reused verbatim by
 // the static portfolio build.
 
-import { residencyLabel, type Lang } from "../eligibility-format";
+import { residencyLabel, localizeHours, localizeNote, type Lang } from "../eligibility-format";
 
 export type { Lang };
 
@@ -128,9 +128,9 @@ export function buildModel(records: PantryRecord[], lang: Lang = "en"): RegionGr
               title: rec.title,
               address: `${rec.address}, ${rec.city}, OH ${rec.zip}`,
               phone: rec.phone,
-              hours,
+              hours: localizeHours(hours, lang),
               residency: residencyLabel(rec.residency_cities, rec.residency_zips, lang),
-              note: rec.eligibility_note,
+              note: localizeNote(rec.eligibility_note, lang),
             } as Entry;
           })
           .filter((e): e is Entry => e !== null)

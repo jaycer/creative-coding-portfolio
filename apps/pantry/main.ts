@@ -2,7 +2,7 @@ import "./style.css";
 import data from "./data.json";
 import type { PantryRecord, Lang } from "./lib/pdf/model";
 import { formatSourceDate } from "./lib/pdf/model";
-import { residencyLabel, provenanceLabel } from "./lib/eligibility-format";
+import { residencyLabel, provenanceLabel, localizeHours, localizeNote } from "./lib/eligibility-format";
 
 // A record carries everything PantryRecord needs plus id/notes for the UI, and
 // the display-only bilingual extras from the eligibility overlay.
@@ -488,11 +488,12 @@ function openDetail(loc: Loc) {
   scrim.hidden = false;
   const residency = residencyLabel(loc.residency_cities, loc.residency_zips, lang);
   const provenance = provenanceLabel(loc.eligibility_source, lang);
-  const note = lang === "es" ? loc.eligibility_note_es || loc.eligibility_note : loc.eligibility_note;
+  const note = localizeNote(loc.eligibility_note, lang, loc.eligibility_note_es);
   const supplemental = loc.supplemental ? (lang === "es" ? loc.supplemental.es : loc.supplemental.en) : null;
   const maps = `https://maps.google.com/?q=${encodeURIComponent(`${loc.address}, ${loc.city}, OH ${loc.zip}`)}`;
   const hours = DAYS.map((d) => {
-    const h = hoursOf(loc, d);
+    const raw = hoursOf(loc, d);
+    const h = raw ? localizeHours(raw, lang) : null;
     return `<li><span class="day">${DAY_LABEL[lang][d]}</span><span class="${h ? "" : "closed"}">${
       h ? esc(h) : esc(tr.closed)
     }</span></li>`;

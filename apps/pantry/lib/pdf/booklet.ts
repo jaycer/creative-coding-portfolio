@@ -27,6 +27,7 @@ const STRINGS = {
     subtitle: (n: number, asOf: string) => `${n} locations · grouped by area and city, listed by day${asOf}.`,
     backTitle: "Find the latest version",
     backBody: "Search, filter by where you live, see today's hours.",
+    notes: "Notes",
     locale: "en-US",
   },
   es: {
@@ -35,9 +36,20 @@ const STRINGS = {
     subtitle: (n: number, asOf: string) => `${n} lugares · agrupados por área y ciudad, listados por día${asOf}.`,
     backTitle: "Encuentre la versión más reciente",
     backBody: "Busque, filtre por dónde vive, vea los horarios de hoy.",
+    notes: "Notas",
     locale: "es-ES",
   },
 } as const;
+
+// A "Notes" page for the leaves saddle-stitch padding would otherwise leave
+// blank — useful for jotting down which pantry, what day, what to bring.
+function drawNotesPage(page: PDFPage, bold: PDFFont, label: string) {
+  const m = 30;
+  page.drawText(label, { x: m, y: HALF_H - m - 13, size: 13, font: bold, color: MUTED });
+  for (let y = HALF_H - m - 40; y > m + 16; y -= 27) {
+    page.drawLine({ start: { x: m, y }, end: { x: HALF_W - m, y }, thickness: 0.5, color: rgb(0.85, 0.87, 0.9) });
+  }
+}
 
 // The QR back cover, drawn on the booklet's outside-back leaf.
 function drawBackCover(page: PDFPage, helv: PDFFont, bold: PDFFont, s: (typeof STRINGS)[Lang], lang: Lang) {
@@ -80,21 +92,21 @@ export async function buildBookletPdf(
     credit: CREDIT[lang],
     creditUrl: CREDIT_URL,
     produce: true,
+    bodyScale: 0.9, // the single wide column runs long lines to the trim at full size
   });
   const logicalBytes = await logical.save();
 
   // 2. Reserve the last leaf for a QR back cover, then pad to a multiple of 4
-  //    (a folded sheet is 4 pages). Blanks go BEFORE the back cover, so the QR
-  //    always lands on page N — the outside-back cover after imposition. Each
-  //    blank still needs a (visually empty) content stream, else embedPdf balks.
+  //    (a folded sheet is 4 pages). The pad leaves go BEFORE the back cover, so
+  //    the QR always lands on page N — the outside-back cover after imposition.
+  //    Rather than leave them blank, make them "Notes" pages.
   const padded = await PDFDocument.load(logicalBytes);
   const helv = await padded.embedFont(StandardFonts.Helvetica);
   const bold = await padded.embedFont(StandardFonts.HelveticaBold);
   const L = padded.getPageCount();
   const n = Math.ceil((L + 1) / 4) * 4;
   for (let i = 0; i < n - L - 1; i++) {
-    const blank = padded.addPage([HALF_W, HALF_H]);
-    blank.drawRectangle({ x: 0, y: 0, width: 0, height: 0 });
+    drawNotesPage(padded.addPage([HALF_W, HALF_H]), bold, s.notes);
   }
   drawBackCover(padded.addPage([HALF_W, HALF_H]), helv, bold, s, lang); // page n = outside back cover
   const paddedBytes = await padded.save();
