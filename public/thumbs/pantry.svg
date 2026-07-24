@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f5132"/>
+      <stop offset="1" stop-color="#08301d"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="400" fill="url(#bg)"/>
+
+  <!-- directory card -->
+  <g>
+    <rect x="40" y="70" width="520" height="250" rx="14" fill="#ffffff" fill-opacity="0.97"/>
+    <!-- rows -->
+    <g font-family="-apple-system, Segoe UI, Roboto, sans-serif">
+      <g transform="translate(64 104)">
+        <text font-size="15" font-weight="700" fill="#16181d">A.C.E. Ministry Baptist Church</text>
+        <text y="17" font-size="11" fill="#6b7280">4411 E 175th St · Cleveland · East Side</text>
+      </g>
+      <line x1="64" y1="138" x2="536" y2="138" stroke="#e4e7eb"/>
+      <g transform="translate(64 160)">
+        <text font-size="15" font-weight="700" fill="#16181d">Parma Hunger Center</text>
+        <rect x="176" y="-13" width="128" height="18" rx="9" fill="#fdf3d7" stroke="#efd591"/>
+        <text x="186" y="0" font-size="10.5" font-weight="700" fill="#8a6100">Parma residents only</text>
+        <text y="17" font-size="11" fill="#6b7280">5280 Broadview Rd · Parma · Tue, Fri</text>
+      </g>
+      <line x1="64" y1="194" x2="536" y2="194" stroke="#e4e7eb"/>
+      <g transform="translate(64 216)">
+        <text font-size="15" font-weight="700" fill="#16181d">St. Augustine Hunger Center</text>
+        <text y="17" font-size="11" fill="#6b7280">2846 West 14th · Cleveland · West Side</text>
+      </g>
+      <line x1="64" y1="250" x2="536" y2="250" stroke="#e4e7eb"/>
+      <g transform="translate(64 272)">
+        <text font-size="15" font-weight="700" fill="#16181d">West Side Catholic Center</text>
+        <text y="17" font-size="11" fill="#6b7280">3135 Lorain Ave · Cleveland · Mon, Tue</text>
+      </g>
+    </g>
+    <!-- PDF export chips -->
+    <g transform="translate(408 300)">
+      <rect x="-2" y="-2" width="70" height="20" rx="6" fill="#0f5132"/>
+      <text x="8" y="12" font-size="10" font-weight="700" fill="#eafff3" font-family="-apple-system, Segoe UI, Roboto, sans-serif">PDF ↓</text>
+      <rect x="74" y="-2" width="76" height="20" rx="6" fill="#ffffff" stroke="#cbd3cd"/>
+      <text x="84" y="12" font-size="10" font-weight="700" fill="#0f5132" font-family="-apple-system, Segoe UI, Roboto, sans-serif">Booklet ↓</text>
+    </g>
+  </g>
+
+  <text x="40" y="52" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="30" font-weight="700" fill="#ffffff">Cleveland Food Finder</text>
+  <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="15" fill="#bfe6cf">~370 pantries &amp; meal sites · filter, check eligibility, print</text>
+</svg>

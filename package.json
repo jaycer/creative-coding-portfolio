@@ -13,5 +13,8 @@
   "devDependencies": {
     "playwright-core": "^1.61.1",
     "vite": "^7.0.0"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
   }
 }
