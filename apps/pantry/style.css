@@ -141,6 +141,8 @@ a { color: var(--accent); }
 .sheet .close { cursor: pointer; border: none; background: none; font-size: 1.3rem; line-height: 1; color: var(--muted); padding: 0 4px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .chip { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); }
+.chip-flag { color: var(--amber-ink); font-weight: 700; cursor: help; }
+.inferred-note { margin: 6px 0 0; font-size: 0.72rem; font-style: italic; color: var(--muted); line-height: 1.4; }
 .callout { margin: 12px 0; padding: 11px 13px; border-radius: 10px; background: var(--amber-bg); border: 1px solid var(--amber-line); }
 .callout h3 { margin: 0 0 3px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--amber-ink); }
 .callout p { margin: 2px 0; font-size: 0.86rem; }
