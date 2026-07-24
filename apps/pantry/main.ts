@@ -8,6 +8,7 @@ import { residencyLabel, provenanceLabel } from "./lib/eligibility-format";
 interface Loc extends PantryRecord {
   id: number;
   category: string;
+  category_source: string | null;
   notes: string | null;
   eligibility_source: string | null;
   eligibility_note_es: string | null;
@@ -103,6 +104,7 @@ const T = {
     closed: "Closed",
     eligibility: "Eligibility",
     otherServices: "Other services here",
+    categoryInferred: "Category added by us — GCFB left this site uncategorized. Classified as a mobile pantry from its monthly, host-site distribution schedule.",
     localeTag: "en-US",
   },
   es: {
@@ -141,6 +143,7 @@ const T = {
     closed: "Cerrado",
     eligibility: "Requisitos",
     otherServices: "Otros servicios aquí",
+    categoryInferred: "Categoría agregada por nosotros — GCFB dejó este lugar sin categoría. Clasificado como despensa móvil según su horario mensual de distribución en el sitio anfitrión.",
     localeTag: "es-ES",
   },
 } as const;
@@ -363,9 +366,16 @@ function openDetail(loc: Loc) {
       <button class="close" id="sheet-close" aria-label="Close">×</button>
     </div>
     <div class="chips">
-      <span class="chip">${esc(CATEGORY_LABEL[lang][loc.category] ?? loc.category)}</span>
+      <span class="chip">${esc(CATEGORY_LABEL[lang][loc.category] ?? loc.category)}${
+    loc.category_source === "overlay" ? ` <span class="chip-flag" title="${esc(tr.categoryInferred)}">*</span>` : ""
+  }</span>
       ${loc.region ? `<span class="chip">${esc(regionLabel(loc))}</span>` : ""}
     </div>
+    ${
+      loc.category_source === "overlay"
+        ? `<p class="inferred-note">${esc(tr.categoryInferred)}</p>`
+        : ""
+    }
     <div class="addr"><a href="${maps}" target="_blank" rel="noopener">${esc(loc.address)}, ${esc(
     loc.city
   )}, OH ${esc(loc.zip)} ↗</a>${loc.phone ? ` · <a href="tel:${esc(loc.phone)}">${esc(loc.phone)}</a>` : ""}</div>
