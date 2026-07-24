@@ -7,6 +7,10 @@
 // different color with its own synthesized voice (see audio.js) that sounds
 // when it enters the room.
 //
+// The round is won by getting BLOON_CONFIG.maxBalloons aloft at once. Past
+// sideEntryAt the arrivals turn nasty: they fly in from the left or right
+// instead of dropping from the top, each one lower than the last.
+//
 // Physics runs here in JS; every frame the live balloons are packed into
 // uniform arrays and drawn as fake-3D lit spheres by balloons.frag.glsl.
 
@@ -22,6 +26,7 @@ const BAT_UP    = 430;   // upward speed imparted by a hit
 const SIDE_PUSH = 260;   // sideways kick when you catch a balloon off-center
 const WALL_BOUNCE = 0.7; // horizontal restitution at the side walls
 const HIT_COOLDOWN = 0.12; // s before the same balloon can be hit again (one swipe = one hit)
+const ENTER_MAX_S  = 3;    // hard deadline on a side entry's wall exemption
 
 // --- rotation (radians) ---
 const LEAN_PER_VX = 0.0016; // how far a balloon tilts, per px/s of horizontal drift
@@ -58,13 +63,14 @@ let baseRadiusPx = 60;
 // Score is the most balloons you kept aloft at once. Balloons only leave a
 // round by falling off the bottom (which ends it), so the live count only
 // climbs — the peak is simply how many were up when you lost.
-let state = 'ready';         // 'ready' | 'playing' | 'over'
+let state = 'ready';         // 'ready' | 'playing' | 'over' | 'won'
 let startMs = 0;             // millis() when the round began (for spawn timing)
 let peakAloft = 0;           // most balloons up at once this round
 let finalAloft = 0;          // peak frozen at game over
 let bestAloft = Number(localStorage.getItem('bloon-boon-best-count') || 0);
 let spawnQueue = [];         // scheduled spawn times (ms, relative to round start)
 let nextRandomSpawnMs = 0;   // when the next random spawn fires
+let sideEntries = 0;         // side entries so far this round (drives their height)
 
 // --- input / flick tracking ---
 let pointerDown = false;
@@ -73,6 +79,7 @@ let pVX = 0, pVY = 0;        // smoothed pointer velocity (px/s)
 
 // DOM refs (populated on load)
 let elStart, elOver, elScore, elBest, elFinal, elOverBest, elStartBtn, elRestartBtn;
+let elWin, elWinBtn, elWinCount, elConfetti;
 let elRipples, elTapToggles;
 let tapViz = false;               // show taps as expanding green rings
 
@@ -115,7 +122,9 @@ function startRound() {
   state = 'playing';
   startMs = millis();
   peakAloft = 0;
+  sideEntries = 0;
   colorBag = []; lastColorIdx = -1;   // fresh shuffle each round
+  clearConfetti();
   // Scripted opening so the room isn't empty, then hand off to random cadence.
   spawnQueue = BLOON_CONFIG.firstSpawnsSeconds.map((s) => s * 1000);
   const last = spawnQueue[spawnQueue.length - 1] || 0;
@@ -126,11 +135,31 @@ function startRound() {
 function endRound() {
   state = 'over';
   finalAloft = peakAloft;
+  recordBest();
+  showOver();
+}
+
+// A full room — you got every bloon aloft at once. Send them all up in a
+// celebratory burst, each sounding off in turn, and throw confetti.
+function winRound() {
+  state = 'won';
+  finalAloft = balloons.length;
+  recordBest();
+  balloons.forEach((b, i) => {
+    b.vy = -random(340, 620) / b.z;
+    b.vx = random(-220, 220);
+    b.squashVel = -7;
+    b.angVel = constrain(b.angVel + random(-HIT_SPIN, HIT_SPIN), -ANGVEL_MAX, ANGVEL_MAX);
+    setTimeout(() => BloonAudio.play(b.voice, 0.5), i * 55); // a rolling fanfare
+  });
+  showWin();
+}
+
+function recordBest() {
   if (finalAloft > bestAloft) {
     bestAloft = finalAloft;
     localStorage.setItem('bloon-boon-best-count', String(bestAloft));
   }
-  showOver();
 }
 
 // Time until the next random spawn, shrinking as the round goes on so balloons
@@ -174,18 +203,56 @@ function nextColorIdx() {
   return lastColorIdx;
 }
 
+// Where a new balloon comes in. Early on they just drop from the top; once the
+// room holds sideEntryAt of them the arrivals start flying in from the left or
+// right, each entry lower than the last, so late bloons have less room to
+// recover before the floor. Returns {x, y, vx, vy, entering, enterVx}.
+function entryFor(radius) {
+  const C = BLOON_CONFIG;
+  if (balloons.length < C.sideEntryAt) {
+    return {
+      x: random(width * 0.15, width * 0.85),
+      y: -radius,                  // drop in from just above the top edge
+      vx: random(-40, 40),
+      vy: random(20, 50),
+      entering: false,
+      enterVx: 0,
+    };
+  }
+  // Walk from the top height down to the bottom one over the side entries it
+  // takes to fill the room, so the very last arrivals cut in lowest.
+  const total = Math.max(MAX - C.sideEntryAt, 1);
+  const t = constrain(sideEntries / total, 0, 1);
+  sideEntries++;
+  const fromLeft = random() < 0.5;
+  const speed = (fromLeft ? 1 : -1) * random(C.sideEntrySpeedMin, C.sideEntrySpeedMax);
+  return {
+    x: fromLeft ? -radius : width + radius,
+    y: height * lerp(C.sideEntryYTop, C.sideEntryYBottom, t),
+    vx: speed,
+    vy: random(-10, 30),
+    entering: true,                // no wall bounce until it's fully on screen
+    enterVx: speed,                // held until then, so it can't stall outside
+  };
+}
+
 function spawnBalloon() {
   if (balloons.length >= MAX) return;
   const idx = nextColorIdx();
   const p = PALETTE[idx];
   const z = random(0.72, 1.2);     // size + depth: smaller balloons sit behind, bigger in front
+  const radius = baseRadiusPx * z;
+  const entry = entryFor(radius);
   const b = {
-    x: random(width * 0.15, width * 0.85),
-    y: -baseRadiusPx,              // drop in from just above the top edge
-    vx: random(-40, 40),
-    vy: random(20, 50),
+    x: entry.x,
+    y: entry.y,
+    vx: entry.vx,
+    vy: entry.vy,
+    entering: entry.entering,
+    enterVx: entry.enterVx,
+    enterAt: millis() / 1000,
     z,
-    radius: baseRadiusPx * z,
+    radius,
     mass: z * z,                   // area-like: a big balloon is heavier to bat & shove
     colorIdx: idx,
     rgb: p.rgb,
@@ -221,8 +288,24 @@ function updateBalloons(dt, tSec, checkLoss) {
     // clean off the top of the screen and drift back down under gravity, and
     // may bump a just-spawned balloon up in the off-screen area. The floor is
     // the loss line (handled below).
-    if (b.x < b.radius)          { b.x = b.radius;          b.vx = Math.abs(b.vx) * WALL_BOUNCE; }
-    if (b.x > width - b.radius)  { b.x = width - b.radius;  b.vx = -Math.abs(b.vx) * WALL_BOUNCE; }
+    //
+    // A side entry starts outside the wall it's flying through, so it's exempt
+    // until it has cleared fully into the room — otherwise the clamp below would
+    // snap it to the edge and bounce it straight back out.
+    //
+    // Re-assert its inward speed while it's still out there: drag and a crowded
+    // room will otherwise stall it just past the wall, where it would hang
+    // offscreen forever — invisible and untappable, but still counting. The
+    // deadline is the backstop; past it the exemption drops and the clamp below
+    // puts it in the room whatever it's tangled with.
+    if (b.entering) {
+      b.vx = b.enterVx > 0 ? Math.max(b.vx, b.enterVx) : Math.min(b.vx, b.enterVx);
+      const inside = b.x >= b.radius && b.x <= width - b.radius;
+      if (inside || tSec - b.enterAt > ENTER_MAX_S) b.entering = false;
+    } else {
+      if (b.x < b.radius)          { b.x = b.radius;          b.vx = Math.abs(b.vx) * WALL_BOUNCE; }
+      if (b.x > width - b.radius)  { b.x = width - b.radius;  b.vx = -Math.abs(b.vx) * WALL_BOUNCE; }
+    }
 
     // Jelly squash spring back toward 1.
     const k = 210, dmp = 9;
@@ -396,11 +479,14 @@ function draw() {
       bestAloft = peakAloft;
       localStorage.setItem('bloon-boon-best-count', String(bestAloft));
     }
-    updateBalloons(dt, now / 1000, true);
     updateHud();
-  } else if (state === 'over') {
-    // Keep the bloons falling behind the game-over screen; drop each once it has
-    // fully left the bottom so they drift away instead of freezing in place.
+    // A full room wins it — checked before physics so the win can't be stolen
+    // by a bloon slipping out on the same frame the last one arrived.
+    if (balloons.length >= MAX) { winRound(); renderScene(); return; }
+    updateBalloons(dt, now / 1000, true);
+  } else if (state === 'over' || state === 'won') {
+    // Keep the bloons moving behind the end screen; drop each once it has fully
+    // left the bottom so they drift away instead of freezing in place.
     updateBalloons(dt, now / 1000, false);
     balloons = balloons.filter((b) => b.y - b.radius <= height);
   }
@@ -449,9 +535,17 @@ function cacheDom() {
   elOverBest   = document.getElementById('over-best');
   elStartBtn   = document.getElementById('start-btn');
   elRestartBtn = document.getElementById('restart-btn');
+  elWin        = document.getElementById('win');
+  elWinBtn     = document.getElementById('win-btn');
+  elWinCount   = document.getElementById('win-count');
+  elConfetti   = document.getElementById('confetti');
+  // Both copy points quote the goal — take it from config so they can't drift.
+  document.getElementById('goal').textContent = MAX;
+  elWinCount.textContent = MAX;
   // The buttons are the only way to (re)start a round.
   elStartBtn.addEventListener('click', startRound);
   elRestartBtn.addEventListener('click', startRound);
+  elWinBtn.addEventListener('click', startRound);
 
   // Tap visualizer: "Show Taps" toggles in the overlay panels (persisted) draw
   // an expanding green ring at every tap/click. There's one in each panel, kept
@@ -520,11 +614,51 @@ function showOver() {
   elRestartBtn.disabled = true;
   setTimeout(() => { elRestartBtn.disabled = false; }, 1500);
 }
+function showWin() {
+  throwConfetti();
+  // Let the burst and the confetti land before the panel comes up, so the win
+  // reads as a moment rather than an interruption.
+  setTimeout(() => {
+    elWin.classList.remove('hidden');
+    elWinBtn.disabled = true;
+    setTimeout(() => { elWinBtn.disabled = false; }, 900);
+  }, 700);
+}
 function hideOverlays() {
   elStart.classList.add('hidden');
   elOver.classList.add('hidden');
-  // Neutralise both buttons the instant we start playing, so the invisible
+  elWin.classList.add('hidden');
+  // Neutralise every button the instant we start playing, so an invisible
   // (fading-out) overlay can't catch a tap and restart the round.
   elStartBtn.disabled = true;
   elRestartBtn.disabled = true;
+  elWinBtn.disabled = true;
+}
+
+// ---------------------------------------------------------------------------
+// Confetti — the win celebration. Plain DOM: each piece is a small div given a
+// randomized fall (duration, drift, spin) through CSS custom properties, and it
+// removes itself when the animation ends.
+// ---------------------------------------------------------------------------
+const CONFETTI_COUNT = 140;
+function throwConfetti() {
+  for (let i = 0; i < CONFETTI_COUNT; i++) {
+    const p = document.createElement('div');
+    p.className = 'confetti-piece';
+    const rgb = PALETTE[floor(random(PALETTE.length))].rgb;
+    p.style.background = `rgb(${rgb.map((c) => Math.round(c * 255)).join(',')})`;
+    p.style.left = random(100) + 'vw';
+    p.style.setProperty('--fall', random(2.2, 4.4).toFixed(2) + 's');
+    p.style.setProperty('--delay', random(0, 1.6).toFixed(2) + 's');
+    p.style.setProperty('--drift', random(-18, 18).toFixed(1) + 'vw');
+    p.style.setProperty('--spin', Math.round(random(360, 1440)) + 'deg');
+    p.style.width = Math.round(random(6, 12)) + 'px';
+    p.style.height = Math.round(random(8, 18)) + 'px';
+    if (random() < 0.35) p.style.borderRadius = '50%';
+    p.addEventListener('animationend', () => p.remove());
+    elConfetti.appendChild(p);
+  }
+}
+function clearConfetti() {
+  if (elConfetti) elConfetti.replaceChildren();
 }
