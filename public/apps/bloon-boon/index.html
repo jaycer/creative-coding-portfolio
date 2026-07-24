@@ -112,6 +112,24 @@
         .ripple { animation-duration: 0.3s; }
       }
 
+      /* Confetti: the win celebration. Pieces are created in JS, each with its
+         own --fall/--delay/--drift/--spin, and removed on animationend. Sits
+         above the overlays so it rains in front of the win panel. */
+      #confetti { position: fixed; inset: 0; z-index: 30; pointer-events: none; overflow: hidden; }
+      .confetti-piece {
+        position: absolute; top: -6vh;
+        animation: confetti-fall var(--fall, 3s) linear var(--delay, 0s) forwards;
+        will-change: transform, opacity;
+      }
+      @keyframes confetti-fall {
+        0%   { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 1; }
+        85%  { opacity: 1; }
+        100% { transform: translate3d(var(--drift, 0), 115vh, 0) rotate(var(--spin, 720deg)); opacity: 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .confetti-piece { animation-duration: 1.2s; animation-delay: 0s; }
+      }
+
       /* Overlays. pointer-events:none so the tap passes through to the canvas,
          which owns start/restart. */
       .overlay {
@@ -178,11 +196,13 @@
     </header>
 
     <div id="ripples"></div>
+    <div id="confetti"></div>
 
     <div id="start" class="overlay">
       <div class="panel">
         <h2>Bloon Boon</h2>
         <p>Tap them Bloons!</p>
+        <p>Keep <b id="goal">30</b> aloft at once to win.</p>
         <button id="start-btn" class="cue-btn" type="button">Tap here to play</button>
         <button class="tap-toggle" type="button" aria-pressed="false">Show Taps</button>
       </div>
@@ -194,6 +214,15 @@
         <p class="stat">You kept <b id="final-count">0</b> bloons aloft at once</p>
         <p id="over-best" class="best"></p>
         <button id="restart-btn" class="cue-btn" type="button">Tap here to play again</button>
+        <button class="tap-toggle" type="button" aria-pressed="false">Show Taps</button>
+      </div>
+    </div>
+
+    <div id="win" class="overlay hidden">
+      <div class="panel">
+        <h2>You win!!!</h2>
+        <p class="stat">A full room, <b id="win-count">30</b> bloons aloft at once</p>
+        <button id="win-btn" class="cue-btn" type="button">Tap here to play again</button>
         <button class="tap-toggle" type="button" aria-pressed="false">Show Taps</button>
       </div>
     </div>

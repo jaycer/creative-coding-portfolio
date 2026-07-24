@@ -10,10 +10,22 @@
 //
 // Loaded as a plain global before the other scripts (see index.html).
 const BLOON_CONFIG = {
-  // Hard cap on simultaneous balloons. Physics never spawns past this; it also
+  // Hard cap on simultaneous balloons, and the win condition: get this many
+  // aloft at once and the round is won. Physics never spawns past this; it also
   // sets the GLSL array size, so keep it modest — every balloon is a loop
   // iteration per pixel.
-  maxBalloons: 24,
+  maxBalloons: 30,
+
+  // Endgame. Once this many bloons are aloft, new ones stop dropping from the
+  // top and sail in from the left or right (side picked at random). Each side
+  // entry arrives lower than the one before it, walking from sideEntryYTop down
+  // to sideEntryYBottom (fractions of screen height) across the run to the win,
+  // so the last few cut in near the danger zone.
+  sideEntryAt: 15,
+  sideEntryYTop: 0.14,
+  sideEntryYBottom: 0.62,
+  sideEntrySpeedMin: 230, // inward px/s
+  sideEntrySpeedMax: 340,
 
   // Spawn cadence, in seconds. A new balloon arrives at a random interval in
   // this range. The very first ones come faster so the game isn't empty on

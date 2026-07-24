@@ -12,7 +12,7 @@ export const apps = [
   { slug: 'chairs-in-space',        title: 'Chairs In Space!',       blurb: 'The chairs are pulled into a singularity. Slowly they form a planetoid. Tap to add a chair. Orbit the center and zoom.', entry: 'index.html' },
   { slug: 'photo-gallery',          title: 'Photo Gallery',          blurb: 'Professional photography including real estate interiors and exteriors, and more.', entry: 'index.html' },
   { slug: 'ch4td1c3',               title: 'ch4td1c3',               blurb: 'A full set of DnD dice drawn by a raymarching shader, hearts and all. Tap a die to roll it, or rattle the whole set.', entry: 'index.html' },
-  { slug: 'bloon-boon',             title: 'Bloon Boon',             blurb: 'A shader-bloon juggling game. Tap and flick glossy 3D bloons to keep them aloft, and each color sings its own sound.', entry: 'index.html' },
+  { slug: 'bloon-boon',             title: 'Bloon Boon',             blurb: 'A shader-bloon juggling game. Tap and flick glossy 3D bloons to keep them aloft, each color singing its own sound, until 30 are up at once and you win.', entry: 'index.html' },
   { slug: 'sleep-noise',            title: 'Sleep Noise',            blurb: 'A calm noise machine for sleep. Blend dark, white, and pink noise, each with its own level and tone.', entry: 'index.html' },
   { slug: 'particle-system',        title: 'Particle System',        blurb: 'Color-shifting orbs that breathe in and out across an HSB field.',           entry: 'index.html' },
   { slug: 'shader-particle-system', title: 'Shader Particle System', blurb: 'The particle system reborn on the GPU as soft additive blobs in a fragment shader.', entry: 'index.html' },
