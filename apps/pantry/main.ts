@@ -608,12 +608,11 @@ async function exportPdf(kind: "full" | "booklet", pdfLang: Lang, btn: HTMLButto
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const suffix = pdfLang === "es" ? "-es" : "";
     const stamp = fileStamp();
     a.download =
       kind === "full"
-        ? `cleveland-food-resources${suffix}-${stamp}.pdf`
-        : `cleveland-food-resources-booklet${suffix}-${stamp}.pdf`;
+        ? `cleveland-food-resources-${pdfLang}-${stamp}.pdf`
+        : `cleveland-food-resources-booklet-${pdfLang}-${stamp}.pdf`;
     document.body.appendChild(a);
     a.click();
     a.remove();
