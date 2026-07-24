@@ -77,7 +77,7 @@ const T = {
     freshness: (asOf: string, compiled: string) =>
       `Source as of ${asOf} · compiled ${compiled}. Hours change — call ahead.`,
     banner:
-      "Please call ahead before you go. This directory is compiled from public data that can fall out of date — hours, eligibility rules, and even whether a site is still open may have changed. A quick phone call saves a wasted trip. We update details as we verify them on the ground.",
+      "Please call ahead before you go. This directory is compiled from public data that could be out-of-date.",
     search: "Search",
     searchPh: "name, city, address",
     category: "Category",
@@ -117,7 +117,7 @@ const T = {
     freshness: (asOf: string, compiled: string) =>
       `Fuente actualizada al ${asOf} · compilado ${compiled}. Los horarios cambian — llame antes.`,
     banner:
-      "Por favor llame antes de ir. Este directorio se compila de datos públicos que pueden estar desactualizados — los horarios, los requisitos e incluso si un lugar sigue abierto pueden haber cambiado. Una llamada rápida le ahorra un viaje en vano. Actualizamos los detalles a medida que los verificamos en persona.",
+      "Por favor llame antes de ir. Este directorio se compila de datos públicos que podrían estar desactualizados.",
     search: "Buscar",
     searchPh: "nombre, ciudad, dirección",
     category: "Categoría",
