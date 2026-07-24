@@ -3,7 +3,9 @@
 // dependency on the app, the DB, or pdf-lib — so it can be reused verbatim by
 // the static portfolio build.
 
-import { residencyLabel } from "../eligibility-format";
+import { residencyLabel, type Lang } from "../eligibility-format";
+
+export type { Lang };
 
 export const PDF_DAYS = [
   "monday",
@@ -16,14 +18,25 @@ export const PDF_DAYS = [
 ] as const;
 export type PdfDay = (typeof PDF_DAYS)[number];
 
-const DAY_LABEL: Record<PdfDay, string> = {
-  monday: "Monday",
-  tuesday: "Tuesday",
-  wednesday: "Wednesday",
-  thursday: "Thursday",
-  friday: "Friday",
-  saturday: "Saturday",
-  sunday: "Sunday",
+const DAY_LABEL: Record<Lang, Record<PdfDay, string>> = {
+  en: {
+    monday: "Monday",
+    tuesday: "Tuesday",
+    wednesday: "Wednesday",
+    thursday: "Thursday",
+    friday: "Friday",
+    saturday: "Saturday",
+    sunday: "Sunday",
+  },
+  es: {
+    monday: "Lunes",
+    tuesday: "Martes",
+    wednesday: "Miércoles",
+    thursday: "Jueves",
+    friday: "Viernes",
+    saturday: "Sábado",
+    sunday: "Domingo",
+  },
 };
 
 // The subset of a location the printable needs. `Location` (lib/db.ts) and the
@@ -72,10 +85,14 @@ export interface RegionGroup {
 
 // Region order + labels. "Other" collects the many suburbs/exurbs with no
 // east/west classification so nothing is dropped.
-const REGION_SPECS: { key: RegionGroup["key"]; label: string; match: (r: PantryRecord["region"]) => boolean }[] = [
-  { key: "west", label: "West Side", match: (r) => r === "west" },
-  { key: "east", label: "East Side", match: (r) => r === "east" },
-  { key: "other", label: "Other Areas", match: (r) => r !== "west" && r !== "east" },
+const REGION_SPECS: {
+  key: RegionGroup["key"];
+  label: Record<Lang, string>;
+  match: (r: PantryRecord["region"]) => boolean;
+}[] = [
+  { key: "west", label: { en: "West Side", es: "Lado Oeste" }, match: (r) => r === "west" },
+  { key: "east", label: { en: "East Side", es: "Lado Este" }, match: (r) => r === "east" },
+  { key: "other", label: { en: "Other Areas", es: "Otras Áreas" }, match: (r) => r !== "west" && r !== "east" },
 ];
 
 function hoursFor(rec: PantryRecord, day: PdfDay): string | null {
@@ -89,7 +106,7 @@ function hoursFor(rec: PantryRecord, day: PdfDay): string | null {
  * duplication that makes the printed page easy to scan ("what's open here on
  * Tuesday?").
  */
-export function buildModel(records: PantryRecord[]): RegionGroup[] {
+export function buildModel(records: PantryRecord[], lang: Lang = "en"): RegionGroup[] {
   const out: RegionGroup[] = [];
   for (const spec of REGION_SPECS) {
     const inRegion = records.filter((r) => spec.match(r.region));
@@ -112,17 +129,17 @@ export function buildModel(records: PantryRecord[]): RegionGroup[] {
               address: `${rec.address}, ${rec.city}, OH ${rec.zip}`,
               phone: rec.phone,
               hours,
-              residency: residencyLabel(rec.residency_cities, rec.residency_zips),
+              residency: residencyLabel(rec.residency_cities, rec.residency_zips, lang),
               note: rec.eligibility_note,
             } as Entry;
           })
           .filter((e): e is Entry => e !== null)
           .sort((a, b) => a.title.localeCompare(b.title));
-        if (entries.length) days.push({ day, label: DAY_LABEL[day], entries });
+        if (entries.length) days.push({ day, label: DAY_LABEL[lang][day], entries });
       }
       if (days.length) cities.push({ city, days });
     }
-    if (cities.length) out.push({ key: spec.key, label: spec.label, cities });
+    if (cities.length) out.push({ key: spec.key, label: spec.label[lang], cities });
   }
   return out;
 }

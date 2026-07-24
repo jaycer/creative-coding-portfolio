@@ -4,7 +4,7 @@
 // read in order.
 
 import { PDFDocument } from "pdf-lib";
-import { buildModel, type PantryRecord } from "./model";
+import { buildModel, type PantryRecord, type Lang } from "./model";
 import { renderModel } from "./layout";
 
 const HALF_W = 396; // 5.5 in — a folded half-page
@@ -12,13 +12,32 @@ const HALF_H = 612; // 8.5 in
 const SHEET_W = 792; // 11 in — landscape sheet holding two half-pages
 const SHEET_H = 612; // 8.5 in
 
+const STRINGS = {
+  en: {
+    title: "Greater Cleveland Food Resources",
+    asOf: (d: string) => ` · source as of ${d}`,
+    subtitle: (n: number, asOf: string) =>
+      `${n} locations · grouped by area and city, listed by day${asOf}.`,
+    locale: "en-US",
+  },
+  es: {
+    title: "Recursos de Alimentos del Gran Cleveland",
+    asOf: (d: string) => ` · fuente actualizada al ${d}`,
+    subtitle: (n: number, asOf: string) =>
+      `${n} lugares · agrupados por área y ciudad, listados por día${asOf}.`,
+    locale: "es-ES",
+  },
+} as const;
+
 export async function buildBookletPdf(
   records: PantryRecord[],
-  meta?: { scrapedAt?: string | null }
+  meta?: { scrapedAt?: string | null },
+  lang: Lang = "en"
 ): Promise<Uint8Array> {
-  const model = buildModel(records);
+  const s = STRINGS[lang];
+  const model = buildModel(records, lang);
   const asOf = meta?.scrapedAt
-    ? ` · source as of ${new Date(meta.scrapedAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}`
+    ? s.asOf(new Date(meta.scrapedAt).toLocaleDateString(s.locale, { year: "numeric", month: "short", day: "numeric" }))
     : "";
 
   // 1. Render the content as ordinary sequential half-Letter pages.
@@ -27,15 +46,20 @@ export async function buildBookletPdf(
     pageHeight: HALF_H,
     columns: 1,
     margin: 30,
-    title: "Greater Cleveland Food Resources",
-    subtitle: `${records.length} locations · grouped by area and city, listed by day${asOf}.`,
+    title: s.title,
+    subtitle: s.subtitle(records.length, asOf),
   });
   const logicalBytes = await logical.save();
 
-  // 2. Pad to a multiple of 4 with blanks (a folded sheet is 4 pages).
+  // 2. Pad to a multiple of 4 with blanks (a folded sheet is 4 pages). Each
+  //    blank still needs a (visually empty) content stream — pdf-lib's embedPdf
+  //    refuses to embed a page that has no Contents, so draw a zero-size shape.
   const padded = await PDFDocument.load(logicalBytes);
   const padCount = (4 - (padded.getPageCount() % 4)) % 4;
-  for (let i = 0; i < padCount; i++) padded.addPage([HALF_W, HALF_H]);
+  for (let i = 0; i < padCount; i++) {
+    const blank = padded.addPage([HALF_W, HALF_H]);
+    blank.drawRectangle({ x: 0, y: 0, width: 0, height: 0 });
+  }
   const n = padded.getPageCount();
   const paddedBytes = await padded.save();
 
