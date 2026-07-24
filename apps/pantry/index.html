@@ -18,6 +18,15 @@
     <meta name="twitter:title" content="Food Access Directory for Greater Cleveland" />
     <meta name="twitter:description" content="A filterable directory of free food sources around Greater Cleveland, with eligibility upfront and printable PDF exports." />
     <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/pantry.jpg" />
+    <!-- Apply the saved (or system) theme before first paint so there's no flash. -->
+    <script>
+      try {
+        var t = localStorage.getItem("pantry-theme");
+        if (t === "dark" || ((!t || t === "system") && matchMedia("(prefers-color-scheme: dark)").matches)) {
+          document.documentElement.classList.add("dark");
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

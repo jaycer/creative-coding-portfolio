@@ -15,6 +15,7 @@
     "vite": "^7.0.0"
   },
   "dependencies": {
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "qrcode-generator": "^2.0.4"
   }
 }

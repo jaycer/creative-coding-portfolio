@@ -144,9 +144,24 @@ export function buildModel(records: PantryRecord[], lang: Lang = "en"): RegionGr
   return out;
 }
 
+/** The live, always-fresher directory — encoded in the PDF QR + printed credit. */
+export const LIVE_URL = "https://jaycer.github.io/creative-coding-portfolio/apps/pantry/";
+export const LIVE_URL_SHORT = "jaycer.github.io/creative-coding-portfolio/apps/pantry";
+
 /** Total entry count (with duplicates) — handy for a cover/subtitle. */
 export function countEntries(model: RegionGroup[]): number {
   let n = 0;
   for (const r of model) for (const c of r.cities) for (const d of c.days) n += d.entries.length;
   return n;
+}
+
+/**
+ * Format a source date for display. A bare `YYYY-MM-DD` is a calendar date, so
+ * parse it in local time — `new Date("2026-07-01")` is UTC midnight and renders
+ * a day early west of Greenwich. Full ISO timestamps (with a time/zone) are real
+ * instants and pass through unchanged.
+ */
+export function formatSourceDate(s: string, locale: string): string {
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(`${s}T00:00:00`) : new Date(s);
+  return d.toLocaleDateString(locale, { year: "numeric", month: "short", day: "numeric" });
 }
