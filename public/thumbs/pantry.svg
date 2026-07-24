@@ -1,49 +1,74 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0f5132"/>
-      <stop offset="1" stop-color="#08301d"/>
+    <linearGradient id="pink" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbd0e0"/>
+      <stop offset="1" stop-color="#f3b6cf"/>
     </linearGradient>
+
+    <!-- Produce, drawn as flat green almost-icons. Pink details use the bg tint. -->
+    <symbol id="tomato" viewBox="0 0 72 72">
+      <circle cx="36" cy="45" r="22" fill="#0f5132"/>
+      <g fill="#4fbf85">
+        <path d="M36 33 C32 27 27 25 23 25 C26 31 30 34 36 34 Z"/>
+        <path d="M36 33 C40 27 45 25 49 25 C46 31 42 34 36 34 Z"/>
+        <path d="M36 34 C34 28 36 22 36 21 C38 25 38 30 37 34 Z"/>
+      </g>
+    </symbol>
+
+    <symbol id="carrot" viewBox="0 0 72 72">
+      <path d="M25 35 L47 35 L38 63 C37 65.5 35 65.5 34 63 Z" fill="#0f5132"/>
+      <g stroke="#f6c2d6" stroke-width="1.8" stroke-linecap="round">
+        <line x1="30" y1="42" x2="42" y2="42"/>
+        <line x1="32" y1="49" x2="40" y2="49"/>
+        <line x1="34" y1="56" x2="38" y2="56"/>
+      </g>
+      <g fill="#4fbf85">
+        <path d="M31 35 C27 25 20 22 16 22 C20 29 24 33 31 35 Z"/>
+        <path d="M36 35 C35 23 36 16 37 15 C41 20 40 28 40 35 Z"/>
+        <path d="M41 35 C45 25 52 22 56 22 C52 29 48 33 41 35 Z"/>
+      </g>
+    </symbol>
+
+    <symbol id="broccoli" viewBox="0 0 72 72">
+      <path d="M30 43 h12 l-2 17 c0 3 -8 3 -8 0 Z" fill="#2f7a52"/>
+      <g fill="#0f5132">
+        <circle cx="25" cy="37" r="10"/>
+        <circle cx="37" cy="30" r="11"/>
+        <circle cx="48" cy="38" r="10"/>
+        <circle cx="36" cy="43" r="10"/>
+      </g>
+    </symbol>
+
+    <symbol id="apple" viewBox="0 0 72 72">
+      <path d="M36 31 C33 27 27 27 23 30 C17 35 17 47 22 56 C25 61 29 59 32 58 C34.5 57 37.5 57 40 58 C43 59 47 61 50 56 C55 47 55 35 49 30 C45 27 39 27 36 31 Z" fill="#0f5132"/>
+      <rect x="34.7" y="19" width="2.6" height="12" rx="1.3" fill="#2f7a52"/>
+      <path d="M37 27 C39 20 45 18 50 18 C49 25 44 28 37 28 Z" fill="#4fbf85"/>
+    </symbol>
+
+    <symbol id="grapes" viewBox="0 0 72 72">
+      <g fill="#0f5132">
+        <circle cx="30" cy="35" r="7"/>
+        <circle cx="44" cy="35" r="7"/>
+        <circle cx="37" cy="45" r="7"/>
+        <circle cx="24" cy="47" r="7"/>
+        <circle cx="50" cy="47" r="7"/>
+        <circle cx="31" cy="56" r="7"/>
+        <circle cx="43" cy="56" r="7"/>
+      </g>
+      <path d="M37 28 C37 21 42 16 49 15 C48 23 44 27 37 28 Z" fill="#4fbf85"/>
+      <path d="M37 28 c0-4 1-6 2-7" fill="none" stroke="#2f7a52" stroke-width="2.4" stroke-linecap="round"/>
+    </symbol>
   </defs>
-  <rect width="600" height="400" fill="url(#bg)"/>
 
-  <!-- directory card -->
-  <g>
-    <rect x="40" y="70" width="520" height="250" rx="14" fill="#ffffff" fill-opacity="0.97"/>
-    <!-- rows -->
-    <g font-family="-apple-system, Segoe UI, Roboto, sans-serif">
-      <g transform="translate(64 104)">
-        <text font-size="15" font-weight="700" fill="#16181d">A.C.E. Ministry Baptist Church</text>
-        <text y="17" font-size="11" fill="#6b7280">4411 E 175th St · Cleveland · East Side</text>
-      </g>
-      <line x1="64" y1="138" x2="536" y2="138" stroke="#e4e7eb"/>
-      <g transform="translate(64 160)">
-        <text font-size="15" font-weight="700" fill="#16181d">Parma Hunger Center</text>
-        <rect x="176" y="-13" width="128" height="18" rx="9" fill="#fdf3d7" stroke="#efd591"/>
-        <text x="186" y="0" font-size="10.5" font-weight="700" fill="#8a6100">Parma residents only</text>
-        <text y="17" font-size="11" fill="#6b7280">5280 Broadview Rd · Parma · Tue, Fri</text>
-      </g>
-      <line x1="64" y1="194" x2="536" y2="194" stroke="#e4e7eb"/>
-      <g transform="translate(64 216)">
-        <text font-size="15" font-weight="700" fill="#16181d">St. Augustine Hunger Center</text>
-        <text y="17" font-size="11" fill="#6b7280">2846 West 14th · Cleveland · West Side</text>
-      </g>
-      <line x1="64" y1="250" x2="536" y2="250" stroke="#e4e7eb"/>
-      <g transform="translate(64 272)">
-        <text font-size="15" font-weight="700" fill="#16181d">West Side Catholic Center</text>
-        <text y="17" font-size="11" fill="#6b7280">3135 Lorain Ave · Cleveland · Mon, Tue</text>
-      </g>
-    </g>
-    <!-- PDF export chips -->
-    <g transform="translate(408 300)">
-      <rect x="-2" y="-2" width="70" height="20" rx="6" fill="#0f5132"/>
-      <text x="8" y="12" font-size="10" font-weight="700" fill="#eafff3" font-family="-apple-system, Segoe UI, Roboto, sans-serif">PDF ↓</text>
-      <rect x="74" y="-2" width="76" height="20" rx="6" fill="#ffffff" stroke="#cbd3cd"/>
-      <text x="84" y="12" font-size="10" font-weight="700" fill="#0f5132" font-family="-apple-system, Segoe UI, Roboto, sans-serif">Booklet ↓</text>
-    </g>
-  </g>
+  <rect width="600" height="400" fill="url(#pink)"/>
 
-  <text x="40" y="34" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="25" font-weight="800" fill="#ffffff">Food Access Directory</text>
-  <text x="40" y="57" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="17" font-weight="600" fill="#bfe6cf">for Greater Cleveland</text>
-  <text x="40" y="362" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="15" fill="#bfe6cf">~370 pantries &amp; meal sites · filter, check eligibility, print</text>
+  <!-- produce cluster, gently arced -->
+  <use href="#broccoli" x="40"  y="78"  width="118" height="118"/>
+  <use href="#tomato"   x="152" y="96"  width="118" height="118"/>
+  <use href="#carrot"   x="262" y="66"  width="118" height="118"/>
+  <use href="#apple"    x="372" y="96"  width="118" height="118"/>
+  <use href="#grapes"   x="452" y="78"  width="118" height="118"/>
+
+  <text x="300" y="300" text-anchor="middle" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="46" font-weight="800" fill="#0f5132">Food Directory</text>
+  <text x="300" y="336" text-anchor="middle" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="20" font-weight="600" fill="#b23a6b">Greater Cleveland pantries, meals &amp; mobile</text>
 </svg>

@@ -1,6 +1,7 @@
 import "./style.css";
 import data from "./data.json";
 import type { PantryRecord, Lang } from "./lib/pdf/model";
+import { formatSourceDate } from "./lib/pdf/model";
 import { residencyLabel, provenanceLabel } from "./lib/eligibility-format";
 
 // A record carries everything PantryRecord needs plus id/notes for the UI, and
@@ -66,6 +67,62 @@ const REGION_LABEL: Record<Lang, { west: string; east: string; other: string }> 
   es: { west: "Lado Oeste", east: "Lado Este", other: "Otras áreas" },
 };
 
+// ---- theme (system → light → dark), persisted ------------------------------
+type Theme = "system" | "light" | "dark";
+const THEME_KEY = "pantry-theme";
+const THEME_ORDER: Theme[] = ["system", "light", "dark"];
+const THEME_ICON: Record<Theme, string> = { system: "◐", light: "☀", dark: "☾" };
+const THEME_LABEL: Record<Lang, Record<Theme, string>> = {
+  en: { system: "System", light: "Light", dark: "Dark" },
+  es: { system: "Sistema", light: "Claro", dark: "Oscuro" },
+};
+const prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+function loadTheme(): Theme {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    if (v === "light" || v === "dark" || v === "system") return v;
+  } catch {
+    /* ignore */
+  }
+  return "system";
+}
+let theme: Theme = loadTheme();
+
+// Toggle the .dark class on <html>; the inline script in index.html does this
+// before first paint, and we keep it in sync here. JS is the single source of
+// truth so an explicit light/dark choice can override the OS preference.
+function applyTheme() {
+  document.documentElement.classList.toggle(
+    "dark",
+    theme === "dark" || (theme === "system" && prefersDark())
+  );
+}
+
+function cycleTheme() {
+  theme = THEME_ORDER[(THEME_ORDER.indexOf(theme) + 1) % THEME_ORDER.length];
+  try {
+    if (theme === "system") localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, theme);
+  } catch {
+    /* ignore */
+  }
+  applyTheme();
+  syncThemeBtn();
+}
+
+function syncThemeBtn() {
+  const btn = document.getElementById("theme-btn");
+  if (!btn) return;
+  btn.querySelector(".theme-ico")!.textContent = THEME_ICON[theme];
+  btn.querySelector(".theme-label")!.textContent = THEME_LABEL[lang][theme];
+}
+
+// Follow the OS live while the choice is "system".
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (theme === "system") applyTheme();
+});
+
 // ---- i18n dictionary -------------------------------------------------------
 const T = {
   en: {
@@ -90,9 +147,12 @@ const T = {
     anywhere: "Anywhere",
     orZip: "…or your ZIP",
     zipPh: "e.g. 44113",
-    fullPdf: "↓ Full-pager PDF",
-    bookletPdf: "↓ Booklet PDF",
-    exportHint: (n: number) => `all ${n} locations · print & fold the booklet`,
+    pdfPill: "PDF",
+    exportTitle: "Download PDF with all locations",
+    fullTitle: "Full-pager",
+    fullDesc: "Standard letter pages",
+    bookletTitle: "Booklet",
+    bookletDesc: "Pocket-sized pages",
     building: "Building…",
     pdfError: "Sorry — the PDF couldn't be generated.",
     thName: "Name",
@@ -106,6 +166,7 @@ const T = {
     eligibility: "Eligibility",
     otherServices: "Other services here",
     categoryInferred: "Category added by us — GCFB left this site uncategorized. Classified as a mobile pantry from its monthly, host-site distribution schedule.",
+    themeAria: "Theme",
     localeTag: "en-US",
   },
   es: {
@@ -130,9 +191,12 @@ const T = {
     anywhere: "Cualquier lugar",
     orZip: "…o su código postal",
     zipPh: "ej. 44113",
-    fullPdf: "↓ PDF completo",
-    bookletPdf: "↓ PDF de folleto",
-    exportHint: (n: number) => `los ${n} lugares · imprima y doble el folleto`,
+    pdfPill: "PDF",
+    exportTitle: "Descargar PDF con todos los lugares",
+    fullTitle: "Página completa",
+    fullDesc: "Páginas tamaño carta",
+    bookletTitle: "Folleto",
+    bookletDesc: "Páginas de bolsillo",
     building: "Generando…",
     pdfError: "Lo sentimos — no se pudo generar el PDF.",
     thName: "Nombre",
@@ -146,6 +210,7 @@ const T = {
     eligibility: "Requisitos",
     otherServices: "Otros servicios aquí",
     categoryInferred: "Categoría agregada por nosotros — GCFB dejó este lugar sin categoría. Clasificado como despensa móvil según su horario mensual de distribución en el sitio anfitrión.",
+    themeAria: "Tema",
     localeTag: "es-ES",
   },
 } as const;
@@ -173,6 +238,37 @@ const RESIDE_CITIES = [
 
 const hoursOf = (loc: Loc, day: Day) => (loc[`${day}_hours`] as string | null) || null;
 const openDays = (loc: Loc): Day[] => DAYS.filter((d) => hoursOf(loc, d));
+
+// Many sites run on a monthly cadence baked into the raw hours string, e.g.
+// "Third Friday 9:00 AM - 11:00 AM" or "Second and Fourth Saturday …". Pull that
+// week-of-month qualifier out so the day column can read "3rd Fri" instead of a
+// plain "Fri" that implies weekly. Returns "" for weekly schedules.
+const EN_DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const ORD_WORD: Record<Lang, Record<string, string>> = {
+  en: { first: "1st", second: "2nd", third: "3rd", thrid: "3rd", fourth: "4th", fifth: "5th", last: "Last", other: "Alt" },
+  es: { first: "1.º", second: "2.º", third: "3.º", thrid: "3.º", fourth: "4.º", fifth: "5.º", last: "Últ.", other: "Alt" },
+};
+function ordinalPrefix(hours: string | null): string {
+  if (!hours) return "";
+  let pre = "";
+  for (const dn of EN_DAY_NAMES) {
+    const i = hours.indexOf(dn);
+    if (i === 0) return ""; // weekday leads the string → weekly
+    if (i > 0) { pre = hours.slice(0, i); break; }
+  }
+  // "thrid and fourth" is a source typo for "third"; keep it mapped.
+  const parts = pre
+    .toLowerCase()
+    .split(/[,&]|\band\b/)
+    .map((s) => ORD_WORD[lang][s.trim()])
+    .filter(Boolean) as string[];
+  if (parts.length <= 1) return parts[0] ?? "";
+  return parts.slice(0, -1).join(", ") + " & " + parts[parts.length - 1];
+}
+const dayShortLabel = (loc: Loc, d: Day): string => {
+  const ord = ordinalPrefix(hoursOf(loc, d));
+  return ord ? `${ord} ${DAY_SHORT[lang][d]}` : DAY_SHORT[lang][d];
+};
 const regionKey = (loc: Loc): "west" | "east" | "other" =>
   loc.region === "west" || loc.region === "east" ? loc.region : "other";
 const regionLabel = (loc: Loc) => (loc.region ? REGION_LABEL[lang][regionKey(loc)] : "—");
@@ -202,9 +298,13 @@ function option(v: string, label: string, sel: string) {
   return `<option value="${esc(v)}"${v === sel ? " selected" : ""}>${esc(label)}</option>`;
 }
 
-const fmtDate = (s: string | null | undefined) =>
-  s ? new Date(s).toLocaleDateString(t().localeTag, { year: "numeric", month: "short", day: "numeric" }) : "—";
+const fmtDate = (s: string | null | undefined) => (s ? formatSourceDate(s, t().localeTag) : "—");
 const META = data as unknown as { scrapedAt?: string | null; compiledAt?: string | null };
+
+// PDF option icons (stroke-based, inherit currentColor): a single page with a
+// folded corner for the full-pager, an open book for the fold-up booklet.
+const ICON_FULL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h8l4 4v13.5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-17a.5.5 0 0 1 .5-.5z"/><path d="M14 3v4h4"/><path d="M8.5 12.5h7M8.5 15.5h7M8.5 18.5h4"/></svg>`;
+const ICON_BOOKLET = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6C10.3 4.8 7.6 4.3 4.5 5v13.2c3.1-.7 5.8-.2 7.5 1 1.7-1.2 4.4-1.7 7.5-1V5C16.4 4.3 13.7 4.8 12 6z"/><path d="M12 6v13.2"/></svg>`;
 
 // ---- shell -----------------------------------------------------------------
 const app = document.getElementById("app")!;
@@ -219,10 +319,17 @@ function mount() {
     <a class="back" href="../../" aria-label="${esc(tr.back)}"><span class="back-arrow" aria-hidden="true">←</span><span class="back-label">${esc(tr.back)}</span></a>
     <h1>${esc(tr.headerTitle)}</h1>
     <div class="bar-right">
+      <button class="pdf-pill" id="open-pdf" type="button">
+        <span class="pdf-pill-ico" aria-hidden="true">${ICON_FULL}</span><span>${esc(tr.pdfPill)}</span><span class="pdf-pill-ico" aria-hidden="true">${ICON_BOOKLET}</span>
+      </button>
       <div class="lang" role="group" aria-label="Language">
         <button class="lang-btn${lang === "en" ? " on" : ""}" data-lang="en">EN</button>
         <button class="lang-btn${lang === "es" ? " on" : ""}" data-lang="es">ES</button>
       </div>
+      <button class="theme-btn" id="theme-btn" type="button" aria-label="${esc(tr.themeAria)}">
+        <span class="theme-ico" aria-hidden="true">${THEME_ICON[theme]}</span>
+        <span class="theme-label">${esc(THEME_LABEL[lang][theme])}</span>
+      </button>
     </div>
   </header>
   <div class="wrap">
@@ -259,18 +366,43 @@ function mount() {
           tr.zipPh
         )}" value="${esc(state.resideZip)}" style="min-width:100px" /></div>
       </div>
-      <div class="row">
-        <div class="exports">
-          <button class="btn" id="pdf-full">${esc(tr.fullPdf)}</button>
-          <button class="btn secondary" id="pdf-booklet">${esc(tr.bookletPdf)}</button>
-          <span class="muted" style="font-size:0.78rem">${esc(tr.exportHint(RECORDS.length))}</span>
-        </div>
-      </div>
     </div>
     <div class="count-line" id="count"></div>
     <div id="results"></div>
   </div>
   <div class="scrim" id="scrim" hidden><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+  <div class="scrim" id="pdf-scrim" hidden>
+    <div class="sheet pdf-sheet" role="dialog" aria-modal="true" aria-label="${esc(tr.exportTitle)}">
+      <div class="sheet-head">
+        <h2>${esc(tr.exportTitle)}</h2>
+        <button class="close" id="pdf-close" aria-label="Close">×</button>
+      </div>
+      <div class="pdf-options">
+        <div class="pdf-row">
+          <span class="pdf-option-ico" aria-hidden="true">${ICON_FULL}</span>
+          <span class="pdf-option-text">
+            <span class="pdf-option-title">${esc(tr.fullTitle)}</span>
+            <span class="pdf-option-desc">${esc(tr.fullDesc)}</span>
+          </span>
+          <span class="pdf-langs">
+            <button class="pdf-lang" data-kind="full" data-lang="en" type="button">English</button>
+            <button class="pdf-lang" data-kind="full" data-lang="es" type="button">Español</button>
+          </span>
+        </div>
+        <div class="pdf-row">
+          <span class="pdf-option-ico" aria-hidden="true">${ICON_BOOKLET}</span>
+          <span class="pdf-option-text">
+            <span class="pdf-option-title">${esc(tr.bookletTitle)}</span>
+            <span class="pdf-option-desc">${esc(tr.bookletDesc)}</span>
+          </span>
+          <span class="pdf-langs">
+            <button class="pdf-lang" data-kind="booklet" data-lang="en" type="button">English</button>
+            <button class="pdf-lang" data-kind="booklet" data-lang="es" type="button">Español</button>
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
 `;
 
   results = document.getElementById("results")!;
@@ -280,6 +412,9 @@ function mount() {
   app.querySelectorAll<HTMLButtonElement>(".lang-btn").forEach((b) =>
     b.addEventListener("click", () => setLang(b.dataset.lang as Lang))
   );
+
+  // theme pill (cycles system → light → dark)
+  document.getElementById("theme-btn")!.addEventListener("click", cycleTheme);
 
   // restore search box (state persists across re-mount)
   (document.getElementById("f-q") as HTMLInputElement).value = state.q;
@@ -329,7 +464,7 @@ function render() {
     )}</th><th>${esc(tr.thDays)}</th><th>${esc(tr.thPhone)}</th></tr></thead><tbody>`;
     for (const loc of rows) {
       const badge = residencyLabel(loc.residency_cities, loc.residency_zips, lang);
-      const days = openDays(loc).map((d) => DAY_SHORT[lang][d]).join(", ") || "—";
+      const days = openDays(loc).map((d) => dayShortLabel(loc, d)).join(", ") || "—";
       html += `<tr data-id="${loc.id}">
         <td class="name-cell"><span class="name">${esc(loc.title)}</span>${
         badge ? `<span class="badge">${esc(badge)}</span>` : ""
@@ -404,8 +539,21 @@ function closeDetail() {
   const scrim = document.getElementById("scrim");
   if (scrim) scrim.hidden = true;
 }
+
+// ---- PDF export modal ------------------------------------------------------
+function openPdfModal() {
+  const s = document.getElementById("pdf-scrim");
+  if (s) s.hidden = false;
+}
+function closePdfModal() {
+  const s = document.getElementById("pdf-scrim");
+  if (s) s.hidden = true;
+}
 window.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeDetail();
+  if (e.key === "Escape") {
+    closeDetail();
+    closePdfModal();
+  }
 });
 
 function bindResults() {
@@ -434,48 +582,95 @@ function bindFilters() {
 }
 
 // ---- PDF export ------------------------------------------------------------
-async function exportPdf(kind: "full" | "booklet", btn: HTMLButtonElement) {
+// Date + time stamp for download names, matching the other sub-apps
+// (chair-pile, sleep-noise): YYYYMMDD-HHMM, so repeated exports never collide.
+function fileStamp(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+}
+
+// All four versions (2 formats × 2 languages) are offered regardless of the
+// app's current language, so a bilingual helper can hand out either one.
+async function exportPdf(kind: "full" | "booklet", pdfLang: Lang, btn: HTMLButtonElement) {
   const tr = t();
   const orig = btn.textContent;
-  btn.disabled = true;
+  const buttons = document.querySelectorAll<HTMLButtonElement>(".pdf-lang");
+  buttons.forEach((b) => (b.disabled = true));
   btn.textContent = tr.building;
   try {
     const meta = { scrapedAt: META.scrapedAt };
     const bytes =
       kind === "full"
-        ? await (await import("./lib/pdf/full-pager")).buildFullPagerPdf(RECORDS, meta, lang)
-        : await (await import("./lib/pdf/booklet")).buildBookletPdf(RECORDS, meta, lang);
+        ? await (await import("./lib/pdf/full-pager")).buildFullPagerPdf(RECORDS, meta, pdfLang)
+        : await (await import("./lib/pdf/booklet")).buildBookletPdf(RECORDS, meta, pdfLang);
     const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    const suffix = lang === "es" ? "-es" : "";
+    const suffix = pdfLang === "es" ? "-es" : "";
+    const stamp = fileStamp();
     a.download =
       kind === "full"
-        ? `cleveland-food-resources${suffix}.pdf`
-        : `cleveland-food-resources-booklet${suffix}.pdf`;
+        ? `cleveland-food-resources${suffix}-${stamp}.pdf`
+        : `cleveland-food-resources-booklet${suffix}-${stamp}.pdf`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+    closePdfModal();
   } catch (err) {
     console.error(err);
     alert(tr.pdfError);
   } finally {
-    btn.disabled = false;
+    buttons.forEach((b) => (b.disabled = false));
     btn.textContent = orig;
   }
 }
 
 function bindExports() {
-  document
-    .getElementById("pdf-full")!
-    .addEventListener("click", (e) => exportPdf("full", e.currentTarget as HTMLButtonElement));
-  document
-    .getElementById("pdf-booklet")!
-    .addEventListener("click", (e) => exportPdf("booklet", e.currentTarget as HTMLButtonElement));
+  document.getElementById("open-pdf")!.addEventListener("click", openPdfModal);
+  document.getElementById("pdf-close")!.addEventListener("click", closePdfModal);
+  const pdfScrim = document.getElementById("pdf-scrim")!;
+  pdfScrim.addEventListener("click", (e) => {
+    if (e.target === pdfScrim) closePdfModal();
+  });
+  app.querySelectorAll<HTMLButtonElement>(".pdf-lang").forEach((b) =>
+    b.addEventListener("click", () =>
+      exportPdf(b.dataset.kind as "full" | "booklet", b.dataset.lang as Lang, b)
+    )
+  );
+}
+
+// ---- favicon: swap the tab icon through fruit & veggie emoji every 5s ------
+// (A sliding transition looked great in isolation, but browsers throttle
+// favicon repaints too hard for it to animate smoothly — so we just cut.)
+const FAVICON_EMOJI = ["🍎", "🥕", "🍅", "🥦", "🍇", "🍐", "🌽", "🫑", "🍊", "🥬", "🍆", "🍓"];
+const emojiFaviconHref = (emoji: string) =>
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text x="16" y="17" font-size="28" text-anchor="middle" dominant-baseline="central">${emoji}</text></svg>`
+  );
+function startFaviconRotation() {
+  let link = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "icon";
+    document.head.appendChild(link);
+  }
+  link.type = "image/svg+xml";
+  const el = link;
+  let i = Math.floor(Math.random() * FAVICON_EMOJI.length); // fresh start each visit
+  const tick = () => {
+    el.href = emojiFaviconHref(FAVICON_EMOJI[i]);
+    i = (i + 1) % FAVICON_EMOJI.length;
+  };
+  tick();
+  setInterval(tick, 5000);
 }
 
 // ---- boot ------------------------------------------------------------------
 document.documentElement.lang = lang;
+applyTheme();
+startFaviconRotation();
 mount();

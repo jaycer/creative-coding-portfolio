@@ -10,19 +10,20 @@
   --amber-ink: #8a6100;
   --amber-line: #efd591;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0c0e12;
-    --panel: #14171d;
-    --ink: #e8eaed;
-    --muted: #9aa1ad;
-    --line: #262b33;
-    --accent: #4ade80;
-    --accent-soft: #10241a;
-    --amber-bg: #2a2210;
-    --amber-ink: #e8c766;
-    --amber-line: #4a3d17;
-  }
+/* Dark palette. A synchronous inline script in index.html and the theme pill
+   toggle .dark on <html> (system pref, or an explicit light/dark choice), so
+   the media query itself never governs — JS is the single source of truth. */
+:root.dark {
+  --bg: #0c0e12;
+  --panel: #14171d;
+  --ink: #e8eaed;
+  --muted: #9aa1ad;
+  --line: #262b33;
+  --accent: #4ade80;
+  --accent-soft: #10241a;
+  --amber-bg: #2a2210;
+  --amber-ink: #e8c766;
+  --amber-line: #4a3d17;
 }
 
 * { box-sizing: border-box; }
@@ -67,6 +68,16 @@ a { color: var(--accent); }
 .lang-btn:hover:not(.on) { background: var(--bg); }
 .lang-btn.on { background: var(--accent); color: #fff; }
 
+/* theme pill: single button cycling system → light → dark */
+.theme-btn {
+  cursor: pointer; font: inherit; font-size: 0.72rem; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  color: var(--muted); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px;
+}
+.theme-btn:hover { background: var(--bg); color: var(--ink); }
+.theme-ico { font-size: 0.85rem; line-height: 1; }
+
 .wrap { max-width: 1040px; margin: 0 auto; padding: 16px; }
 .intro { color: var(--muted); font-size: 0.85rem; margin: 2px 0 16px; }
 
@@ -102,21 +113,45 @@ a { color: var(--accent); }
   background-position: right 10px center;
   background-size: 12px;
 }
-@media (prefers-color-scheme: dark) {
-  .field select {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5l4 4 4-4' fill='none' stroke='%239aa1ad' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  }
+:root.dark .field select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5l4 4 4-4' fill='none' stroke='%239aa1ad' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 .spacer { flex: 1; }
-.exports { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
-.btn {
-  cursor: pointer; font: inherit; font-size: 0.82rem; font-weight: 600;
-  color: #fff; background: var(--accent); border: 1px solid transparent; border-radius: 8px;
-  padding: 7px 12px;
+/* header PDF pill: the primary action, so it carries the accent (unlike the
+   neutral lang/theme pills beside it) */
+.pdf-pill {
+  cursor: pointer; font: inherit; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em;
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  color: #fff; background: var(--accent); border: 1px solid transparent;
+  border-radius: 999px; padding: 4px 13px;
 }
-.btn.secondary { color: var(--ink); background: var(--panel); border-color: var(--line); }
-.btn:disabled { opacity: 0.55; cursor: default; }
-.btn:hover:not(:disabled) { filter: brightness(1.05); }
+.pdf-pill:hover { filter: brightness(1.05); }
+.pdf-pill-ico { display: inline-flex; }
+.pdf-pill-ico svg { width: 15px; height: 15px; display: block; }
+
+/* PDF export modal (reuses .scrim / .sheet) */
+.pdf-sheet { max-width: 400px; }
+.pdf-sheet .sheet-head { margin-bottom: 16px; }
+.pdf-options { display: flex; flex-direction: column; gap: 10px; }
+.pdf-row {
+  display: flex; align-items: center; gap: 13px;
+  padding: 12px 14px; border-radius: 10px;
+  background: var(--bg); border: 1px solid var(--line);
+}
+.pdf-option-ico { flex: none; display: flex; color: var(--accent); }
+.pdf-option-ico svg { width: 28px; height: 28px; display: block; }
+.pdf-option-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.pdf-option-title { font-weight: 700; font-size: 0.95rem; color: var(--accent); }
+.pdf-option-desc { font-size: 0.8rem; color: var(--muted); }
+.pdf-langs { display: flex; gap: 6px; flex: none; }
+.pdf-lang {
+  cursor: pointer; font: inherit; font-size: 0.74rem; font-weight: 700;
+  color: var(--accent); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.pdf-lang:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.pdf-lang:disabled { opacity: 0.5; cursor: default; }
 
 .cat { margin: 22px 0 8px; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
 .cat .n { opacity: 0.6; margin-left: 6px; }
@@ -139,8 +174,9 @@ a { color: var(--accent); }
 
 /* mobile: cards instead of a wide table */
 @media (max-width: 640px) {
-  /* declutter the header: the gallery pill collapses to just the arrow */
-  .back-label { display: none; }
+  /* declutter the header: the gallery pill and theme pill collapse to icons */
+  .back-label, .theme-label { display: none; }
+  .theme-btn { padding: 4px 9px; }
   .bar { gap: 10px; }
   .bar h1 { font-size: 0.95rem; }
 
