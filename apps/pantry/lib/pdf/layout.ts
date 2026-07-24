@@ -3,7 +3,7 @@
 // booklet's logical pages (half-Letter, 1 column) call this with different page
 // geometry, so the content rendering lives in exactly one place. pdf-lib only.
 
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type Color } from "pdf-lib";
 import type { RegionGroup, Entry } from "./model";
 import { drawProduceRow } from "./produce";
 
@@ -18,6 +18,7 @@ export interface LayoutOpts {
   credit?: string; // byline
   creditUrl?: string; // link to the live directory
   produce?: boolean; // draw the produce motif in the header
+  bodyScale?: number; // scale entry text (the booklet's wide column runs to the trim otherwise)
 }
 
 const INK = rgb(0.09, 0.11, 0.15);
@@ -43,19 +44,21 @@ export async function renderModel(model: RegionGroup[], opts: LayoutOpts): Promi
   let col = 0;
   let contentTop = pageHeight - margin;
 
-  // Page-1 title block spans the full width; content starts beneath it.
+  // Page-1 title block spans the full width; content starts beneath it. Header
+  // lines wrap to the usable width, so a long title/subtitle (e.g. Spanish on
+  // the narrow booklet page) folds to a second line instead of running to the
+  // trim.
   {
     let ty = pageHeight - margin;
-    page.drawText(opts.title, { x: margin, y: ty - 18, size: 18, font: bold, color: INK });
-    ty -= 24;
-    if (opts.subtitle) {
-      page.drawText(opts.subtitle, { x: margin, y: ty - 10, size: 9.5, font, color: MUTED });
-      ty -= 15;
-    }
-    if (opts.notice) {
-      page.drawText(opts.notice, { x: margin, y: ty - 9.5, size: 9.5, font: bold, color: NOTICE });
-      ty -= 16;
-    }
+    const headerLine = (str: string, f: PDFFont, size: number, color: Color, lead: number) => {
+      for (const ln of wrap(str, f, size, usableW)) {
+        page.drawText(ln, { x: margin, y: ty - size, size, font: f, color });
+        ty -= size + lead;
+      }
+    };
+    headerLine(opts.title, bold, 18, INK, 6);
+    if (opts.subtitle) headerLine(opts.subtitle, font, 9.5, MUTED, 5.5);
+    if (opts.notice) headerLine(opts.notice, bold, 9.5, NOTICE, 6.5);
     if (opts.produce) {
       ty -= 3;
       const s = 15;
@@ -63,12 +66,8 @@ export async function renderModel(model: RegionGroup[], opts: LayoutOpts): Promi
       ty -= s + 6;
     }
     if (opts.credit) {
-      page.drawText(opts.credit, { x: margin, y: ty - 7.5, size: 7.5, font, color: MUTED });
-      ty -= 10.5;
-      if (opts.creditUrl) {
-        page.drawText(opts.creditUrl, { x: margin, y: ty - 7.5, size: 7.5, font, color: ACCENT });
-        ty -= 10.5;
-      }
+      headerLine(opts.credit, font, 7.5, MUTED, 3);
+      if (opts.creditUrl) headerLine(opts.creditUrl, font, 7.5, ACCENT, 3);
     }
     ty -= 8;
     contentTop = ty;
@@ -130,6 +129,11 @@ export async function renderModel(model: RegionGroup[], opts: LayoutOpts): Promi
     }
   }
 
+  // Entry text sizes, scaled per format (the booklet's single wide column runs
+  // long lines to the trim at full size, so it asks for a smaller body).
+  const bs = opts.bodyScale ?? 1;
+  const SZ = { title: 9 * bs, addr: 7.5 * bs, hours: 8 * bs, resid: 7.5 * bs, note: 7 * bs };
+
   // Height a text run will consume — same wrap + line math as text(), so an
   // entry's total height can be measured before drawing a single line of it.
   const runH = (str: string, f: PDFFont, size: number, gap: number) =>
@@ -138,19 +142,26 @@ export async function renderModel(model: RegionGroup[], opts: LayoutOpts): Promi
   // trailing gap), used to keep the whole entry on one column/page.
   function entryHeight(e: Entry): number {
     let h = 1 + 4;
-    h += runH(e.title, bold, 9, 1.5);
-    h += runH(e.address, font, 7.5, 1);
-    h += runH(e.phone ? `${e.hours}  ·  ${e.phone}` : e.hours, font, 8, 1);
-    if (e.residency) h += runH(e.residency, italic, 7.5, 1);
-    if (e.note) h += runH(e.note, italic, 7, 1);
+    h += runH(e.title, bold, SZ.title, 1.5);
+    h += runH(e.address, font, SZ.addr, 1);
+    h += runH(e.phone ? `${e.hours}  ·  ${e.phone}` : e.hours, font, SZ.hours, 1);
+    if (e.residency) h += runH(e.residency, italic, SZ.resid, 1);
+    if (e.note) h += runH(e.note, italic, SZ.note, 1);
     return h;
   }
 
+  // Vertical space each heading consumes (lead + label; the region also draws a
+  // rule). A heading reserves its own height PLUS its first real entry, so a
+  // heading (or a city+day pair like "Oakwood / Saturday") never strands at a
+  // column bottom with its content flowing to the next column.
+  const H_REGION = 6 + 15 + 8;
+  const H_CITY = 2 + 15;
+  const H_DAY = 12;
+  const keep = (h: number) => reserve(Math.min(h, contentTop - bottomY));
+
   for (const region of model) {
-    // Keep a region header with at least its first city + an entry.
-    reserve(52);
+    keep(H_REGION + H_CITY + H_DAY + entryHeight(region.cities[0].days[0].entries[0]));
     y -= 6;
-    reserve(18);
     page.drawText(region.label.toUpperCase(), {
       x: colX(col),
       y: y - 12,
@@ -168,13 +179,13 @@ export async function renderModel(model: RegionGroup[], opts: LayoutOpts): Promi
     y -= 8;
 
     for (const cityGroup of region.cities) {
-      reserve(34);
+      keep(H_CITY + H_DAY + entryHeight(cityGroup.days[0].entries[0]));
       y -= 2;
       page.drawText(cityGroup.city, { x: colX(col), y: y - 10.5, size: 10.5, font: bold, color: INK });
       y -= 15;
 
       for (const dayGroup of cityGroup.days) {
-        reserve(26);
+        keep(H_DAY + entryHeight(dayGroup.entries[0]));
         page.drawText(dayGroup.label, { x: colX(col), y: y - 8.5, size: 8.5, font: bold, color: MUTED });
         y -= 12;
 
@@ -185,12 +196,12 @@ export async function renderModel(model: RegionGroup[], opts: LayoutOpts): Promi
           const h = entryHeight(e);
           reserve(h <= contentTop - bottomY ? h : 14);
           y -= 1;
-          text(e.title, bold, 9, INK, 1.5);
-          text(e.address, font, 7.5, MUTED, 1);
+          text(e.title, bold, SZ.title, INK, 1.5);
+          text(e.address, font, SZ.addr, MUTED, 1);
           const line = e.phone ? `${e.hours}  ·  ${e.phone}` : e.hours;
-          text(line, font, 8, INK, 1);
-          if (e.residency) text(e.residency, italic, 7.5, ACCENT, 1);
-          if (e.note) text(e.note, italic, 7, ACCENT, 1);
+          text(line, font, SZ.hours, INK, 1);
+          if (e.residency) text(e.residency, italic, SZ.resid, ACCENT, 1);
+          if (e.note) text(e.note, italic, SZ.note, ACCENT, 1);
           y -= 4;
         }
         y -= 2;
