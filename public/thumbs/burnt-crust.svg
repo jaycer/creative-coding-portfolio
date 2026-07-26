@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400" role="img" aria-label="Burnt Crust">
+  <defs>
+    <linearGradient id="room" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#17191c"/>
+      <stop offset="1" stop-color="#0e0f11"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#32363a"/>
+      <stop offset="0.18" stop-color="#26282a"/>
+      <stop offset="0.85" stop-color="#26282a"/>
+      <stop offset="1" stop-color="#1b1d1f"/>
+    </linearGradient>
+    <linearGradient id="lcd" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9fae3f"/>
+      <stop offset="1" stop-color="#8d9c35"/>
+    </linearGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d5dade"/>
+      <stop offset="0.48" stop-color="#a9b0b6"/>
+      <stop offset="0.52" stop-color="#7f878d"/>
+      <stop offset="1" stop-color="#9aa1a7"/>
+    </linearGradient>
+    <linearGradient id="capAmber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffcb84"/>
+      <stop offset="0.48" stop-color="#f0a03a"/>
+      <stop offset="0.52" stop-color="#b96f16"/>
+      <stop offset="1" stop-color="#dd8c24"/>
+    </linearGradient>
+    <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0e0f11" stop-opacity="0"/>
+      <stop offset="1" stop-color="#0e0f11" stop-opacity="0.92"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="600" height="400" fill="url(#room)"/>
+
+  <!-- head panel: LCD pattern readout -->
+  <rect x="30" y="26" width="330" height="132" rx="6" fill="url(#panel)" stroke="#3a3e42"/>
+  <rect x="42" y="38" width="306" height="108" rx="3" fill="url(#lcd)"/>
+  <g fill="#171d07">
+    <rect x="52" y="46" width="46" height="5" opacity="0.55"/>
+    <rect x="296" y="46" width="42" height="5" opacity="0.75"/>
+  </g>
+  <!-- trigger matrix: 6 rows x 16 columns, some cells lit -->
+  <g>
+    <g fill="#171d07" opacity="0.18">
+      <rect x="52" y="60" width="286" height="8"/>
+      <rect x="52" y="74" width="286" height="8"/>
+      <rect x="52" y="88" width="286" height="8"/>
+      <rect x="52" y="102" width="286" height="8"/>
+      <rect x="52" y="116" width="286" height="8"/>
+      <rect x="52" y="130" width="286" height="8"/>
+    </g>
+    <g fill="url(#lcd)">
+      <!-- gaps between the 16 columns -->
+      <rect x="69"  y="58" width="3" height="82"/><rect x="87"  y="58" width="3" height="82"/>
+      <rect x="105" y="58" width="3" height="82"/><rect x="123" y="58" width="3" height="82"/>
+      <rect x="141" y="58" width="3" height="82"/><rect x="159" y="58" width="3" height="82"/>
+      <rect x="177" y="58" width="3" height="82"/><rect x="195" y="58" width="3" height="82"/>
+      <rect x="213" y="58" width="3" height="82"/><rect x="231" y="58" width="3" height="82"/>
+      <rect x="249" y="58" width="3" height="82"/><rect x="267" y="58" width="3" height="82"/>
+      <rect x="285" y="58" width="3" height="82"/><rect x="303" y="58" width="3" height="82"/>
+      <rect x="321" y="58" width="3" height="82"/>
+    </g>
+    <g fill="#171d07">
+      <!-- KIK -->
+      <rect x="52" y="60" width="15" height="8"/><rect x="160" y="60" width="15" height="8"/>
+      <rect x="232" y="60" width="15" height="8" opacity="0.6"/>
+      <!-- SNR -->
+      <rect x="124" y="74" width="15" height="8"/><rect x="268" y="74" width="15" height="8"/>
+      <rect x="196" y="74" width="15" height="8" opacity="0.45"/>
+      <!-- HAT -->
+      <rect x="52" y="88" width="15" height="8" opacity="0.8"/><rect x="88" y="88" width="15" height="8" opacity="0.5"/>
+      <rect x="124" y="88" width="15" height="8" opacity="0.8"/><rect x="160" y="88" width="15" height="8" opacity="0.5"/>
+      <rect x="196" y="88" width="15" height="8" opacity="0.8"/><rect x="232" y="88" width="15" height="8" opacity="0.5"/>
+      <rect x="268" y="88" width="15" height="8" opacity="0.8"/><rect x="304" y="88" width="15" height="8" opacity="0.5"/>
+      <!-- CHP -->
+      <rect x="70" y="102" width="15" height="8"/><rect x="106" y="102" width="15" height="8" opacity="0.7"/>
+      <rect x="178" y="102" width="15" height="8"/><rect x="250" y="102" width="15" height="8" opacity="0.55"/>
+      <rect x="286" y="102" width="15" height="8"/><rect x="322" y="102" width="15" height="8" opacity="0.8"/>
+      <!-- ROL -->
+      <rect x="268" y="116" width="15" height="8" opacity="0.85"/><rect x="286" y="116" width="15" height="8"/>
+      <rect x="304" y="116" width="15" height="8"/><rect x="322" y="116" width="15" height="8"/>
+      <!-- SUB -->
+      <rect x="52" y="130" width="15" height="8"/><rect x="160" y="130" width="15" height="8" opacity="0.75"/>
+      <rect x="232" y="130" width="15" height="8"/>
+    </g>
+  </g>
+
+  <!-- tempo panel -->
+  <rect x="374" y="26" width="196" height="132" rx="6" fill="url(#panel)" stroke="#3a3e42"/>
+  <rect x="386" y="38" width="172" height="40" rx="4" fill="#1b1d1f" stroke="#3a3e42"/>
+  <circle cx="404" cy="58" r="5" fill="#ff9b21"/>
+  <text x="420" y="64" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="17" font-weight="700" letter-spacing="2.5" fill="#ced3d7">RUNNING</text>
+  <text x="386" y="118" font-family="ui-monospace, Menlo, monospace" font-size="42" font-weight="700" fill="#9fae3f">140</text>
+  <text x="474" y="118" font-family="ui-monospace, Menlo, monospace" font-size="13" letter-spacing="2.5" fill="#5d666d">BPM</text>
+  <rect x="386" y="132" width="172" height="6" rx="3" fill="#121315"/>
+  <rect x="437" y="126" width="13" height="18" rx="3" fill="url(#cap)"/>
+
+  <!-- channel strips: amount fader over a drift trim -->
+  <g>
+    <rect x="30" y="170" width="264" height="86" rx="6" fill="url(#panel)" stroke="#3a3e42"/>
+    <text x="46" y="194" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="15" font-weight="700" letter-spacing="1.6" fill="#ced3d7">CHOP</text>
+    <rect x="46" y="208" width="232" height="6" rx="3" fill="#121315"/>
+    <rect x="176" y="202" width="13" height="18" rx="3" fill="url(#capAmber)"/>
+    <circle cx="49" cy="238" r="3.5" fill="#ff9b21"/>
+    <rect x="60" y="235" width="218" height="4" rx="2" fill="#121315"/>
+    <rect x="118" y="230" width="10" height="14" rx="2.5" fill="url(#cap)"/>
+
+    <rect x="306" y="170" width="264" height="86" rx="6" fill="url(#panel)" stroke="#3a3e42"/>
+    <text x="322" y="194" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="15" font-weight="700" letter-spacing="1.6" fill="#ced3d7">STUTTER</text>
+    <rect x="322" y="208" width="232" height="6" rx="3" fill="#121315"/>
+    <rect x="404" y="202" width="13" height="18" rx="3" fill="url(#capAmber)"/>
+    <circle cx="325" cy="238" r="3.5" fill="#ff9b21"/>
+    <rect x="336" y="235" width="218" height="4" rx="2" fill="#121315"/>
+    <rect x="470" y="230" width="10" height="14" rx="2.5" fill="url(#cap)"/>
+  </g>
+
+  <!-- title -->
+  <rect x="0" y="268" width="600" height="132" fill="url(#scrim)"/>
+  <text x="30" y="352" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="34" font-weight="700" letter-spacing="0.5" fill="#fff">Burnt Crust</text>
+  <text x="30" y="376" font-family="ui-monospace, Menlo, monospace" font-size="13" letter-spacing="3" fill="#868e95">TEN ELEMENTS / TEN CITY KITS</text>
+</svg>

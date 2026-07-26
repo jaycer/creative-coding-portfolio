@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#32363a"/>
+      <stop offset="1" stop-color="#1b1d1f"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="url(#face)"/>
+  <!-- LCD strip -->
+  <rect x="6" y="6" width="20" height="6" rx="1" fill="#9fae3f"/>
+  <rect x="8"  y="8" width="2" height="2" fill="#171d07"/>
+  <rect x="13" y="8" width="2" height="2" fill="#171d07"/>
+  <rect x="15" y="8" width="2" height="2" fill="#171d07"/>
+  <rect x="21" y="8" width="2" height="2" fill="#171d07"/>
+  <!-- amount fader -->
+  <rect x="6" y="17" width="20" height="2" rx="1" fill="#121315"/>
+  <rect x="17" y="14.5" width="4" height="7" rx="1.2" fill="#ced3d7"/>
+  <!-- drift fader with its lit indicator -->
+  <rect x="6" y="25" width="20" height="2" rx="1" fill="#121315"/>
+  <rect x="10" y="23" width="3.5" height="6" rx="1.2" fill="#ff9b21"/>
+</svg>
