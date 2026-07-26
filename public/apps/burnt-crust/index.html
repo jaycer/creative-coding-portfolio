@@ -1,0 +1,627 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Burnt Crust — Jayce Renner</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="description" content="A ten element breakcore machine with ten city kits. Set how much of each element you want, give it a drift rate, and swap kits on the fly." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="Burnt Crust" />
+    <meta property="og:description" content="A ten element breakcore machine with ten city kits. Set how much of each element you want, give it a drift rate, and swap kits on the fly." />
+    <meta property="og:url" content="https://jaycer.github.io/creative-coding-portfolio/apps/burnt-crust/" />
+    <meta property="og:image" content="https://jaycer.github.io/creative-coding-portfolio/og/burnt-crust.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Burnt Crust" />
+    <meta name="twitter:description" content="A ten element breakcore machine with ten city kits. Set how much of each element you want, give it a drift rate, and swap kits on the fly." />
+    <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/burnt-crust.jpg" />
+    <style>
+      /* The unit is a rack sampler: a graphite chassis, a backlit LCD, silkscreen
+         labels, and amber indicator LEDs. Faders sit in milled grooves. Nothing
+         glows except what is actually doing something. */
+      :root {
+        --room:      #0e0f11;   /* the dark behind the rack */
+        --chassis:   #26282a;   /* the unit's face */
+        --chassis-hi:#32363a;   /* raised bezel */
+        --chassis-lo:#1b1d1f;   /* shaded edge */
+        --groove:    #121315;   /* milled slot: fader tracks, LCD well */
+        --line:      #3a3e42;   /* panel hairlines */
+        --silk:      #ced3d7;   /* silkscreen white */
+        --silk-dim:  #868e95;   /* secondary silkscreen */
+        --silk-etch: #5d666d;   /* etched-in small print */
+        --lcd:       #9fae3f;   /* backlit LCD, yellow-green */
+        --lcd-lo:    #6f7c2c;   /* unlit LCD pixel */
+        --lcd-ink:   #171d07;   /* dark ink on the LCD */
+        --amber:     #ff9b21;   /* drift indicator */
+        --amber-dim: #6b4210;
+        --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+        --cond: 'Helvetica Neue Condensed', 'Roboto Condensed', 'Arial Narrow', var(--sans);
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body {
+        background: radial-gradient(120% 90% at 50% -10%, #17191c 0%, var(--room) 60%) fixed, var(--room);
+        color: var(--silk);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+        min-height: 100vh;
+      }
+
+      /* ---- top bar ---- */
+      .bar {
+        position: sticky; top: 0; z-index: 20;
+        display: flex; align-items: center; gap: 12px;
+        padding: 12px 18px;
+        background: rgba(14, 15, 17, 0.72);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid rgba(58,62,66,0.6);
+      }
+      /* Not scoped to .bar — the kit panel uses .bar-btn too. */
+      .bar .back, .bar-btn {
+        font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600;
+        color: var(--silk-dim); background: none; text-decoration: none;
+        padding: 7px 13px; border: 1px solid var(--line); border-radius: 4px;
+        white-space: nowrap; cursor: pointer;
+        transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .bar .back:hover, .bar-btn:hover { color: var(--silk); border-color: var(--silk-etch); background: rgba(206,211,215,0.06); }
+      .bar .back:focus-visible, .bar-btn:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+      @media (max-width: 620px) { .bar .back-label, .bar .btn-label { display: none; } }
+      .bar .crumb {
+        font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.24em;
+        text-transform: uppercase; color: var(--silk-etch); white-space: nowrap;
+      }
+      @media (max-width: 460px) { .bar .crumb { display: none; } }
+      .bar .push { margin-left: auto; }
+
+      .toast {
+        position: fixed; bottom: 26px; left: 50%; z-index: 60;
+        transform: translateX(-50%) translateY(10px);
+        padding: 10px 18px; border-radius: 4px;
+        background: rgba(18,19,21,0.95); border: 1px solid var(--line);
+        color: var(--silk); font-size: 0.82rem; letter-spacing: 0.06em;
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      /* ---- the unit ---- */
+      .stage { display: flex; justify-content: center; padding: 22px 16px 70px; }
+      .unit { width: 100%; max-width: 960px; }
+
+      .nameplate {
+        display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+        padding: 0 2px 16px;
+      }
+      .nameplate h1 {
+        margin: 0; font-family: var(--cond);
+        font-size: clamp(1.9rem, 6.4vw, 3.1rem); font-weight: 700;
+        letter-spacing: 0.02em; text-transform: uppercase; line-height: 0.95;
+        color: var(--silk);
+      }
+      .nameplate .model {
+        font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.2em;
+        color: var(--silk-etch); padding-bottom: 4px;
+      }
+      .nameplate .tagline {
+        width: 100%; margin: 0; color: var(--silk-dim);
+        font-size: 0.86rem; letter-spacing: 0.01em;
+      }
+
+      .panel {
+        background: linear-gradient(180deg, var(--chassis-hi) 0%, var(--chassis) 18%, var(--chassis) 82%, var(--chassis-lo) 100%);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 18px 40px rgba(0,0,0,0.45);
+      }
+
+      /* ---- kit rail: ten cities, swapped on the fly ---- */
+      .kits { margin-bottom: 12px; padding: 13px 15px 14px; }
+      .kits__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+      .kits__title {
+        font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase;
+        color: var(--silk-dim); font-weight: 600;
+      }
+      .kits__now {
+        font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.1em;
+        color: var(--lcd); background: var(--groove); border-radius: 2px; padding: 2px 7px;
+      }
+      .kits__reset { margin-left: auto; font-size: 0.62rem; padding: 5px 10px; }
+
+      .kits__rail {
+        display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain;
+        scroll-snap-type: x proximity; padding-bottom: 6px;
+        scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+      }
+      .kits__rail::-webkit-scrollbar { height: 6px; }
+      .kits__rail::-webkit-scrollbar-track { background: var(--groove); border-radius: 3px; }
+      .kits__rail::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+      .kit {
+        flex: 0 0 auto; scroll-snap-align: start; min-width: 128px;
+        display: flex; align-items: center; gap: 8px; text-align: left;
+        padding: 9px 12px; border-radius: 5px; cursor: pointer;
+        background: linear-gradient(180deg, #34383c, #24272a);
+        border: 1px solid var(--line);
+        -webkit-tap-highlight-color: transparent;
+        transition: border-color 0.15s ease, box-shadow 0.2s ease;
+      }
+      .kit:hover { border-color: var(--silk-etch); }
+      .kit:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+      .kit__city {
+        display: block; font-family: var(--cond); font-size: 0.92rem; font-weight: 700;
+        letter-spacing: 0.07em; text-transform: uppercase; color: var(--silk);
+      }
+      .kit__tag { display: block; margin-top: 2px; font-size: 0.6rem; letter-spacing: 0.05em; color: var(--silk-etch); }
+      .kit .led { width: 7px; height: 7px; }
+      .kit[aria-checked="true"] {
+        border-color: rgba(255,155,33,0.75);
+        box-shadow: 0 0 0 1px rgba(255,155,33,0.25), 0 0 20px rgba(255,155,33,0.10) inset;
+      }
+      .kit[aria-checked="true"] .kit__city { color: var(--amber); }
+      .kit[aria-checked="true"] .led { background: var(--amber); box-shadow: 0 0 7px rgba(255,155,33,0.8); }
+
+      /* ---- head panel: LCD + transport + BPM ---- */
+      .head { padding: 16px; display: grid; gap: 16px; grid-template-columns: 1fr; }
+      @media (min-width: 780px) { .head { grid-template-columns: 1fr 250px; } }
+
+      /* the LCD — the readout of what the machine is actually playing */
+      .lcd {
+        display: flex; flex-direction: column;
+        background: linear-gradient(180deg, var(--lcd) 0%, #94a33a 100%);
+        border-radius: 4px; padding: 12px 13px 11px;
+        box-shadow: 0 0 0 1px #0b0c08 inset, 0 3px 10px rgba(0,0,0,0.5) inset, 0 0 22px rgba(159,174,63,0.14);
+        color: var(--lcd-ink);
+        font-family: var(--mono);
+      }
+      .lcd.dark { filter: saturate(0.35) brightness(0.6); }
+      .lcd__top {
+        display: flex; align-items: baseline; gap: 10px;
+        font-size: 0.6rem; letter-spacing: 0.18em; text-transform: uppercase;
+        opacity: 0.72; margin-bottom: 9px;
+      }
+      .lcd__state { margin-left: auto; font-weight: 700; letter-spacing: 0.2em; }
+
+      /* trigger matrix: a row per event element, a column per 16th. The rows
+         stretch to fill whatever height the panel has, so the readout always
+         reads as a full screen rather than a strip floating in green. */
+      #matrix { flex: 1; display: flex; flex-direction: column; gap: 4px; min-height: 96px; }
+      .matrix { flex: 1 0 11px; display: grid; grid-template-columns: 46px 1fr; gap: 8px; align-items: stretch; }
+      .matrix__label { font-size: 0.56rem; letter-spacing: 0.06em; opacity: 0.78; align-self: center; }
+      .matrix__row { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
+      .cell {
+        height: 100%; min-height: 9px; border-radius: 1px;
+        background: rgba(23,29,7,0.16);
+      }
+      .cell.beat { background: rgba(23,29,7,0.30); }
+      /* The playhead marks the column you are hearing. Not ".head" — that class
+         belongs to the head panel and would restyle the cell. */
+      .cell.playhead { box-shadow: 0 0 0 2px rgba(23,29,7,0.9) inset; }
+
+      /* level meters for the elements that run continuously rather than trigger */
+      #meters { margin-top: 9px; display: flex; flex-direction: column; gap: 4px; }
+      .meters { display: grid; grid-template-columns: 46px 1fr; gap: 8px; align-items: center; }
+      .meter { height: 10px; background: rgba(23,29,7,0.16); border-radius: 1px; overflow: hidden; }
+      .meter i { display: block; height: 100%; width: 0; background: var(--lcd-ink); transition: width 0.12s linear; }
+
+      /* transport + BPM column */
+      .console { display: flex; flex-direction: column; gap: 14px; }
+      .transport {
+        display: flex; align-items: center; gap: 12px;
+        background: var(--chassis-lo); border: 1px solid var(--line);
+        border-radius: 6px; padding: 11px 13px;
+      }
+      #run {
+        flex: 1; display: flex; align-items: center; justify-content: center; gap: 9px;
+        font-family: var(--cond); font-size: 1.05rem; font-weight: 700;
+        letter-spacing: 0.16em; text-transform: uppercase;
+        color: var(--silk); cursor: pointer;
+        padding: 12px 10px; border-radius: 4px;
+        background: linear-gradient(180deg, #43484d, #2d3135);
+        border: 1px solid #4b5157;
+        box-shadow: 0 1px 0 rgba(255,255,255,0.12) inset, 0 3px 0 #16181a;
+        transition: transform 0.06s ease, box-shadow 0.06s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #run:active, #run.on { transform: translateY(2px); box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 1px 0 #16181a; }
+      #run:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+      .led {
+        width: 9px; height: 9px; border-radius: 50%;
+        background: #2a2c2e; box-shadow: 0 0 0 1px #131517 inset;
+        flex: none;
+      }
+      #run.on .led { background: var(--amber); box-shadow: 0 0 8px rgba(255,155,33,0.8); }
+
+      .bpm { background: var(--chassis-lo); border: 1px solid var(--line); border-radius: 6px; padding: 12px 13px 14px; }
+      .bpm__head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+      .bpm__title { font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase; color: var(--silk-dim); font-weight: 600; }
+      .bpm__note { margin-left: auto; font-family: var(--mono); font-size: 0.55rem; letter-spacing: 0.14em; color: var(--silk-etch); text-transform: uppercase; }
+      .bpm__read { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+      .bpm__num {
+        font-family: var(--mono); font-size: 2.1rem; font-weight: 700; line-height: 1;
+        color: var(--lcd); font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+        text-shadow: 0 0 14px rgba(159,174,63,0.35);
+      }
+      .bpm__unit { font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.2em; color: var(--silk-etch); }
+      .step-btn {
+        margin-left: auto; width: 30px; height: 30px; flex: none;
+        background: linear-gradient(180deg, #3c4045, #2a2e31); color: var(--silk);
+        border: 1px solid #4b5157; border-radius: 4px; cursor: pointer;
+        font-size: 1rem; line-height: 1; font-family: var(--mono);
+        -webkit-tap-highlight-color: transparent;
+      }
+      .step-btn:hover { background: linear-gradient(180deg, #474c52, #33383c); }
+      .step-btn:active { transform: translateY(1px); }
+      .step-btn:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+      .step-btn + .step-btn { margin-left: 6px; }
+
+      /* ---- channel strips ---- */
+      .strips {
+        margin-top: 16px; display: grid; gap: 12px; grid-template-columns: 1fr;
+      }
+      @media (min-width: 780px) { .strips { grid-template-columns: 1fr 1fr; } }
+
+      .strip { padding: 13px 15px 15px; }
+      .strip__head { display: flex; align-items: baseline; gap: 9px; }
+      .strip__ch {
+        font-family: var(--mono); font-size: 0.56rem; letter-spacing: 0.12em;
+        color: var(--silk-etch); border: 1px solid var(--line);
+        border-radius: 3px; padding: 2px 4px; flex: none;
+      }
+      .strip__name {
+        font-family: var(--cond); font-size: 1.02rem; font-weight: 700;
+        letter-spacing: 0.09em; text-transform: uppercase; color: var(--silk);
+      }
+      .strip__desc { margin-left: auto; font-size: 0.7rem; color: var(--silk-etch); text-align: right; }
+
+      .ctl { margin-top: 11px; }
+      .ctl__row { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+      .ctl__label {
+        font-size: 0.6rem; letter-spacing: 0.18em; text-transform: uppercase;
+        color: var(--silk-dim); font-weight: 600;
+      }
+      .ctl__val {
+        margin-left: auto; font-family: var(--mono); font-size: 0.68rem;
+        font-variant-numeric: tabular-nums; color: var(--lcd);
+        background: var(--groove); border-radius: 2px; padding: 1px 5px;
+        min-width: 38px; text-align: right;
+      }
+      .ctl--sub { margin-top: 9px; padding-left: 14px; border-left: 1px solid var(--line); }
+      .ctl--sub .ctl__label { color: var(--silk-etch); letter-spacing: 0.16em; }
+      .ctl--sub .ctl__val { color: var(--silk-dim); font-size: 0.62rem; }
+
+      /* The sub fader is a multislider: these pick which parameter it holds. */
+      .pager { display: flex; gap: 3px; }
+      .pager__btn {
+        font: inherit; font-size: 0.56rem; font-weight: 600;
+        letter-spacing: 0.12em; text-transform: uppercase;
+        color: var(--silk-etch); background: var(--chassis-lo);
+        border: 1px solid var(--line); border-radius: 3px;
+        padding: 3px 7px; cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+      }
+      .pager__btn:hover { color: var(--silk-dim); border-color: var(--silk-etch); }
+      .pager__btn:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+      .pager__btn.on {
+        color: var(--lcd); background: var(--groove);
+        border-color: rgba(159,174,63,0.55);
+      }
+      .drift-led {
+        width: 6px; height: 6px; border-radius: 50%; flex: none;
+        background: #2a2c2e; box-shadow: 0 0 0 1px #131517 inset;
+      }
+      .strip.drifting .drift-led {
+        background: var(--amber); box-shadow: 0 0 6px rgba(255,155,33,0.75);
+        animation: pulse 1s linear infinite;
+      }
+      @keyframes pulse { 0%, 45% { opacity: 1; } 55%, 100% { opacity: 0.25; } }
+
+      /* ---- faders ---- */
+      input[type="range"] {
+        -webkit-appearance: none; appearance: none;
+        width: 100%; height: 22px; margin: 0; background: transparent; cursor: pointer;
+        display: block;
+      }
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 6px; border-radius: 2px; background: var(--groove);
+        box-shadow: 0 1px 0 rgba(255,255,255,0.05), 0 1px 3px rgba(0,0,0,0.7) inset;
+      }
+      input[type="range"]::-moz-range-track {
+        height: 6px; border-radius: 2px; background: var(--groove);
+        box-shadow: 0 1px 0 rgba(255,255,255,0.05), 0 1px 3px rgba(0,0,0,0.7) inset;
+      }
+      /* fader cap: a wide flat knob with a center line, like a mixer */
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none;
+        width: 15px; height: 24px; margin-top: -9px; border-radius: 3px;
+        background: linear-gradient(180deg, #d5dade 0%, #a9b0b6 48%, #7f878d 52%, #9aa1a7 100%);
+        border: 1px solid #63696e;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.55);
+        transition: background 0.15s ease;
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 15px; height: 24px; border-radius: 3px; border: 1px solid #63696e;
+        background: linear-gradient(180deg, #d5dade 0%, #a9b0b6 48%, #7f878d 52%, #9aa1a7 100%);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.55);
+      }
+      input[type="range"]:focus-visible { outline: none; }
+      input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(255,155,33,0.55), 0 2px 4px rgba(0,0,0,0.55); }
+      input[type="range"]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px rgba(255,155,33,0.55), 0 2px 4px rgba(0,0,0,0.55); }
+
+      /* the drift fader is a smaller trim control */
+      .fader--trim { height: 18px; }
+      .fader--trim::-webkit-slider-runnable-track { height: 4px; }
+      .fader--trim::-moz-range-track { height: 4px; }
+      .fader--trim::-webkit-slider-thumb { width: 11px; height: 16px; margin-top: -6px; }
+      .fader--trim::-moz-range-thumb { width: 11px; height: 16px; }
+
+      /* an amount fader being moved by drift wears an amber cap */
+      .strip.drifting .fader--amount::-webkit-slider-thumb {
+        background: linear-gradient(180deg, #ffcb84 0%, #f0a03a 48%, #b96f16 52%, #dd8c24 100%);
+        border-color: #8a5410;
+      }
+      .strip.drifting .fader--amount::-moz-range-thumb {
+        background: linear-gradient(180deg, #ffcb84 0%, #f0a03a 48%, #b96f16 52%, #dd8c24 100%);
+        border-color: #8a5410;
+      }
+
+      /* ---- guide sheet behind the hamburger ---- */
+      .bar-btn.menu { display: inline-flex; align-items: center; padding: 7px 11px; }
+      .bar-btn.menu svg {
+        display: block; width: 16px; height: 12px;
+        stroke: currentColor; stroke-width: 2; stroke-linecap: round;
+      }
+
+      .scrim {
+        position: fixed; inset: 0; z-index: 40;
+        display: flex; align-items: center; justify-content: center;
+        padding: 18px;
+        background: rgba(8, 9, 10, 0.66);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        animation: scrim-in 0.16s ease;
+      }
+      .scrim[hidden] { display: none; }
+      @keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes sheet-in {
+        from { opacity: 0; transform: translateY(10px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+
+      .sheet {
+        width: 100%; max-width: 640px; max-height: 100%; overflow-y: auto;
+        padding: 18px 20px 22px;
+        background: linear-gradient(180deg, var(--chassis-hi) 0%, var(--chassis) 14%, var(--chassis) 86%, var(--chassis-lo) 100%);
+        border: 1px solid var(--line); border-radius: 8px;
+        box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 24px 60px rgba(0,0,0,0.6);
+        animation: sheet-in 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+      }
+      .sheet__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
+      .sheet h2 {
+        margin: 0; font-family: var(--cond); font-size: 1.2rem; font-weight: 700;
+        letter-spacing: 0.06em; text-transform: uppercase; color: var(--silk);
+      }
+      .sheet__model {
+        font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.2em;
+        color: var(--silk-etch); white-space: nowrap;
+      }
+      .sheet__close {
+        margin-left: auto; width: 28px; height: 28px; flex: none;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.9rem; line-height: 1; color: var(--silk-dim);
+        background: none; border: 1px solid var(--line); border-radius: 4px;
+        cursor: pointer; -webkit-tap-highlight-color: transparent;
+        transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+      }
+      .sheet__close:hover { color: var(--silk); border-color: var(--silk-etch); background: rgba(206,211,215,0.06); }
+      .sheet__close:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+      .sheet__group + .sheet__group { margin-top: 22px; }
+      .sheet h3 {
+        margin: 0 0 8px; font-size: 0.62rem; letter-spacing: 0.2em; text-transform: uppercase;
+        color: var(--silk-dim); font-weight: 600;
+      }
+      .sheet p {
+        margin: 0 0 8px; max-width: 66ch;
+        font-size: 0.82rem; line-height: 1.6; color: var(--silk-dim);
+      }
+      .sheet strong { color: var(--silk); font-weight: 600; }
+      .sheet kbd {
+        font-family: var(--mono); font-size: 0.72rem;
+        padding: 1px 5px; border-radius: 3px;
+        background: var(--groove); border: 1px solid var(--line); color: var(--silk);
+      }
+
+      .kit-table { width: 100%; margin-top: 12px; border-collapse: collapse; text-align: left; }
+      .kit-table th, .kit-table td { padding: 9px 10px; vertical-align: top; }
+      .kit-table thead th {
+        font-size: 0.58rem; letter-spacing: 0.18em; text-transform: uppercase;
+        color: var(--silk-etch); font-weight: 600; padding-bottom: 4px;
+      }
+      .kit-table tbody tr {
+        border-top: 1px solid var(--line); cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .kit-table tbody tr:hover { background: rgba(206,211,215,0.05); }
+      .kit-table tbody tr:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+      .kit-table tbody tr[aria-current="true"] { background: rgba(255,155,33,0.09); }
+      .kit-table tbody tr[aria-current="true"] .kit-table__city { color: var(--amber); }
+      .kit-table__city {
+        display: block; font-family: var(--cond); font-size: 0.9rem; font-weight: 700;
+        letter-spacing: 0.06em; text-transform: uppercase; color: var(--silk); white-space: nowrap;
+      }
+      .kit-table__tag { display: block; margin-top: 2px; font-size: 0.6rem; color: var(--silk-etch); }
+      .kit-table td { font-size: 0.76rem; line-height: 1.5; color: var(--silk-dim); }
+
+      /* Narrow: stack each row so the two columns do not fight for width. */
+      @media (max-width: 560px) {
+        .kit-table thead { display: none; }
+        .kit-table tbody tr, .kit-table th, .kit-table td { display: block; }
+        .kit-table th { padding-bottom: 2px; }
+        .kit-table td { padding-top: 0; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .strip.drifting .drift-led { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="bar">
+      <a class="back" href="../../" aria-label="Back to gallery">←<span class="back-label"> Gallery</span></a>
+      <span class="crumb">Burnt Crust</span>
+      <button class="bar-btn push" id="new-layer" type="button"
+              aria-label="Open another layer in a new tab">+<span class="btn-label"> Layer</span></button>
+      <button class="bar-btn" id="saveState" type="button">Save</button>
+      <button class="bar-btn" id="loadState" type="button">Load</button>
+      <button class="bar-btn menu" id="menu-btn" type="button" aria-label="Guide"
+              aria-haspopup="dialog" aria-expanded="false">
+        <svg viewBox="0 0 24 18" aria-hidden="true" focusable="false">
+          <line x1="2" y1="3" x2="22" y2="3" />
+          <line x1="2" y1="9" x2="22" y2="9" />
+          <line x1="2" y1="15" x2="22" y2="15" />
+        </svg>
+      </button>
+    </nav>
+
+    <div class="scrim" id="scrim" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <div class="sheet__head">
+          <h2 id="sheet-title">Burnt Crust</h2>
+          <span class="sheet__model">BC-10</span>
+          <button class="sheet__close" id="close-btn" type="button" aria-label="Close guide">✕</button>
+        </div>
+
+        <section class="sheet__group">
+          <h3>How it works</h3>
+          <p>
+            Amount sets how much of an element you hear. Drift sets how fast that amount
+            wanders on its own; at zero it stays exactly where you left it. Drag an amount
+            fader while it is drifting and the walk carries on from where you dropped it.
+          </p>
+          <p>
+            The fader under each amount holds three parameters; the buttons pick which
+            one. <strong>Drift</strong> is that rate of change. <strong>Pan width</strong>
+            is how much of the stereo field the element crosses over one bar, from dead
+            center to hard left on the downbeat and hard right at the end.
+            <strong>Pan rando</strong> throws each individual sounding somewhere else on
+            top of that. Crush and Space shape the whole mix rather than sit in it, so
+            they carry drift only.
+          </p>
+          <p>
+            Tempo is the one control nothing automates: 20 to 300 BPM, by hand.
+            <kbd>Space</kbd> starts and stops. Save writes the whole panel to a file,
+            Load brings one back.
+          </p>
+        </section>
+
+        <section class="sheet__group">
+          <h3>Layering</h3>
+          <p>
+            Run more than one at a time. <strong>+ Layer</strong> opens another machine
+            in a new tab on the next kit, and the two play together. Nothing syncs them:
+            each tab keeps its own clock, so the bars slide against each other and the
+            pattern between them takes a long time to repeat. Set different tempos to
+            push that further.
+          </p>
+          <p>
+            Every tab is its own machine. Its panel is remembered per tab, so a reload
+            comes back as you left it and the other layers are untouched, and each tab
+            names itself in the title bar so you can tell them apart. A layer keeps
+            playing while its tab is in the background.
+          </p>
+        </section>
+
+        <section class="sheet__group">
+          <h3>Kits</h3>
+          <p>
+            Ten kits fill the same ten faders with different sounds. Switching keeps your
+            fader positions, so a kit change is a performance move; Load kit defaults
+            resets the panel to how a kit is meant to sit. Pick one here or from the rail.
+          </p>
+          <table class="kit-table">
+            <thead>
+              <tr><th scope="col">Kit</th><th scope="col">What it sounds like</th></tr>
+            </thead>
+            <tbody id="kit-table"><!-- built by JS --></tbody>
+          </table>
+        </section>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div class="stage">
+      <div class="unit">
+        <div class="nameplate">
+          <h1>Burnt Crust</h1>
+          <span class="model" id="model">BC-10</span>
+          <p class="tagline">Ten elements of a break, in ten city kits. Set how much of each one you want, then give it a drift rate and it moves that fader for you.</p>
+        </div>
+
+        <section class="panel kits">
+          <div class="kits__head">
+            <span class="kits__title">Kit</span>
+            <span class="kits__now" id="kit-now">Cleveland</span>
+            <button class="bar-btn kits__reset" id="kit-defaults" type="button">Load kit defaults</button>
+          </div>
+          <div class="kits__rail" id="kit-rail" role="radiogroup" aria-label="Kit"><!-- built by JS --></div>
+        </section>
+
+        <section class="panel head">
+          <div class="lcd dark" id="lcd">
+            <div class="lcd__top">
+              <span>Pattern</span>
+              <span id="lcd-bar">bar 0</span>
+              <span class="lcd__state" id="lcd-state">stopped</span>
+            </div>
+            <div id="matrix"><!-- built by JS --></div>
+            <div id="meters"><!-- built by JS --></div>
+          </div>
+
+          <div class="console">
+            <div class="transport">
+              <button id="run" type="button" aria-pressed="false">
+                <span class="led" aria-hidden="true"></span>
+                <span id="run-label">Start</span>
+              </button>
+            </div>
+
+            <div class="bpm">
+              <div class="bpm__head">
+                <span class="bpm__title">Tempo</span>
+                <span class="bpm__note">manual only</span>
+              </div>
+              <div class="bpm__read">
+                <span class="bpm__num" id="bpm-val">140</span>
+                <span class="bpm__unit">BPM</span>
+                <button class="step-btn" id="bpm-down" type="button" aria-label="Slow down 1 BPM">−</button>
+                <button class="step-btn" id="bpm-up" type="button" aria-label="Speed up 1 BPM">+</button>
+              </div>
+              <input id="bpm" class="fader--amount" type="range" min="20" max="300" step="1" value="140" aria-label="Tempo in BPM" />
+            </div>
+
+            <div class="bpm">
+              <div class="bpm__head">
+                <span class="bpm__title">Output</span>
+                <span class="ctl__val" id="master-val">75%</span>
+              </div>
+              <input id="master" class="fader--amount" type="range" min="0" max="100" value="75" aria-label="Output level" />
+            </div>
+          </div>
+        </section>
+
+        <div class="strips" id="strips"><!-- built by JS --></div>
+
+      </div>
+    </div>
+
+    <script type="module" src="./burnt-crust.js"></script>
+  </body>
+</html>
