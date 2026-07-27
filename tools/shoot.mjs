@@ -49,6 +49,13 @@ const fpsSeconds = Number(opt('seconds', 4));
 // --mobile emulates a touch phone, so `(pointer: fine)` is false and the app
 // takes its phone code path (smaller shadow map, lighter shadow tier).
 const mobile = flag('mobile');
+// --set flips an app's own checkboxes before the shot, e.g. --set ghost-toggle=on,stars-toggle=off
+const sets = opt('set', '').split(',').filter(Boolean).map((pair) => {
+  const [id, val] = pair.split('=');
+  return { id, on: val !== 'off' && val !== '0' && val !== 'false' };
+});
+// --wait lets the scene run on for a while first, for apps that build up over time
+const waitSeconds = Number(opt('wait', 0));
 
 // --- find the cached Chrome for Testing ------------------------------------
 function findChrome() {
@@ -112,6 +119,27 @@ if (app === 'chair-pile') {
   await page.evaluate(() => document.getElementById('menu-done')?.click() ?? document.getElementById('menu-btn')?.click());
   await page.waitForTimeout(1000);
 }
+
+// chairs-in-space: the settings sheet is up on load and covers the scene, so
+// dismiss it the way a visitor would before anything is worth looking at.
+if (app === 'chairs-in-space') {
+  await page.evaluate(() => document.getElementById('done-btn')?.click());
+  await page.waitForTimeout(300);
+}
+
+// --set: flip the app's own checkboxes, dispatching the same change event a
+// real click would, so the app's handler runs.
+if (sets.length) {
+  await page.evaluate((pairs) => {
+    for (const { id, on } of pairs) {
+      const el = document.getElementById(id);
+      if (el && el.checked !== on) { el.checked = on; el.dispatchEvent(new Event('change', { bubbles: true })); }
+    }
+  }, sets);
+  await page.waitForTimeout(200);
+}
+
+if (waitSeconds) await page.waitForTimeout(waitSeconds * 1000);
 
 // Orbit by dragging the canvas. 'down' drags downward, which tilts the camera
 // toward the horizon (bounded by the app's own maxPolarAngle).

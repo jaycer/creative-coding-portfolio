@@ -70,8 +70,8 @@ const DEMO_ORBIT_SPEED = 0.35; // OrbitControls autoRotate units
 // straight overhead and underneath. Azimuth stays with autoRotate; only the
 // distance and elevation are driven here. The two periods differ so the vantage
 // drifts over the sphere instead of retracing one ring.
-const DEMO_DIST_NEAR = 12;              // closest the breath dollies in
-const DEMO_DIST_FAR = 30;               // farthest it drifts back out
+const DEMO_DIST_NEAR = 6;               // closest the breath dollies in
+const DEMO_DIST_FAR = 16;               // farthest it drifts back out
 const DEMO_DIST_PERIOD = 24;            // seconds for one in-and-out
 const DEMO_POLAR_HIGH = 0.28 * Math.PI; // small phi: looking down from above
 const DEMO_POLAR_LOW = 0.72 * Math.PI;  // large phi: looking up from below
@@ -139,7 +139,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x03040a);
 
 const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 3000);
-camera.position.set(0, 4, 17);
+camera.position.set(0, 2, 9);
 
 // The camera is locked onto the singularity: orbit and zoom only, never pan, so
 // it can never point away from the center.
@@ -289,6 +289,34 @@ const chairGeometry = buildChairGeometry();
 const materials = PALETTE.map((color) =>
   new THREE.MeshStandardMaterial({ color, roughness: 0.62, metalness: 0.08 }));
 
+// Ghost mode: every chair keeps its color but is dealt one of these opacities,
+// so the pile reads as layers of glass with a few solid chairs still anchoring
+// it. Depth writing is off on the see-through tiers — otherwise a near-invisible
+// chair would still punch a hole in everything behind it — which leaves them to
+// the renderer's back-to-front sort. The last tier is left fully opaque on
+// purpose: it draws in the normal pass and gives the eye something to hold.
+const GHOST_TIERS = [0.14, 0.26, 0.42, 0.65, 1];
+const ghostMaterials = PALETTE.map((color) => GHOST_TIERS.map((opacity) =>
+  new THREE.MeshStandardMaterial({
+    color, roughness: 0.62, metalness: 0.08,
+    transparent: opacity < 1,
+    opacity,
+    depthWrite: opacity >= 1,
+  })));
+let ghostOn = false;
+
+/** The material a chair should be wearing right now, given its dealt tint/tier. */
+function chairMaterial(mesh) {
+  const { tint, tier } = mesh.userData;
+  return ghostOn ? ghostMaterials[tint][tier] : materials[tint];
+}
+
+/** Re-dress every chair, free and settled, after the mode is toggled. */
+function applyGhost() {
+  for (const mesh of free) mesh.material = chairMaterial(mesh);
+  for (const mesh of planetoid.children) mesh.material = chairMaterial(mesh);
+}
+
 // Free chairs still falling in: each { mesh, vel, omega }. Settled chairs are
 // reparented into `planetoid` and no longer simulated.
 const free = [];
@@ -332,8 +360,10 @@ function randomUnit(out) {
 }
 
 function newChairMesh() {
-  const tint = Math.floor(Math.random() * materials.length);
-  const mesh = new THREE.Mesh(chairGeometry, materials[tint]);
+  const mesh = new THREE.Mesh(chairGeometry);
+  mesh.userData.tint = Math.floor(Math.random() * materials.length);
+  mesh.userData.tier = Math.floor(Math.random() * GHOST_TIERS.length);
+  mesh.material = chairMaterial(mesh);
   mesh.scale.setScalar(0.8 + Math.random() * 0.5);
   return mesh;
 }
@@ -634,7 +664,13 @@ function closeMenu() {
 menuBtn.addEventListener('click', openMenu);
 closeBtn.addEventListener('click', closeMenu);
 doneBtn.addEventListener('click', () => { resumeAudio(); closeMenu(); });
-scrim.addEventListener('click', (e) => { if (e.target === scrim) closeMenu(); });
+// A real modal: the backdrop does not dismiss. It only swallows the press, so a
+// tap that misses the sheet can't reach the scene behind it. The way out is the
+// ✕, Enter Space, or Escape. Tap-outside used to close it, but a drag that
+// started on a control and wandered off the sheet released over the backdrop,
+// and the browser delivers that click to the nearest ancestor of press and
+// release — the scrim — so adjusting a slider would dismiss the whole sheet.
+scrim.addEventListener('pointerdown', (e) => { if (e.target === scrim) e.preventDefault(); });
 
 // Sound
 const soundToggle = document.getElementById('sound-toggle');
@@ -673,6 +709,10 @@ rampToggle.addEventListener('change', () => { gravityRamp = rampToggle.checked; 
 // Starfield
 const starsToggle = document.getElementById('stars-toggle');
 starsToggle.addEventListener('change', () => { stars.visible = starsToggle.checked; });
+
+// Ghost chairs
+const ghostToggle = document.getElementById('ghost-toggle');
+ghostToggle.addEventListener('change', () => { ghostOn = ghostToggle.checked; applyGhost(); });
 
 // Show taps
 const tapsToggle = document.getElementById('taps-toggle');
