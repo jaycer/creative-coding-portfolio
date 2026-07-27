@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
+  <defs>
+    <radialGradient id="gs-bg" cx="50%" cy="30%" r="90%">
+      <stop offset="0" stop-color="#1a1e26"/>
+      <stop offset="1" stop-color="#0c0e12"/>
+    </radialGradient>
+    <linearGradient id="gs-spec" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6fd3a4" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#6fd3a4" stop-opacity="0.02"/>
+    </linearGradient>
+    <linearGradient id="gs-scrim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="600" height="400" fill="url(#gs-bg)"/>
+
+  <!-- grid -->
+  <g stroke="#262b34" stroke-width="1">
+    <path d="M110 40 V300 M190 40 V300 M270 40 V300 M350 40 V300 M430 40 V300 M510 40 V300"/>
+    <path d="M40 100 H560 M40 230 H560"/>
+  </g>
+  <path d="M40 165 H560" stroke="#39404b" stroke-width="1.5"/>
+
+  <!-- spectrum fill under the curve -->
+  <path d="M40 300 L40 214 L80 200 L120 186 L160 196 L200 172 L240 190 L280 164
+           L320 182 L360 174 L400 198 L440 210 L480 232 L520 252 L560 268 L560 300 Z"
+        fill="url(#gs-spec)"/>
+
+  <!-- EQ response curve -->
+  <path d="M40 205 C 90 205, 110 120, 170 118 C 225 116, 245 200, 300 205
+           C 350 210, 370 128, 425 126 C 480 124, 520 180, 560 186"
+        fill="none" stroke="#6fd3a4" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- band handles -->
+  <g fill="#6fd3a4" stroke="#0f1115" stroke-width="3">
+    <circle cx="170" cy="118" r="11"/>
+    <circle cx="300" cy="205" r="11"/>
+    <circle cx="425" cy="126" r="11"/>
+  </g>
+
+  <rect x="0" y="300" width="600" height="100" fill="url(#gs-scrim)"/>
+  <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="34" font-weight="600" fill="#fff">Gain Stage</text>
+</svg>
