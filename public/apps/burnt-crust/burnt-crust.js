@@ -1367,7 +1367,14 @@ function closeMenu() {
 }
 menuBtn.addEventListener('click', openMenu);
 document.getElementById('close-btn').addEventListener('click', closeMenu);
-scrim.addEventListener('click', (e) => { if (e.target === scrim) closeMenu(); });
+// A real modal, as the sheet's own aria-modal already claims: the backdrop does
+// not dismiss, it only swallows the press so a tap that misses the sheet can't
+// reach the machine behind it. The way out is the ✕ or Escape. Tap-outside used
+// to close it, but a press that starts on the sheet and drifts off it — sweeping
+// a fader, dragging across the guide text — releases over the backdrop, and the
+// browser delivers that click to the nearest ancestor of press and release, the
+// scrim, which read as a tap outside and dismissed the sheet mid-gesture.
+scrim.addEventListener('pointerdown', (e) => { if (e.target === scrim) e.preventDefault(); });
 window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 
 // --- transport -----------------------------------------------------------------
