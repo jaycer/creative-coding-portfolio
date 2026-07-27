@@ -8,6 +8,7 @@
 // entries, not for static folders under /public. To add work: drop a folder in
 // either place and add a row here.
 export const apps = [
+  { slug: 'gain-stage',     title: 'Gain Stage',    blurb: 'A mastering chain that runs in the tab. Drop in a file, shape it with EQ, compression, saturation and a look-ahead limiter, then export a WAV. Nothing is uploaded.', entry: 'index.html' },
   { slug: 'burnt-crust',    title: 'Burnt Crust',   blurb: 'Ten faders of breakcore, each with a drift rate that moves it for you. Ten city kits, from Cleveland to Tokyo, swap every sound on the fly.', entry: 'index.html' },
   { slug: 'chair-pile',             title: 'Chair Pile',             blurb: 'Chairs fall out of the dark and pile up forever. Tap or press any key to send another one down, then drag to look around what you built.', entry: 'index.html' },
   { slug: 'chairs-in-space',        title: 'Chairs In Space!',       blurb: 'The chairs are pulled into a singularity. Slowly they form a planetoid. Tap to add a chair. Orbit the center and zoom.', entry: 'index.html' },

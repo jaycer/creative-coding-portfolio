@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gain Stage — Jayce Renner</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="description" content="An open source mastering chain that runs entirely in your browser. EQ, compression, saturation, and a look-ahead limiter with LUFS metering. Your audio never leaves the device." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="Gain Stage" />
+    <meta property="og:description" content="An open source mastering chain that runs entirely in your browser. EQ, compression, saturation, and a look-ahead limiter with LUFS metering. Your audio never leaves the device." />
+    <meta property="og:url" content="https://jaycer.github.io/creative-coding-portfolio/apps/gain-stage/" />
+    <meta property="og:image" content="https://jaycer.github.io/creative-coding-portfolio/og/gain-stage.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Gain Stage" />
+    <meta name="twitter:description" content="An open source mastering chain that runs entirely in your browser. EQ, compression, saturation, and a look-ahead limiter with LUFS metering." />
+    <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/gain-stage.jpg" />
+    <style>
+      /* Graphite console with a single signal-green accent. Meters are the
+         only place other hues appear — amber for gain reduction, red for
+         clipping — so color always means something. */
+      :root {
+        --bg:        #0f1115;
+        --bg-2:      #0a0c0f;
+        --panel:     #171a20;
+        --panel-2:   #1e222a;
+        --panel-3:   #262b34;
+        --line:      #2a2f3a;
+        --line-soft: #21252d;
+        --ink:       #d8dde5;
+        --ink-dim:   #939bab;
+        --ink-faint: #69717f;
+        --accent:    #6fd3a4;
+        --accent-dim:#3f7d64;
+        --warn:      #e6b45c;
+        --hot:       #e2695a;
+        --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body {
+        background: radial-gradient(120% 90% at 50% -10%, #161a21 0%, var(--bg) 45%, var(--bg-2) 100%) fixed, var(--bg);
+        color: var(--ink);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+        min-height: 100vh;
+      }
+
+      /* ---- top bar ---- */
+      .bar {
+        position: sticky; top: 0; z-index: 30;
+        display: flex; align-items: center; gap: 10px;
+        padding: 11px 16px;
+        background: rgba(10, 12, 15, 0.72);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .bar .back, .bar-btn {
+        font-size: 0.8rem; letter-spacing: 0.01em; font-family: var(--sans);
+        text-decoration: none; color: var(--ink-dim); background: none;
+        padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px;
+        white-space: nowrap; cursor: pointer;
+        transition: color .15s ease, border-color .15s ease, background .15s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .bar .back:hover, .bar-btn:hover { color: var(--ink); border-color: var(--ink-faint); background: rgba(216,221,229,.05); }
+      .bar-btn:focus-visible, .back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .bar-btn[disabled] { opacity: .4; cursor: not-allowed; }
+      .bar-btn[disabled]:hover { color: var(--ink-dim); border-color: var(--line); background: none; }
+      .bar-btn.primary { color: #0d1712; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+      .bar-btn.primary:hover { background: #86e0b6; border-color: #86e0b6; color: #0d1712; }
+      .bar-btn.on { color: var(--accent); border-color: var(--accent-dim); background: rgba(111,211,164,.1); }
+      .bar .crumb {
+        font-size: 0.66rem; letter-spacing: 0.26em; text-transform: uppercase; color: var(--ink-faint);
+      }
+      .bar .push { margin-left: auto; }
+      @media (max-width: 720px) { .bar .back-label, .bar .crumb { display: none; } }
+
+      .toast {
+        position: fixed; bottom: 24px; left: 50%; z-index: 60;
+        transform: translateX(-50%) translateY(10px);
+        padding: 10px 18px; border-radius: 999px;
+        background: rgba(10,12,15,.95); border: 1px solid var(--line);
+        color: var(--ink); font-size: .88rem;
+        opacity: 0; pointer-events: none;
+        transition: opacity .2s ease, transform .2s ease;
+        max-width: min(90vw, 460px); text-align: center;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      /* ---- layout ---- */
+      .stage { max-width: 1180px; margin: 0 auto; padding: 20px 16px 80px; }
+      header.hero { padding: 22px 0 26px; max-width: 640px; }
+      header.hero h1 {
+        margin: 0 0 8px; font-weight: 600; letter-spacing: -0.02em;
+        font-size: clamp(1.9rem, 5vw, 2.6rem);
+      }
+      header.hero p { margin: 0; color: var(--ink-dim); font-size: .95rem; line-height: 1.55; }
+      header.hero .local {
+        display: inline-flex; align-items: center; gap: 7px; margin-top: 14px;
+        font-size: .76rem; color: var(--accent);
+        border: 1px solid var(--accent-dim); border-radius: 999px; padding: 5px 12px;
+        background: rgba(111,211,164,.07);
+      }
+
+      .panel {
+        background: var(--panel); border: 1px solid var(--line);
+        border-radius: 14px; padding: 16px 18px; margin-bottom: 14px;
+      }
+      .panel__head {
+        display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+      }
+      .panel__name {
+        font-size: .7rem; letter-spacing: .2em; text-transform: uppercase; color: var(--ink-dim);
+      }
+      .panel__note { font-size: .74rem; color: var(--ink-faint); margin-left: auto; }
+
+      .cols { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 14px; align-items: start; }
+      @media (max-width: 900px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+
+      /* ---- source / dropzone ---- */
+      #drop { transition: border-color .18s ease, background .18s ease; }
+      #drop.hot { border-color: var(--accent); background: rgba(111,211,164,.06); }
+      .source-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+      .btn {
+        font-size: .84rem; font-family: var(--sans); color: var(--ink);
+        background: var(--panel-2); border: 1px solid var(--line);
+        padding: 9px 16px; border-radius: 9px; cursor: pointer;
+        transition: background .15s ease, border-color .15s ease, color .15s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .btn:hover { background: var(--panel-3); border-color: var(--ink-faint); }
+      .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .btn[disabled] { opacity: .45; cursor: not-allowed; }
+      .btn.live { color: var(--accent); border-color: var(--accent-dim); background: rgba(111,211,164,.12); }
+      .hint { font-size: .8rem; color: var(--ink-faint); }
+      .track-name { font-size: .9rem; color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+      .track-meta { font-size: .76rem; color: var(--ink-faint); font-family: var(--mono); }
+
+      /* ---- transport / waveform ---- */
+      #waveWrap { position: relative; margin: 4px 0 12px; }
+      #wave { display: block; width: 100%; height: 96px; border-radius: 9px; background: var(--panel-2); cursor: pointer; touch-action: none; }
+      .transport { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+      #play {
+        width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+        background: var(--accent); border: none; cursor: pointer; color: #0d1712; flex: none;
+        transition: transform .1s ease, background .15s ease;
+      }
+      #play:hover { background: #86e0b6; }
+      #play:active { transform: scale(.95); }
+      #play:disabled { background: var(--panel-3); color: var(--ink-faint); cursor: not-allowed; }
+      #play:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+      #play .bars { display: none; }
+      #play.playing .tri { display: none; }
+      #play.playing .bars { display: block; }
+      .time { font-family: var(--mono); font-size: .82rem; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+      .toggle-chip {
+        font-size: .76rem; color: var(--ink-dim); background: none;
+        border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; cursor: pointer;
+        transition: color .15s ease, border-color .15s ease, background .15s ease;
+      }
+      .toggle-chip:hover { color: var(--ink); border-color: var(--ink-faint); }
+      .toggle-chip.on { color: var(--accent); border-color: var(--accent-dim); background: rgba(111,211,164,.1); }
+
+      /* ---- EQ display ---- */
+      #eqWrap { position: relative; }
+      #eq { display: block; width: 100%; height: 240px; border-radius: 10px; background: var(--panel-2); touch-action: none; cursor: crosshair; }
+      @media (max-width: 600px) { #eq { height: 190px; } }
+      .eq-legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: .72rem; color: var(--ink-faint); }
+      .eq-legend b { font-weight: 500; color: var(--ink-dim); }
+
+      /* ---- band table ---- */
+      .bands { margin-top: 14px; display: flex; flex-direction: column; gap: 2px; }
+      .band {
+        display: grid; grid-template-columns: 88px repeat(3, minmax(0, 1fr));
+        gap: 12px; align-items: center; padding: 7px 0;
+        border-top: 1px solid var(--line-soft);
+      }
+      .band:first-child { border-top: none; }
+      .band__name { font-size: .78rem; color: var(--ink-dim); display: flex; align-items: center; gap: 7px; }
+      .band__name .sw { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); opacity: .35; flex: none; }
+      .band.active .band__name { color: var(--ink); }
+      .band.active .sw { opacity: 1; }
+      .band .cell { min-width: 0; }
+      @media (max-width: 700px) {
+        .band { grid-template-columns: 1fr 1fr; }
+        .band__name { grid-column: 1 / -1; margin-bottom: 2px; }
+      }
+
+      /* ---- generic control ---- */
+      .ctl__row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+      .ctl__label { font-size: .64rem; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-faint); white-space: nowrap; }
+      .ctl__val { font-size: .72rem; color: var(--ink-dim); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+      input[type="range"] {
+        -webkit-appearance: none; appearance: none;
+        width: 100%; height: 20px; margin: 0; background: transparent; cursor: pointer; display: block;
+      }
+      input[type="range"]::-webkit-slider-runnable-track { height: 3px; border-radius: 999px; background: var(--panel-3); }
+      input[type="range"]::-moz-range-track { height: 3px; border-radius: 999px; background: var(--panel-3); }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none;
+        width: 14px; height: 14px; margin-top: -5.5px; border-radius: 50%;
+        background: var(--ink); border: none; box-shadow: 0 1px 3px rgba(0,0,0,.5);
+        transition: background .15s ease, box-shadow .2s ease;
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 14px; height: 14px; border-radius: 50%; background: var(--ink); border: none;
+      }
+      input[type="range"]:hover::-webkit-slider-thumb { background: var(--accent); }
+      input[type="range"]:focus-visible { outline: none; }
+      input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(111,211,164,.3); }
+      input[type="range"][disabled] { opacity: .35; cursor: not-allowed; }
+
+      /* ---- module rack ----
+         Column flow rather than a grid: the modules are wildly different
+         heights, and a grid would stretch the two-slider Levels card to match
+         the nine-slider Compressor beside it and leave a hole. */
+      .rack { column-count: 2; column-gap: 14px; }
+      @media (max-width: 700px) { .rack { column-count: 1; } }
+      .module {
+        break-inside: avoid; -webkit-column-break-inside: avoid;
+        display: inline-block; width: 100%; margin-bottom: 14px;
+      }
+      .module__head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+      .module__name { font-size: .8rem; font-weight: 600; letter-spacing: .01em; color: var(--ink); }
+      .module__spacer { flex: 1; }
+      .module__gr {
+        font-family: var(--mono); font-size: .7rem; color: var(--warn);
+        font-variant-numeric: tabular-nums; opacity: 0; transition: opacity .2s ease;
+      }
+      .module__gr.live { opacity: 1; }
+      .module.off .module__body { opacity: .35; pointer-events: none; }
+      .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+
+      /* switch */
+      .sw-btn {
+        position: relative; width: 34px; height: 19px; border-radius: 999px; flex: none;
+        background: var(--panel-3); border: 1px solid var(--line); cursor: pointer; padding: 0;
+        transition: background .18s ease, border-color .18s ease;
+      }
+      .sw-btn::after {
+        content: ''; position: absolute; top: 2px; left: 2px;
+        width: 13px; height: 13px; border-radius: 50%; background: var(--ink-faint);
+        transition: transform .18s ease, background .18s ease;
+      }
+      .sw-btn[aria-pressed="true"] { background: rgba(111,211,164,.22); border-color: var(--accent-dim); }
+      .sw-btn[aria-pressed="true"]::after { transform: translateX(15px); background: var(--accent); }
+      .sw-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      /* segmented */
+      .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      .seg button {
+        font-size: .74rem; font-family: var(--sans); color: var(--ink-dim);
+        background: none; border: none; padding: 6px 12px; cursor: pointer;
+        transition: background .15s ease, color .15s ease;
+      }
+      .seg button + button { border-left: 1px solid var(--line); }
+      .seg button[aria-pressed="true"] { background: rgba(111,211,164,.14); color: var(--accent); }
+      .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+      /* ---- presets ---- */
+      .presets { display: flex; flex-wrap: wrap; gap: 7px; }
+      .preset-btn {
+        font-size: .78rem; font-family: var(--sans); color: var(--ink-dim);
+        background: var(--panel-2); border: 1px solid var(--line);
+        padding: 7px 13px; border-radius: 999px; cursor: pointer;
+        transition: color .15s ease, border-color .15s ease, background .15s ease;
+      }
+      .preset-btn:hover { color: var(--ink); border-color: var(--ink-faint); }
+      .preset-btn.on { color: var(--accent); border-color: var(--accent-dim); background: rgba(111,211,164,.1); }
+      .preset-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      #presetBlurb { margin-top: 10px; font-size: .78rem; color: var(--ink-faint); min-height: 1.2em; line-height: 1.5; }
+
+      /* ---- meters ---- */
+      .meters { position: sticky; top: 66px; }
+      @media (max-width: 900px) { .meters { position: static; } }
+      .meter { margin-bottom: 13px; }
+      .meter__row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px; }
+      .meter__label { font-size: .64rem; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-faint); }
+      .meter__val { font-family: var(--mono); font-size: .74rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+      .meter__bar { height: 7px; border-radius: 3px; background: var(--panel-2); overflow: hidden; position: relative; }
+      .meter__fill { position: absolute; inset: 0 100% 0 0; background: var(--accent); transition: right .06s linear; }
+      .meter__fill.gr { background: var(--warn); }
+      .meter__peak { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: .8; left: 0; }
+      .meter__bar.clip .meter__fill { background: var(--hot); }
+
+      .lufs { border-top: 1px solid var(--line-soft); margin-top: 16px; padding-top: 14px; }
+      .lufs__row { display: flex; align-items: baseline; justify-content: space-between; padding: 4px 0; }
+      .lufs__k { font-size: .74rem; color: var(--ink-dim); }
+      .lufs__v { font-family: var(--mono); font-size: .84rem; font-variant-numeric: tabular-nums; color: var(--ink); }
+      .lufs__v.big { font-size: 1.15rem; color: var(--accent); }
+      .lufs__hint { font-size: .68rem; color: var(--ink-faint); margin-top: 8px; line-height: 1.5; }
+      #resetMeters { margin-top: 12px; width: 100%; font-size: .76rem; padding: 7px; }
+
+      /* ---- export sheet ---- */
+      .sheet-back {
+        position: fixed; inset: 0; z-index: 50; display: none;
+        background: rgba(6,8,10,.7); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+        align-items: center; justify-content: center; padding: 20px;
+      }
+      .sheet-back.open { display: flex; }
+      .sheet {
+        background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+        padding: 22px; width: 100%; max-width: 400px;
+      }
+      .sheet h2 { margin: 0 0 4px; font-size: 1.05rem; font-weight: 600; }
+      .sheet p { margin: 0 0 18px; font-size: .8rem; color: var(--ink-faint); line-height: 1.5; }
+      .sheet .field { margin-bottom: 16px; }
+      .sheet .field > .ctl__label { display: block; margin-bottom: 7px; }
+      .sheet__actions { display: flex; gap: 9px; justify-content: flex-end; margin-top: 20px; }
+      .progress { height: 4px; border-radius: 2px; background: var(--panel-2); overflow: hidden; margin-top: 14px; display: none; }
+      .progress.on { display: block; }
+      .progress i { display: block; height: 100%; width: 30%; background: var(--accent); animation: slide 1.1s ease-in-out infinite; }
+      @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+
+      footer {
+        margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line-soft);
+        font-size: .76rem; color: var(--ink-faint); line-height: 1.65; max-width: 640px;
+      }
+      footer a { color: var(--ink-dim); }
+      footer code { font-family: var(--mono); font-size: .95em; color: var(--ink-dim); }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="bar">
+      <a class="back" href="../../" aria-label="Back to gallery">←<span class="back-label"> Gallery</span></a>
+      <span class="crumb">Gain Stage</span>
+      <button class="bar-btn push" id="abBtn" type="button" aria-pressed="false" title="Compare processed against the untouched file (B)">A/B</button>
+      <button class="bar-btn" id="saveState" type="button">Save</button>
+      <button class="bar-btn" id="loadState" type="button">Load</button>
+      <button class="bar-btn primary" id="exportBtn" type="button" disabled>Export</button>
+    </nav>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <main class="stage">
+      <header class="hero">
+        <h1>Gain Stage</h1>
+        <p>
+          A mastering chain in a browser tab. Equalize, compress, saturate and limit,
+          then export a WAV. Every sample is decoded and processed on this device, so
+          there is nothing to upload and no file size limit but your own memory.
+        </p>
+        <span class="local">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+            <rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
+          </svg>
+          Audio never leaves this device
+        </span>
+      </header>
+
+      <section class="panel" id="drop">
+        <div class="panel__head">
+          <span class="panel__name">Source</span>
+          <span class="panel__note" id="srcNote">Drop a file anywhere on this page</span>
+        </div>
+        <div class="source-row">
+          <button class="btn" id="pickBtn" type="button">Choose audio file</button>
+          <button class="btn" id="micBtn" type="button">Use microphone</button>
+          <div style="min-width: 0">
+            <div class="track-name" id="trackName">No file loaded</div>
+            <div class="track-meta" id="trackMeta">wav · mp3 · flac · m4a · ogg</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel__head">
+          <span class="panel__name">Transport</span>
+          <span class="panel__note" id="latencyNote"></span>
+        </div>
+        <div id="waveWrap"><canvas id="wave"></canvas></div>
+        <div class="transport">
+          <button id="play" type="button" aria-label="Play" disabled>
+            <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true">
+              <polygon class="tri" points="8,5 19,12 8,19" fill="currentColor" />
+              <g class="bars" fill="currentColor">
+                <rect x="7" y="5" width="3.5" height="14" rx="1.2" />
+                <rect x="13.5" y="5" width="3.5" height="14" rx="1.2" />
+              </g>
+            </svg>
+          </button>
+          <span class="time" id="time">0:00.0 / 0:00.0</span>
+          <button class="toggle-chip" id="loopBtn" type="button" aria-pressed="true">Loop</button>
+          <span class="hint" id="transportHint">Space plays · B compares</span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel__head">
+          <span class="panel__name">Presets</span>
+        </div>
+        <div class="presets" id="presets"></div>
+        <p id="presetBlurb"></p>
+      </section>
+
+      <div class="cols">
+        <div>
+          <section class="panel">
+            <div class="panel__head">
+              <span class="panel__name">Equalizer</span>
+              <span class="panel__note">Drag a node · scroll or shift-drag for width</span>
+            </div>
+            <div id="eqWrap"><canvas id="eq"></canvas></div>
+            <div class="eq-legend">
+              <span><b>Curve</b> the filter response</span>
+              <span><b>Fill</b> live spectrum of the output</span>
+              <span><b>±18 dB</b> vertical range</span>
+            </div>
+            <div class="bands" id="bands"></div>
+          </section>
+
+          <div class="rack" id="rack"></div>
+        </div>
+
+        <aside class="panel meters">
+          <div class="panel__head"><span class="panel__name">Meters</span></div>
+
+          <div class="meter">
+            <div class="meter__row"><span class="meter__label">In</span><span class="meter__val" id="inVal">-inf</span></div>
+            <div class="meter__bar"><div class="meter__fill" id="inFill"></div><div class="meter__peak" id="inPeak"></div></div>
+          </div>
+
+          <div class="meter">
+            <div class="meter__row"><span class="meter__label">Out</span><span class="meter__val" id="outVal">-inf</span></div>
+            <div class="meter__bar" id="outBar"><div class="meter__fill" id="outFill"></div><div class="meter__peak" id="outPeak"></div></div>
+          </div>
+
+          <div class="meter">
+            <div class="meter__row"><span class="meter__label">True peak</span><span class="meter__val" id="tpVal">-inf</span></div>
+            <div class="meter__bar" id="tpBar"><div class="meter__fill" id="tpFill"></div></div>
+          </div>
+
+          <div class="meter">
+            <div class="meter__row"><span class="meter__label">Comp GR</span><span class="meter__val" id="cgrVal">0.0</span></div>
+            <div class="meter__bar"><div class="meter__fill gr" id="cgrFill"></div></div>
+          </div>
+
+          <div class="meter">
+            <div class="meter__row"><span class="meter__label">Limit GR</span><span class="meter__val" id="lgrVal">0.0</span></div>
+            <div class="meter__bar"><div class="meter__fill gr" id="lgrFill"></div></div>
+          </div>
+
+          <div class="lufs">
+            <div class="lufs__row"><span class="lufs__k">Integrated</span><span class="lufs__v big" id="lufsI">-inf</span></div>
+            <div class="lufs__row"><span class="lufs__k">Short term</span><span class="lufs__v" id="lufsS">-inf</span></div>
+            <div class="lufs__row"><span class="lufs__k">Momentary</span><span class="lufs__v" id="lufsM">-inf</span></div>
+            <p class="lufs__hint" id="lufsHint">
+              Streaming platforms normalize to about -14 LUFS. Play the whole track to get a
+              meaningful integrated reading.
+            </p>
+            <button class="btn" id="resetMeters" type="button">Reset meters</button>
+          </div>
+        </aside>
+      </div>
+
+      <footer>
+        <p>
+          Built with the Web Audio API and no dependencies. The compressor, look-ahead limiter
+          and BS.1770 loudness meter are hand-written <code>AudioWorklet</code> processors living
+          in <code>dsp/</code> — read them, change them, take them.
+        </p>
+        <p>
+          Export renders the same graph through an <code>OfflineAudioContext</code>, so the WAV is
+          what you heard. Sample peaks are limited exactly; the true-peak reading is a
+          4x-oversampled estimate, which is why the ceiling defaults to -1 dB.
+        </p>
+      </footer>
+    </main>
+
+    <div class="sheet-back" id="exportSheet" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
+      <div class="sheet">
+        <h2 id="exportTitle">Export WAV</h2>
+        <p>Rendered offline at full quality on this machine. Nothing is uploaded.</p>
+        <div class="field">
+          <span class="ctl__label">Bit depth</span>
+          <div class="seg" id="depthSeg">
+            <button type="button" data-depth="16" aria-pressed="false">16-bit</button>
+            <button type="button" data-depth="24" aria-pressed="true">24-bit</button>
+            <button type="button" data-depth="32" aria-pressed="false">32-bit float</button>
+          </div>
+        </div>
+        <div class="field">
+          <span class="ctl__label">Range</span>
+          <div class="seg" id="rangeSeg">
+            <button type="button" data-range="full" aria-pressed="true">Whole file</button>
+            <button type="button" data-range="loop" aria-pressed="false">Loop region</button>
+          </div>
+        </div>
+        <div class="progress" id="exportProgress"><i></i></div>
+        <div class="sheet__actions">
+          <button class="btn" id="exportCancel" type="button">Cancel</button>
+          <button class="bar-btn primary" id="exportGo" type="button">Render</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./gain-stage.js"></script>
+  </body>
+</html>
