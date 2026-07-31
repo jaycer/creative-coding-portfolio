@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
+  <defs>
+    <!-- The field. One flat tone lifting toward the middle, and the deck picking
+         up from the exact same color, so there is no horizon line to see. -->
+    <linearGradient id="field" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b1029"/>
+      <stop offset="1" stop-color="#2e1c3f"/>
+    </linearGradient>
+    <radialGradient id="lift" cx="0.5" cy="0.62" r="0.62">
+      <stop offset="0" stop-color="#513070" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#513070" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="deck" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2e1c3f"/>
+      <stop offset="0.35" stop-color="#6a5a90"/>
+      <stop offset="1" stop-color="#9d97c2"/>
+    </linearGradient>
+    <radialGradient id="poolA" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#7fe8ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#7fe8ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="poolB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#d98cff" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#d98cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="shaft" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#9d5cff" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#9d5cff" stop-opacity="0"/>
+    </linearGradient>
+    <!-- Haze has no silhouette. Without this the shafts are two hard-edged
+         triangles, which is the one thing the app went out of its way not to do. -->
+    <filter id="haze" x="-30%" y="-10%" width="160%" height="130%">
+      <feGaussianBlur stdDeviation="16"/>
+    </filter>
+    <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#120a1c" stop-opacity="0"/>
+      <stop offset="1" stop-color="#120a1c" stop-opacity="0.72"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="600" height="252" fill="url(#field)"/>
+  <rect y="248" width="600" height="152" fill="url(#deck)"/>
+  <ellipse cx="300" cy="250" rx="330" ry="190" fill="url(#lift)"/>
+
+  <!-- What is left of the rig: two shafts at a fifth of their old weight, and
+       the pools the lamps leave on the deck. Atmosphere, not the subject. -->
+  <g style="mix-blend-mode:screen">
+    <g filter="url(#haze)">
+      <polygon points="188,0 210,0 248,250 132,250" fill="url(#shaft)"/>
+      <polygon points="404,0 424,0 470,250 356,250" fill="url(#shaft)"/>
+    </g>
+    <ellipse cx="196" cy="288" rx="150" ry="44" fill="url(#poolA)"/>
+    <ellipse cx="416" cy="292" rx="146" ry="42" fill="url(#poolB)"/>
+  </g>
+
+  <!-- The troupe mid-crossing: five builds in a row, one of them a giant, one
+       glitching a double, one caught on its side. -->
+  <!-- ladderback, bobbing -->
+  <g fill="#d98fb4" transform="translate(74 300) rotate(-5)">
+    <rect x="-17" y="-70" width="5" height="70" rx="2"/>
+    <rect x="12" y="-70" width="5" height="70" rx="2"/>
+    <rect x="-17" y="-62" width="34" height="4" rx="2"/>
+    <rect x="-17" y="-52" width="34" height="4" rx="2"/>
+    <rect x="-17" y="-42" width="34" height="4" rx="2"/>
+    <rect x="-19" y="-34" width="38" height="5" rx="2"/>
+    <rect x="-17" y="-29" width="5" height="29" rx="2"/>
+    <rect x="12" y="-29" width="5" height="29" rx="2"/>
+  </g>
+
+  <!-- the giant, standing in its ordinary slot -->
+  <g fill="#e8b04a" transform="translate(196 302)">
+    <rect x="-46" y="-190" width="13" height="190" rx="3"/>
+    <rect x="33" y="-190" width="13" height="190" rx="3"/>
+    <rect x="-46" y="-172" width="92" height="11" rx="3"/>
+    <rect x="-46" y="-146" width="92" height="11" rx="3"/>
+    <rect x="-52" y="-104" width="104" height="14" rx="3"/>
+    <rect x="-46" y="-92" width="13" height="92" rx="3"/>
+    <rect x="33" y="-92" width="13" height="92" rx="3"/>
+  </g>
+
+  <!-- the glitcher: a cyan double dragged off its own body -->
+  <g transform="translate(310 300)">
+    <g fill="#2fe8ff" opacity="0.55" transform="translate(-10 -5) rotate(6)">
+      <rect x="-18" y="-58" width="5" height="58" rx="2"/>
+      <rect x="13" y="-58" width="5" height="58" rx="2"/>
+      <rect x="-18" y="-50" width="36" height="5" rx="2"/>
+      <rect x="-20" y="-31" width="40" height="6" rx="2"/>
+      <rect x="-18" y="-25" width="5" height="25" rx="2"/>
+      <rect x="13" y="-25" width="5" height="25" rx="2"/>
+    </g>
+    <g fill="#e0574f">
+      <rect x="-18" y="-58" width="5" height="58" rx="2"/>
+      <rect x="13" y="-58" width="5" height="58" rx="2"/>
+      <rect x="-18" y="-50" width="36" height="5" rx="2"/>
+      <rect x="-20" y="-31" width="40" height="6" rx="2"/>
+      <rect x="-18" y="-25" width="5" height="25" rx="2"/>
+      <rect x="13" y="-25" width="5" height="25" rx="2"/>
+    </g>
+  </g>
+
+  <!-- stool, mid-hop -->
+  <g fill="#f0d98a" transform="translate(392 288)">
+    <rect x="-20" y="-7" width="40" height="7" rx="2"/>
+    <rect x="-17" y="0" width="5" height="46" rx="2"/>
+    <rect x="12" y="0" width="5" height="46" rx="2"/>
+    <rect x="-17" y="27" width="34" height="4" rx="2"/>
+  </g>
+
+  <!-- the spinner, caught on its side -->
+  <g fill="#8fd9a8" transform="translate(474 296) rotate(58)">
+    <rect x="-16" y="-52" width="5" height="52" rx="2"/>
+    <rect x="11" y="-52" width="5" height="52" rx="2"/>
+    <rect x="-16" y="-45" width="32" height="5" rx="2"/>
+    <rect x="-18" y="-27" width="36" height="6" rx="2"/>
+    <rect x="-16" y="-21" width="5" height="21" rx="2"/>
+    <rect x="11" y="-21" width="5" height="21" rx="2"/>
+  </g>
+
+  <!-- one already walking out of frame -->
+  <g fill="#cfd6e2" transform="translate(566 298) rotate(-7)">
+    <rect x="-17" y="-64" width="5" height="64" rx="2"/>
+    <rect x="12" y="-64" width="5" height="64" rx="2"/>
+    <rect x="-17" y="-56" width="34" height="5" rx="2"/>
+    <rect x="-17" y="-44" width="34" height="5" rx="2"/>
+    <rect x="-19" y="-33" width="38" height="6" rx="2"/>
+    <rect x="-17" y="-27" width="5" height="27" rx="2"/>
+    <rect x="12" y="-27" width="5" height="27" rx="2"/>
+  </g>
+
+  <rect x="0" y="288" width="600" height="112" fill="url(#scrim)"/>
+  <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="34" font-weight="600" fill="#fff">Hey Chair</text>
+</svg>

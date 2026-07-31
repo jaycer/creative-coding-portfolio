@@ -102,6 +102,12 @@ function setup() {
   cacheDom();
   attachInput(cnv.elt);
   showReady();
+
+  // Sound lives in the header: one slider, silent the first time and remembered after, in the same spot in
+  // every app in the gallery. Dragging it is also the gesture that builds the
+  // context, so batting the first balloon already has audio behind it.
+  HeaderVolume.onGesture(() => BloonAudio.init());
+  HeaderVolume.onChange((gain) => BloonAudio.setOutput(gain));
 }
 
 function computeSizes() {

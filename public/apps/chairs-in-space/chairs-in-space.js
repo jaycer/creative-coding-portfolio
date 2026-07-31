@@ -12,7 +12,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { initAudio, resumeAudio, chime, land, setMuted, isMuted } from './audio.js';
+import { initAudio, resumeAudio, chime, land, setVolume } from './audio.js';
 
 // Total chairs (drifting + settled). Each is a lit mesh; a few hundred packs a
 // convincing planetoid and still runs smooth on a phone.
@@ -672,10 +672,11 @@ doneBtn.addEventListener('click', () => { resumeAudio(); closeMenu(); });
 // release — the scrim — so adjusting a slider would dismiss the whole sheet.
 scrim.addEventListener('pointerdown', (e) => { if (e.target === scrim) e.preventDefault(); });
 
-// Sound
-const soundToggle = document.getElementById('sound-toggle');
-soundToggle.addEventListener('change', () => setMuted(!soundToggle.checked));
-setMuted(!soundToggle.checked);
+// Sound lives in the header now: one slider, silent the first time and remembered after, in the same spot
+// in every app in the gallery. Dragging it is also the gesture that builds the
+// context, so there is nothing else to press first.
+HeaderVolume.onGesture(resumeAudio);
+HeaderVolume.onChange(setVolume);
 
 // Demo mode + its spawn interval
 const demoToggle = document.getElementById('demo-toggle');

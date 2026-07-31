@@ -116,7 +116,10 @@ let ctx = null;
 let master = null;
 let dryBus = null;
 let wetBus = null;
-let muted = false;
+// The header slider's level, 0..1. Starts at 0 so the graph agrees with a
+// slider that has not been read yet; the control pushes the remembered level
+// down before anything is built.
+let outLevel = 0;
 let voices = 0;
 let noiseBuf = null;
 let timbre = DEFAULT_TIMBRE;
@@ -161,7 +164,7 @@ export function initAudio() {
   // A whole pile landing at once would clip a bare sum, so everything meets at a
   // compressor before the speakers.
   master = ctx.createGain();
-  master.gain.value = muted ? 0 : 1;
+  master.gain.value = outLevel;
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -16;
   comp.ratio.value = 6;
@@ -221,15 +224,14 @@ export function resumeAudio() {
   tick();
 }
 
-export function setMuted(next) {
-  muted = next;
+/** Header slider, 0..1. Safe to call before the context exists. */
+export function setVolume(v) {
+  outLevel = Math.max(0, Math.min(1, v));
   if (!ctx || !master) return;
   // Ramp rather than jump: a hard gain step on a live tail is an audible click.
   master.gain.cancelScheduledValues(ctx.currentTime);
-  master.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.02);
+  master.gain.setTargetAtTime(outLevel, ctx.currentTime, 0.02);
 }
-
-export function isMuted() { return muted; }
 
 /** Takes effect on the next impact; nothing already ringing is disturbed. */
 export function setTimbre(next) {
@@ -257,7 +259,7 @@ function cleanup(nodes, when) {
  *   pan   -1..1    — where it is across the view
  */
 export function clatter(strength, pitch, pan, dist = DEPTH_NEAR) {
-  if (!ctx || ctx.state !== 'running' || muted || voices > VOICE_CAP) return;
+  if (!ctx || ctx.state !== 'running' || outLevel <= 0 || voices > VOICE_CAP) return;
   if (!dryBus || !wetBus) return;
 
   const t = ctx.currentTime + 0.005;

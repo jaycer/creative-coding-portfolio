@@ -12,8 +12,18 @@
 
 const BloonAudio = (function () {
   let ctx = null;
-  let master = null;      // master gain → compressor → destination
+  let master = null;      // master gain → compressor → out → destination
+  let out = null;         // the header slider's node, last thing before the speakers
+  let outLevel = 0;       // header slider 0..1; the control pushes its level down at startup
   let ready = false;
+
+  /** Header slider, 0..1. Safe to call before the context exists. */
+  function setOutput(v) {
+    outLevel = Math.min(1, Math.max(0, v));
+    if (!out) return;
+    out.gain.cancelScheduledValues(ctx.currentTime);
+    out.gain.setTargetAtTime(outLevel, ctx.currentTime, 0.02);
+  }
 
   // Small helper: a cached white-noise buffer for plucks / chirps.
   let noiseBuf = null;
@@ -48,8 +58,14 @@ const BloonAudio = (function () {
     comp.ratio.value = 6;
     comp.attack.value = 0.003;
     comp.release.value = 0.25;
+    // The header slider gets a node of its own at the very end of the chain, so
+    // the level the listener set and the level the honks were mixed at can
+    // never overwrite each other.
+    out = ctx.createGain();
+    out.gain.value = outLevel;
     master.connect(comp);
-    comp.connect(ctx.destination);
+    comp.connect(out);
+    out.connect(ctx.destination);
 
     // Unlock: play a one-sample silent buffer inside this gesture.
     const s = ctx.createBufferSource();
@@ -341,5 +357,5 @@ const BloonAudio = (function () {
 
   attachUnlock(); // start listening for the first gesture right away
 
-  return { init, resume, play, isReady: () => ready && ctx && ctx.state === 'running' };
+  return { init, resume, play, setOutput, isReady: () => ready && ctx && ctx.state === 'running' };
 })();

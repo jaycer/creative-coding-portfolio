@@ -13,8 +13,8 @@
 //
 // Rendering happens in particles.frag.glsl, where overlapping lumina blend
 // with an exclusion (soft-XOR) rule so their intersections contrast instead of
-// brightening. Audio needs a user gesture: the first click/tap starts the
-// drone; later clicks toggle mute.
+// brightening. Audio needs a user gesture, and the header volume slider is it:
+// moving it off zero starts the drone and sets how loud it is.
 
 const MAX_PARTICLES = AMB_CONFIG.maxParticles;  // single source of truth — see config.js
 
@@ -62,7 +62,9 @@ const uRipple = new Float32Array(MAX_PARTICLES * 4);    // x = phase, y = lobe c
 // a compressor as a safety net against ten voices swelling at once.
 let audioCtx = null;
 let audioStarted = false;
-let muted = false;
+// The header slider's level, 0..1. Starts at 0 and the graph is built to match,
+// so the drone never sounds before the control has pushed a level down.
+let outLevel = 0;
 let busIn, masterGain;
 
 const MASTER_LEVEL = 0.9;
@@ -86,7 +88,7 @@ function buildAudioGraph() {
   compressor.ratio.value = 4;
 
   masterGain = audioCtx.createGain();
-  masterGain.gain.value = MASTER_LEVEL;
+  masterGain.gain.value = MASTER_LEVEL * outLevel;
 
   busIn.connect(lowpass);
   lowpass.connect(compressor);
@@ -207,19 +209,39 @@ function updateAudio() {
   }
 }
 
+// What the hint says when nothing has gone wrong: the piece's mapping, which is
+// the only thing worth reading once the header slider has taken over starting
+// and stopping the sound.
+const HINT = 'pitch from color · pan from motion';
+
 function setHint(text) {
   const el = document.getElementById('sound-hint');
   if (el) el.textContent = text;
 }
 
-// "tap" on touch devices, "click" on pointer devices — used across the copy.
+// "tap" on touch devices, "click" on pointer devices.
 const POINTER_WORD =
   (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ? 'tap' : 'click';
 
-// The overlay's default copy (in index.html) says "click"; match the device.
-{
-  const ov = document.querySelector('#sound-overlay span');
-  if (ov) ov.textContent = `🔊 ${POINTER_WORD} anywhere to begin the sound`;
+// The "begin the sound" prompt. It exists for one situation: the app has opened
+// at a level someone already set, and the browser will not open an audio
+// context without a gesture — so the slider reads 70 over silence and there is
+// nothing on screen to say why. It ships hidden and is only ever raised on
+// load, never mid-session: coming back from 0 the slider is itself the gesture,
+// and a prompt that appeared under your own thumb would just be flicker.
+function showOverlay() {
+  const ov = document.getElementById('sound-overlay');
+  if (!ov) return;
+  const span = ov.querySelector('span');
+  if (span) span.textContent = `🔊 ${POINTER_WORD} anywhere to begin the sound`;
+  ov.hidden = false;
+}
+
+function hideOverlay() {
+  const ov = document.getElementById('sound-overlay');
+  if (!ov || ov.hidden || ov.classList.contains('gone')) return;
+  ov.classList.add('gone');
+  ov.addEventListener('transitionend', () => ov.remove(), { once: true });
 }
 
 // iOS 16.4+: route audio to the media channel (loud speaker) so the hardware
@@ -254,29 +276,51 @@ async function startAudio() {
   buildAudioGraph();
   setAudioSession('playback');     // iOS: media channel, so the ringer switch doesn't mute us
   audioStarted = true;
-  // Dismiss the overlay immediately on the gesture — not gated behind the async
-  // resume retries below, or a failed resume would leave it stuck on screen.
-  const overlay = document.getElementById('sound-overlay');
-  if (overlay) {
-    overlay.classList.add('gone');
-    overlay.addEventListener('transitionend', () => overlay.remove(), { once: true });
-  }
+  // Dismissed on the gesture itself, not gated behind the async resume below —
+  // a failed resume would otherwise leave it stuck on screen.
+  hideOverlay();
   const ok = await resumeCtx();
-  setHint(ok ? `♪ sounding · ${POINTER_WORD} to mute` : `⚠ audio blocked — ${POINTER_WORD} again`);
+  setHint(ok ? HINT : '⚠ audio blocked — move the slider again');
 }
 
-// Use pointerup, not pointerdown: iOS grants audio activation only when a
-// gesture *completes* (pointerdown could still become a scroll), so resume()
-// silently no-ops from a pointerdown handler and the context stays suspended.
-window.addEventListener('pointerup', (e) => {
-  if (e.target.closest('a')) return; // let the back link be just a link
-  if (!audioStarted) {
-    startAudio();
-  } else {
-    muted = !muted;
-    masterGain.gain.setTargetAtTime(muted ? 0 : MASTER_LEVEL, audioCtx.currentTime, 0.2);
-    setHint(muted ? `🔇 muted · ${POINTER_WORD} to unmute` : `♪ sounding · ${POINTER_WORD} to mute`);
+// The header slider both starts the sound and sets its level, so the canvas is
+// no longer a hidden mute button. It fires onGesture on pointerup, never
+// pointerdown: iOS grants audio activation only when a gesture *completes*, so
+// resume() from a pointerdown handler silently no-ops and the context stays
+// suspended.
+HeaderVolume.onGesture(async () => {
+  if (!audioStarted) { startAudio(); return; }
+  // Already started but not actually running — a blocked first attempt, or iOS
+  // having suspended us. The hint tells them to move the slider again, so
+  // moving it has to be a real second try at the resume.
+  if (audioCtx.state !== 'running') setHint((await resumeCtx()) ? HINT : '⚠ audio blocked — move the slider again');
+});
+// The control fires this once as it mounts, which is the app's one look at the
+// level it opened with — the only moment the prompt can be raised.
+let openingLevelSeen = false;
+
+HeaderVolume.onChange((gain) => {
+  outLevel = gain;
+  if (!openingLevelSeen) {
+    openingLevelSeen = true;
+    if (outLevel > 0) showOverlay();
+  } else if (outLevel <= 0) {
+    hideOverlay();   // dragged to silence before starting: nothing left to begin
   }
+  if (!audioCtx || !masterGain) return;
+  masterGain.gain.setTargetAtTime(MASTER_LEVEL * outLevel, audioCtx.currentTime, 0.05);
+});
+
+// A remembered level has to start the drone too, and the slider cannot be what
+// does it — someone returning to a level they already set has no reason to
+// touch it, and would get a control reading 85 over silence. So once a level is
+// on the dial, any completed gesture is enough to open the context. Skipped
+// while the level is 0: there would be nothing to hear, and the slider's own
+// onGesture covers the moment it comes off zero.
+window.addEventListener('pointerup', (e) => {
+  if (audioStarted || outLevel <= 0) return;
+  if (e.target.closest('a') || e.target.closest('.bar-vol')) return; // links and the slider handle themselves
+  startAudio();
 });
 
 // Silence the drone when the tab is hidden; pick it back up on return.
