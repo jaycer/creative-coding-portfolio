@@ -204,6 +204,9 @@
         cursor: pointer;
       }
       .sheet .setting + .setting { margin-top: 16px; }
+      /* A .setting that is a heading rather than a label wraps no control, so it
+         should not offer a label's pointer. */
+      .sheet div.setting { cursor: default; }
       .sheet .desc {
         display: none; /* hidden until the ⓘ toggle is on */
         margin: 8px 0 0;
@@ -405,11 +408,8 @@
         <p class="intro">Chairs fall from the dark and pile up forever. Set the scene, then run it.</p>
 
         <section class="group">
-          <label class="setting">
-            Sound
-            <input type="checkbox" id="sound-toggle" checked />
-          </label>
-          <p class="desc">Knocks as chairs land, panned across the view. Whatever they hit answers quietly underneath.</p>
+          <div class="setting">Knock</div>
+          <p class="desc">Knocks as chairs land, panned across the view. Whatever they hit answers quietly underneath. Level is the slider in the header.</p>
 
           <div class="choice" id="timbre" role="group" aria-label="Knock">
             <button class="choice-btn" data-timbre="sharp" type="button" aria-pressed="true">Sharp</button>
@@ -462,6 +462,7 @@
       </div>
     </div>
 
+    <script src="../shared/volume.js"></script>
     <script type="importmap">
       {
         "imports": {

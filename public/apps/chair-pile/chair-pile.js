@@ -13,7 +13,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import * as CANNON from 'cannon-es';
-import { initAudio, resumeAudio, clatter, setMuted, isMuted, setTimbre, getTimbre } from './audio.js';
+import { initAudio, resumeAudio, clatter, setVolume, setTimbre, getTimbre } from './audio.js';
 
 // Frozen chairs draw as instances and only the few dozen live ones are solved,
 // so the cap is really about the broadphase, which sweeps every body forever.
@@ -1137,7 +1137,6 @@ document.addEventListener('visibilitychange', () => {
 // the keydown handler above stands down for as long as the overlay is up.
 const menuBtn = document.getElementById('menu-btn');
 const scrim = document.getElementById('scrim');
-const soundToggle = document.getElementById('sound-toggle');
 const demoToggle = document.getElementById('demo-toggle');
 const doneBtn = document.getElementById('done-btn');
 const howEl = document.getElementById('how');
@@ -1199,11 +1198,11 @@ doneBtn.addEventListener('click', (e) => closeMenu({ toButton: e.detail === 0 })
 document.getElementById('close-btn')
   .addEventListener('click', (e) => closeMenu({ toButton: e.detail === 0 }));
 
-soundToggle.checked = !isMuted();
-soundToggle.addEventListener('change', () => {
-  setMuted(!soundToggle.checked);
-  initAudio(); // the click behind this change is a gesture too
-});
+// Sound lives in the header now: one slider, silent the first time and remembered after, in the same spot
+// in every app in the gallery. Dragging it is also the gesture that builds the
+// context, so there is nothing else to press first.
+HeaderVolume.onGesture(initAudio);
+HeaderVolume.onChange(setVolume);
 
 // The checkbox is the source of truth, markup included — syncing off it rather
 // than assigning a default here means the shipped setting lives in one place.

@@ -52,6 +52,9 @@
       .bar .back:hover { background: rgba(255,255,255,0.15); }
       .bar .hint { margin-left: auto; font-size: 0.8rem; opacity: 0.7; }
 
+      /* Shown only when the app opens at a remembered level: the drone cannot
+         start without a gesture, so a returning listener needs telling. Ships
+         hidden — arriving muted, there is nothing yet to begin. */
       #sound-overlay {
         position: fixed;
         inset: 0;
@@ -65,6 +68,7 @@
         opacity: 1;
         transition: opacity 0.8s ease;
       }
+      #sound-overlay[hidden] { display: none; }
       #sound-overlay.gone { opacity: 0; }
       #sound-overlay span {
         padding: 12px 22px;
@@ -83,8 +87,9 @@
       <span class="hint" id="sound-hint">pitch from color · pan from motion</span>
     </header>
 
-    <div id="sound-overlay"><span>🔊 click anywhere to begin the sound</span></div>
+    <div id="sound-overlay" hidden><span>🔊 click anywhere to begin the sound</span></div>
 
+    <script src="../shared/volume.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.4/p5.min.js"></script>
     <script src="./config.js"></script>
     <script src="./ambient-lumina.js"></script>

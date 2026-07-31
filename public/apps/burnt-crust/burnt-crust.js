@@ -686,6 +686,11 @@ let crushDry = null, crushWet = null, crushPre = null, crushOut = null, shaper =
 let verb = null, reverbSend = null, reverbOut = null;
 let droneNodes = null;     // { oscs, filter, gain, lfo, lfoAmt }
 let master = null, fade = null, streamEl = null;
+// The header slider's node, downstream of the panel's Output fader, plus the
+// level it is holding. Starts at 0 so the graph agrees with a slider that has
+// not been read yet; the control pushes the remembered level down at startup.
+let out = null;
+let outLevel = 0;
 let built = false;
 let running = false;
 let audioStale = false;
@@ -817,9 +822,13 @@ function buildGraph() {
   master.gain.value = masterToGain(masterSlider.valueAsNumber);
   ceiling.connect(master);
 
+  out = ctx.createGain();
+  out.gain.value = outLevel;
+  master.connect(out);
+
   fade = ctx.createGain();
   fade.gain.value = 0;
-  master.connect(fade);
+  out.connect(fade);
 
   // Route through a MediaStream played by an <audio> element rather than
   // straight to ctx.destination: WebKit keeps a live stream rendering while the
@@ -1240,6 +1249,16 @@ const nudgeBpm = (d) => {
 };
 document.getElementById('bpm-down').addEventListener('click', () => nudgeBpm(-1));
 document.getElementById('bpm-up').addEventListener('click', () => nudgeBpm(1));
+
+// The header slider is the master for the page, downstream of the Output fader
+// on the unit and shared with every other app in the gallery. It opens silent
+// the first time — layering tabs is the point of this one, and a stack of tabs
+// that all start playing at you is a stack of tabs you close — and remembers
+// where you left it after that.
+HeaderVolume.onChange((gain) => {
+  outLevel = gain;
+  if (built) out.gain.setTargetAtTime(outLevel, ctx.currentTime, 0.03);
+});
 
 masterSlider.addEventListener('input', () => {
   const v = masterSlider.valueAsNumber;

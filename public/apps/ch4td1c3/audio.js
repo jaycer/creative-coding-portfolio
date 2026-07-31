@@ -14,9 +14,11 @@
 
 const DiceAudio = (function () {
   let ctx = null;
-  let master = null;      // master gain → compressor → destination
+  let master = null;      // master gain → compressor → out → destination
+  let out = null;         // the header slider's node, downstream of everything
   let ready = false;
   let volume = 0.8;       // user volume 0..1 (the overlay slider); 0 = mute
+  let outLevel = 0;       // header slider 0..1; the control pushes its level down at startup
 
   // Squared taper reads as even loudness steps; 1.3 puts the 80% default
   // right at the old fixed master level (1.3 * 0.8^2 ≈ 0.83).
@@ -25,6 +27,18 @@ const DiceAudio = (function () {
   function setVolume(v) {
     volume = Math.min(1, Math.max(0, v));
     if (master) master.gain.value = masterGain();
+  }
+
+  /**
+   * The header slider, sitting downstream of the panel's own fader. Two
+   * controls in series on purpose: the panel fader is where the dice are
+   * mixed, this is how loud the page is allowed to be.
+   */
+  function setOutput(v) {
+    outLevel = Math.min(1, Math.max(0, v));
+    if (!out) return;
+    out.gain.cancelScheduledValues(ctx.currentTime);
+    out.gain.setTargetAtTime(outLevel, ctx.currentTime, 0.02);
   }
 
   // Cached white-noise buffer all the clicks slice from.
@@ -59,8 +73,11 @@ const DiceAudio = (function () {
     comp.ratio.value = 5;
     comp.attack.value = 0.002;
     comp.release.value = 0.2;
+    out = ctx.createGain();
+    out.gain.value = outLevel;
     master.connect(comp);
-    comp.connect(ctx.destination);
+    comp.connect(out);
+    out.connect(ctx.destination);
 
     // Unlock: play a one-sample silent buffer inside this gesture.
     const s = ctx.createBufferSource();
@@ -196,5 +213,5 @@ const DiceAudio = (function () {
 
   attachUnlock(); // start listening for the first gesture right away
 
-  return { init, resume, roll, setVolume, preview, isReady: () => ready && ctx && ctx.state === 'running' };
+  return { init, resume, roll, setVolume, setOutput, preview, isReady: () => ready && ctx && ctx.state === 'running' };
 })();

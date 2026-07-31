@@ -92,6 +92,8 @@ const STALE_PAUSE_MS = 60_000;  // a pause longer than this rebuilds fresh on pl
 let audio = makeUnlockableAudioContext();
 let ctx = audio.ctx;
 let master = null;
+let out = null;         // the header slider's node, last thing before the stream
+let outLevel = 0;       // header slider 0..1; the control pushes its level down at startup
 let fade = null;        // dedicated node for the play/pause fade, downstream of master
 let streamEl = null;    // <audio> element playing the graph's MediaStream (see buildGraph)
 let built = false;
@@ -115,10 +117,17 @@ function buildGraph() {
   master = ctx.createGain();
   master.gain.value = masterToGain(masterSlider.valueAsNumber);
 
+  // The header slider, downstream of the panel's Master volume: that fader is
+  // where the mix is set, this is how loud the page is allowed to be. Its own
+  // node, so neither ramp can land on the other's param.
+  out = ctx.createGain();
+  out.gain.value = outLevel;
+  master.connect(out);
+
   // A separate gain rides the fade so it never fights the master slider's ramps.
   fade = ctx.createGain();
   fade.gain.value = 0; // start silent; fadeTo(1) brings it up on play
-  master.connect(fade);
+  out.connect(fade);
 
   // Route the graph into a MediaStream played by an <audio> element instead of
   // fade → ctx.destination. This is the key to background playback in Safari: a
@@ -188,7 +197,7 @@ function rebuildAudio() {
   audio = makeUnlockableAudioContext();
   ctx = audio.ctx;
   watchContext(ctx);
-  master = null; fade = null; built = false; sourcesRunning = false;
+  master = null; out = null; fade = null; built = false; sourcesRunning = false;
   buildGraph();
   try { old.ctx.close(); } catch { /* already closed */ }
 }
@@ -280,6 +289,15 @@ masterSlider.addEventListener('input', () => {
   masterVal.textContent = `${v}%`;
   if (built) ramp(master.gain, masterToGain(v));
   persistSettings();
+});
+
+// The header slider is the master for the page, downstream of the fader above
+// and shared with every other app in the gallery. It opens silent the first
+// time — this one opens to a room that should be quiet until it is asked not to
+// be — and remembers where you left it after that.
+HeaderVolume.onChange((gain) => {
+  outLevel = gain;
+  if (built) ramp(out.gain, outLevel);
 });
 
 function markLive(on) {

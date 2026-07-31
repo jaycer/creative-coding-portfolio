@@ -19,9 +19,11 @@
 //   node tools/shoot.mjs --app chair-pile --out /tmp/shot.png
 //   node tools/shoot.mjs --app chair-pile --scene ~/Downloads/pile.json --orbit down --fps
 //   node tools/shoot.mjs --url http://localhost:5173/creative-coding-portfolio/apps/ch4td1c3/index.html --out /tmp/dice.png
+//   node tools/shoot.mjs --app hey-chair --wait 8 --pause --save-scene /tmp/troupe.json --out /tmp/a.png
+//   node tools/shoot.mjs --app hey-chair --scene /tmp/troupe.json --out /tmp/b.png   # the same frame, again
 
 import { createRequire } from 'node:module';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -38,8 +40,19 @@ const flag = (name) => argv.includes(`--${name}`);
 
 const BASE = opt('base', 'http://localhost:5173/creative-coding-portfolio');
 const app = opt('app');
-const url = opt('url', app ? `${BASE}/apps/${app}/index.html` : BASE + '/');
+// --query appends a query string to an --app URL, e.g. --query seed=12345.
+// Worth having as its own flag rather than reaching for --url: --url loses the
+// app name, and with it the per-app handling that dismisses the settings sheet.
+const query = opt('query', '');
+const url = opt('url', (app ? `${BASE}/apps/${app}/index.html` : BASE + '/') + (query ? `?${query}` : ''));
 const scene = opt('scene');
+// --save-scene writes the app's own scene JSON out, for apps that can snapshot
+// themselves (chair-pile, hey-chair). Pair it with --wait to catch a moment
+// worth keeping; feed it back with --scene to put that exact moment up again.
+const saveScene = opt('save-scene');
+// --pause holds the frame before the shot, so a shot of a moving scene is of
+// the frame that was actually inspected rather than one a few milliseconds on.
+const wantPause = flag('pause');
 const orbit = opt('orbit'); // 'down' tilts toward the horizon; omit to keep the saved camera
 const out = opt('out', 'shot.png');
 const width = Number(opt('width', 1400));
@@ -54,6 +67,15 @@ const sets = opt('set', '').split(',').filter(Boolean).map((pair) => {
   const [id, val] = pair.split('=');
   return { id, on: val !== 'off' && val !== '0' && val !== 'false' };
 });
+// --slider moves an app's own range inputs, e.g. --slider size=6,stay=32
+const sliders = opt('slider', '').split(',').filter(Boolean).map((pair) => {
+  const [id, value] = pair.split('=');
+  return { id, value };
+});
+// --click presses an app's own buttons by id, after the sheet is dismissed, e.g.
+// --click next-btn. Needed where a setting only reaches the NEXT thing built:
+// hey-chair's first troupe exists before the sheet has been touched.
+const clicks = opt('click', '').split(',').filter(Boolean);
 // --wait lets the scene run on for a while first, for apps that build up over time
 const waitSeconds = Number(opt('wait', 0));
 
@@ -106,6 +128,22 @@ await page.goto(url, { waitUntil: 'load' });
 await page.waitForFunction(() => !!document.querySelector('canvas'));
 await page.waitForTimeout(600);
 
+// --slider: applied before any settings sheet is dismissed, because a setting
+// like hey-chair's troupe size only reaches what the app builds NEXT — moved
+// after the curtain goes up, it misses the very thing being photographed.
+if (sliders.length) {
+  await page.evaluate((pairs) => {
+    for (const { id, value } of pairs) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      el.value = value;
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }, sliders);
+  await page.waitForTimeout(200);
+}
+
 // chair-pile: turn demo off, load a scene, close the settings card.
 if (app === 'chair-pile') {
   await page.evaluate(() => {
@@ -120,11 +158,20 @@ if (app === 'chair-pile') {
   await page.waitForTimeout(1000);
 }
 
-// chairs-in-space: the settings sheet is up on load and covers the scene, so
-// dismiss it the way a visitor would before anything is worth looking at.
-if (app === 'chairs-in-space') {
+// chairs-in-space / hey-chair: the settings sheet is up on load and covers the
+// scene, so dismiss it the way a visitor would before anything is worth looking
+// at. In hey-chair this is also what starts the transport the dance runs on.
+if (app === 'chairs-in-space' || app === 'hey-chair') {
   await page.evaluate(() => document.getElementById('done-btn')?.click());
   await page.waitForTimeout(300);
+}
+
+// hey-chair: a saved still goes in through the same hidden file input the Load
+// button drives, so the harness exercises the path a visitor does. Loading a
+// scene holds the frame on its own, so --pause is implied.
+if (app === 'hey-chair' && scene) {
+  await page.setInputFiles('#scene-file', scene);
+  await page.waitForTimeout(600);
 }
 
 // --set: flip the app's own checkboxes, dispatching the same change event a
@@ -139,7 +186,31 @@ if (sets.length) {
   await page.waitForTimeout(200);
 }
 
+if (clicks.length) {
+  await page.evaluate((ids) => {
+    for (const id of ids) document.getElementById(id)?.click();
+  }, clicks);
+  await page.waitForTimeout(300);
+}
+
 if (waitSeconds) await page.waitForTimeout(waitSeconds * 1000);
+
+// Held before anything is read off the page, so the JSON that gets written and
+// the pixels that get captured are the same frame.
+if (wantPause) {
+  await page.evaluate(() => {
+    const b = document.getElementById('pause-btn');
+    if (b && b.getAttribute('aria-pressed') !== 'true') b.click();
+  });
+  await page.waitForTimeout(120);
+}
+
+if (saveScene) {
+  const data = await page.evaluate(() => (window.sceneSnapshot ? window.sceneSnapshot() : null));
+  if (!data) throw new Error(`${app} has no sceneSnapshot() to save`);
+  writeFileSync(saveScene, JSON.stringify(data, null, 2));
+  console.log('wrote', saveScene, `(${data.chairs?.length ?? '?'} chairs)`);
+}
 
 // Orbit by dragging the canvas. 'down' drags downward, which tilts the camera
 // toward the horizon (bounded by the app's own maxPolarAngle).

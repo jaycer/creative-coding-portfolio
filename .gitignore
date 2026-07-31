@@ -3,3 +3,6 @@ dist
 .DS_Store
 *.local
 .vite
+# Scratch worktrees agents check out into. The rest of .claude (commands,
+# settings) is tracked on purpose, so this has to be scoped rather than blanket.
+.claude/worktrees/

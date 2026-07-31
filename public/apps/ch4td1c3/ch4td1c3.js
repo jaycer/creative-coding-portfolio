@@ -419,6 +419,11 @@ function wireUi() {
   });
   vol.addEventListener('change', () => DiceAudio.preview()); // hear the level on release
 
+  // The header slider is the master, downstream of the panel fader above: how
+  // loud the page is allowed to be. Silent the first time, remembered after.
+  HeaderVolume.onGesture(() => DiceAudio.init());
+  HeaderVolume.onChange((gain) => DiceAudio.setOutput(gain));
+
   menuBtn.addEventListener('click', () => { panel.hidden = !panel.hidden; });
   document.addEventListener('pointerdown', (e) => {
     if (!panel.hidden && !panel.contains(e.target) && e.target !== menuBtn) panel.hidden = true;

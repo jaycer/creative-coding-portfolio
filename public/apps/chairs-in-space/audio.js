@@ -9,7 +9,13 @@
 
 let ctx = null;
 let master = null;
-let muted = false;
+// The header slider gets a node of its own rather than riding on `master`:
+// keeping the level the user set separate from the level the piece was mixed at
+// means neither can quietly overwrite the other. Starts at 0 so the graph
+// agrees with a slider that has not been read yet; the control pushes the
+// remembered level down before a note is played.
+let volume = null;
+let outLevel = 0;
 
 // A pentatonic scale (A minor pentatonic across two octaves), in Hz. Every
 // pick sounds consonant against the others, so any order of chairs is musical.
@@ -31,13 +37,21 @@ export function resumeAudio() {
     ctx = new AC();
     master = ctx.createGain();
     master.gain.value = 0.5;
-    master.connect(ctx.destination);
+    volume = ctx.createGain();
+    volume.gain.value = outLevel;
+    master.connect(volume);
+    volume.connect(ctx.destination);
   }
   if (ctx.state === 'suspended') ctx.resume();
 }
 
-export function setMuted(m) { muted = !!m; }
-export function isMuted() { return muted; }
+/** Header slider, 0..1. Safe to call before the context exists. */
+export function setVolume(v) {
+  outLevel = Math.max(0, Math.min(1, v));
+  if (!ctx || !volume) return;
+  volume.gain.cancelScheduledValues(ctx.currentTime);
+  volume.gain.setTargetAtTime(outLevel, ctx.currentTime, 0.02);
+}
 
 /**
  * A single soft bell: a few detuned sines through a quick pluck envelope.
@@ -78,12 +92,12 @@ function nextNote() {
 
 /** A bright bell for a chair launched into the field. */
 export function chime() {
-  if (muted || !ctx || ctx.state !== 'running') return;
+  if (outLevel <= 0 || !ctx || ctx.state !== 'running') return;
   bell(nextNote(), 0.35, 1.6);
 }
 
 /** A quieter, lower bell for a chair settling onto the planetoid. */
 export function land() {
-  if (muted || !ctx || ctx.state !== 'running') return;
+  if (outLevel <= 0 || !ctx || ctx.state !== 'running') return;
   bell(nextNote() * 0.5, 0.14, 1.1); // an octave down and much softer
 }
