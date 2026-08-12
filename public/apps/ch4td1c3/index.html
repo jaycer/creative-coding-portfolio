@@ -68,6 +68,10 @@
         cursor: pointer;
         transition: background 0.15s ease;
       }
+      /* The hamburger holds the drawn bars from shared/menu-icon.js rather than
+         a line of text, so it is sized like the same pill everywhere else in the
+         gallery: a fixed height with the glyph flex-centred in it. */
+      .bar .menu { height: 30px; padding: 0 13px; }
       .bar .roll {
         font-size: 0.9rem;
         font-weight: 600;
@@ -182,7 +186,7 @@
       <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
       <h1>ch4td1c3</h1>
       <button class="roll" id="roll-all" type="button">Roll all</button>
-      <button class="menu" id="menu-btn" type="button" aria-label="Menu" aria-haspopup="true">☰</button>
+      <button class="menu" id="menu-btn" type="button" aria-label="Menu" aria-haspopup="true"></button>
     </header>
 
     <div id="looks-panel" hidden>
@@ -216,5 +220,6 @@
     <script src="./audio.js"></script>
     <script src="./ch4td1c3.js"></script>
     <script src="../shared/autohide.js"></script>
+    <script src="../shared/menu-icon.js"></script>
   </body>
 </html>

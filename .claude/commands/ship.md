@@ -15,7 +15,7 @@ Work through these steps in order. Stop and report if any step fails rather than
 3. **Decide the PR title carefully — it becomes the changelog line.** Squash-merged PR titles are this repo's release notes (see the release-changelog workflow). Match the existing house style: `Area: what changed and why` (e.g. `Chair Pile: contact-hardened shadows and tighter joinery`). No em dashes. American spelling. If the user gave a title in `$ARGUMENTS`, use it; otherwise derive one from the diff and confirm it reads well as a changelog entry.
 
 4. **Branch, stage, commit.** If already on a non-`main` branch with the changes, reuse it; otherwise `git checkout -b <kebab-title>`. `git add -A`, then commit with the title as the subject, a short body, and the trailer:
-   `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`
+   `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
 
 5. **Push — with the buffer already raised.** This project ships binary assets (AVIF photos, images), and a large pack over HTTPS fails with `HTTP 400 / send-pack: unexpected disconnect`. Guard against it before pushing:
    `git config http.postBuffer 524288000`

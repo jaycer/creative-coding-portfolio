@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Object Tile Scroll — Jayce Renner</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="description" content="Everyday objects, tiled across a dark field and drifting slowly upward. Some spin, some stutter, some breathe or change color, and each one sings where it stands." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="Object Tile Scroll" />
+    <meta property="og:description" content="Everyday objects, tiled across a dark field and drifting slowly upward. Some spin, some stutter, some breathe or change color, and each one sings where it stands." />
+    <meta property="og:url" content="https://jaycer.github.io/creative-coding-portfolio/apps/object-tile-scroll/" />
+    <meta property="og:image" content="https://jaycer.github.io/creative-coding-portfolio/og/object-tile-scroll.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Object Tile Scroll" />
+    <meta name="twitter:description" content="Everyday objects, tiled across a dark field and drifting slowly upward. Some spin, some stutter, some breathe or change color, and each one sings where it stands." />
+    <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/object-tile-scroll.jpg" />
+    <style>
+      * { box-sizing: border-box; }
+      /* Matched to the top of the room gradient, so the page behind the canvas
+         is the same dark as the scene and there is no flash before first paint. */
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #06070b; }
+      /* width/height 100% rather than inset:0 — a <canvas> is a replaced
+         element, and inset alone leaves it at its intrinsic pixel size, which on
+         a high-DPI phone is twice the viewport. */
+      canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+      .bar {
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 12px 18px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: linear-gradient(180deg, rgba(0,0,0,0.5), rgba(0,0,0,0));
+        pointer-events: none;
+      }
+      .bar h1 { margin: 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+      .bar .back {
+        pointer-events: auto;
+        color: #fff;
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        padding: 6px 12px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        white-space: nowrap;
+        transition: background 0.15s ease;
+      }
+      .bar .back:hover { background: rgba(255,255,255,0.15); }
+      .bar .menu {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        background: none;
+        height: 30px;
+        padding: 0 13px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .bar .menu:hover { background: rgba(255,255,255,0.15); }
+
+      .bar .bar-btn {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 30px;
+        padding: 0 13px;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #fff;
+        background: none;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .bar .bar-btn:hover { background: rgba(255,255,255,0.15); }
+      .bar .bar-btn.push { margin-left: auto; }
+      /* A held field is a mode, and it should read as one from across the room:
+         on a scroll this slow, paused and running look identical for a second or
+         two, which is exactly long enough to be confusing. */
+      .bar .bar-btn[aria-pressed="true"] {
+        color: #10231d;
+        background: #7fe8c0;
+        border-color: transparent;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%; bottom: 30px;
+        z-index: 30;
+        transform: translateX(-50%) translateY(8px);
+        padding: 9px 16px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 0.85rem;
+        color: #fff;
+        background: rgba(0,0,0,0.72);
+        border: 1px solid rgba(255,255,255,0.25);
+        border-radius: 999px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      @media (max-width: 700px) {
+        .back-label { display: none; }
+        .bar { gap: 9px; padding: 12px 14px; }
+        .bar h1 { display: none; }
+        .bar .bar-btn { padding: 0 11px; font-size: 0.8rem; }
+      }
+      /* A phone bar this full pushes the volume slider off its right edge, and
+         the volume is the one control here that has to be reachable. Saving a
+         field is a desk job anyway. */
+      @media (max-width: 460px) { .bar .save-load { display: none; } }
+      body.idle.menu-open .bar { opacity: 1; pointer-events: auto; }
+
+      .scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        /* Neither blurred nor dimmed: the scrim is here to catch the press that
+           closes the sheet and to hold it in the middle of the window, and that
+           is all. Half of what these settings do is only visible in the field
+           behind them — the angle turning, the spacing opening out — so the
+           piece is left exactly as it plays while you are adjusting it. The
+           panel carries its own background and does its own legibility. */
+        background: transparent;
+        animation: scrim-in 0.18s ease;
+      }
+      .scrim[hidden] { display: none; }
+
+      .sheet {
+        position: relative;
+        /* The whole panel, contents and all, sits at 80% — so the field keeps
+           drifting faintly through the words rather than the sheet cutting a
+           hole in the piece. */
+        opacity: 0.8;
+        zoom: 0.9;
+        width: 100%;
+        max-width: 320px;
+        max-height: 100%;
+        overflow-y: auto;
+        padding: 18px 20px 20px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: rgba(0,0,0,0.6);
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 16px;
+        animation: sheet-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+      }
+      .sheet-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0 0 6px;
+      }
+      .sheet h2 { margin: 0 auto 0 0; font-size: 1.05rem; font-weight: 650; letter-spacing: -0.01em; }
+      .sheet .intro {
+        margin: 0 0 16px;
+        font-size: 0.82rem;
+        line-height: 1.45;
+        opacity: 0.72;
+      }
+      .sheet .tips-check { position: absolute; opacity: 0; pointer-events: none; }
+      .sheet .info-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px; height: 26px;
+        font-size: 0.9rem;
+        color: #fff;
+        border: 1px solid rgba(255,255,255,0.3);
+        border-radius: 999px;
+        cursor: pointer;
+        opacity: 0.75;
+        transition: background 0.15s ease, opacity 0.15s ease;
+      }
+      .sheet .info-btn:hover { background: rgba(255,255,255,0.14); opacity: 1; }
+      .sheet .tips-check:focus-visible + .info-btn { border-color: rgba(255,255,255,0.55); opacity: 1; }
+      .sheet:has(.tips-check:checked) .info-btn { opacity: 1; background: rgba(255,255,255,0.12); }
+      .sheet .close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px; height: 26px;
+        font-size: 0.85rem;
+        color: #fff;
+        background: none;
+        border: 1px solid rgba(255,255,255,0.3);
+        border-radius: 999px;
+        cursor: pointer;
+        opacity: 0.75;
+        transition: background 0.15s ease, opacity 0.15s ease;
+      }
+      .sheet .close:hover { background: rgba(255,255,255,0.14); opacity: 1; }
+      .sheet .close:focus-visible { border-color: rgba(255,255,255,0.55); opacity: 1; }
+
+      .sheet .setting {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .sheet .setting + .setting { margin-top: 16px; }
+      /* A .setting that is a heading rather than a label wraps no control, so it
+         should not offer a label's pointer — and it goes with the tips it heads.
+         "Sound" over nothing at all is a title for an empty room. */
+      .sheet div.setting { cursor: default; display: none; }
+      .sheet:has(.tips-check:checked) .group div.setting { display: flex; }
+      .sheet .desc {
+        display: none;
+        margin: 6px 0 0;
+        font-size: 0.76rem;
+        line-height: 1.4;
+        opacity: 0.62;
+      }
+      .sheet:has(.tips-check:checked) .group .desc { display: block; }
+      .sheet #how .desc { display: block; }
+      /* The attribution is not a tip, so it does not hide with the tips. */
+      .sheet .credit { margin-top: 8px; opacity: 0.5; }
+      .sheet .credit a { color: #7fe8c0; }
+      .sheet .desc + .setting { margin-top: 16px; }
+
+      .sheet input[type="checkbox"] {
+        appearance: none;
+        -webkit-appearance: none;
+        position: relative;
+        flex: none;
+        width: 40px; height: 24px;
+        margin: 0;
+        background: rgba(255,255,255,0.16);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .sheet input[type="checkbox"]::after {
+        content: '';
+        position: absolute;
+        top: 3px; left: 3px;
+        width: 18px; height: 18px;
+        background: #fff;
+        border-radius: 50%;
+        transition: transform 0.15s ease;
+      }
+      .sheet input[type="checkbox"]:checked { background: rgba(255,255,255,0.55); }
+      .sheet input[type="checkbox"]:checked::after { transform: translateX(16px); }
+
+      .sheet .slider-label {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin: 16px 0 6px;
+        font-size: 0.9rem;
+        font-weight: 500;
+      }
+      .sheet .slider-label .val {
+        font-size: 0.8rem;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.68;
+      }
+      .sheet input[type="range"] {
+        width: 100%;
+        margin: 0;
+        accent-color: #7fe8c0;
+        cursor: pointer;
+      }
+      /* No rule between the groups: with the descriptions hidden the sheet is
+         already a short list, and a divider across it made two paragraphs look
+         like two documents. The gap is the same 16px the controls inside a group
+         use, so the whole sheet reads on one rhythm. */
+      .sheet .group + .group { margin-top: 16px; }
+      .sheet .how-title {
+        margin: 16px 0 4px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.5;
+      }
+      .sheet .action {
+        display: block;
+        width: 100%;
+        margin-top: 18px;
+        padding: 12px 0;
+        font: inherit;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #10231d;
+        background: #7fe8c0;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .sheet .action:hover { background: #fff; }
+
+      @keyframes scrim-in { from { opacity: 0; } }
+      @keyframes sheet-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+      @media (prefers-reduced-motion: reduce) {
+        .scrim, .sheet { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bar">
+      <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
+      <h1>Object Tile Scroll</h1>
+      <button class="bar-btn push" id="pause-btn" type="button" aria-pressed="false">Pause</button>
+      <button class="bar-btn save-load" id="save-btn" type="button">Save</button>
+      <button class="bar-btn save-load" id="load-btn" type="button">Load</button>
+      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false"></button>
+    </header>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div class="scrim" id="scrim" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <div class="sheet-head">
+          <h2 id="sheet-title">Object Tile Scroll</h2>
+          <input type="checkbox" id="tips-toggle" class="tips-check" aria-label="Show descriptions" />
+          <label class="info-btn" for="tips-toggle" title="Show descriptions">ⓘ</label>
+          <button class="close" id="close-btn" type="button" aria-label="Close settings">✕</button>
+        </div>
+
+        <p class="intro">Nothing that leaves ever comes back, and what arrives underneath was decided a moment ago.</p>
+
+        <section class="group">
+          <label class="slider-label" for="speed">
+            Speed
+            <span class="val" id="speed-val">1.0×</span>
+          </label>
+          <input type="range" id="speed" min="20" max="300" step="5" value="100" aria-label="Scroll speed" />
+          <p class="desc">How fast the field rises. At 1× a thing takes about half a minute to cross the frame.</p>
+
+          <label class="slider-label" for="angle">
+            Angle
+            <span class="val" id="angle-val">0° up</span>
+          </label>
+          <input type="range" id="angle" min="0" max="359" step="1" value="0" aria-label="Scroll angle" />
+          <p class="desc">Which way the field travels, as a bearing: 0 is up, 90 to the right, 180 falling. The lattice turns with it and objects are fed in from whichever edge is behind. Sound follows the picture, so a thing still pans to where it stands.</p>
+
+          <label class="slider-label" for="spacing">
+            Spacing
+            <span class="val" id="spacing-val">20 on screen</span>
+          </label>
+          <input type="range" id="spacing" min="60" max="180" step="5" value="100" aria-label="How far apart the objects are" />
+          <p class="desc">How far apart they stand. Wider is emptier and calmer; tighter fills the frame. The reading is roughly how many are in view at once.</p>
+
+          <label class="slider-label" for="odd">
+            Misbehaving
+            <span class="val" id="odd-val">55%</span>
+          </label>
+          <input type="range" id="odd" min="0" max="100" step="5" value="55" aria-label="Share of objects that do something odd" />
+          <p class="desc">The share that will not simply stand there: spinning flat, tumbling end over end, stuttering into a new attitude and staying wrong, breathing in and out, or drifting through colors. The rest ride up perfectly still, which is what makes the others read.</p>
+        </section>
+
+        <section class="group">
+          <div class="setting">Sound</div>
+          <p class="desc">Every object plays its own voice, panned to where it stands and loudest through the middle of the frame. It fades as the thing leaves and is silent once the last of it is gone. Level is the slider in the header, and it starts at nothing.</p>
+
+          <div id="how">
+            <p class="how-title">The set</p>
+            <p class="desc">70 items: from a ladderback to a bathtub to a cheeseburger.</p>
+            <p class="desc credit">Models by <a href="https://kenney.nl" target="_blank" rel="noopener">Kenney</a> and <a href="https://quaternius.com" target="_blank" rel="noopener">Quaternius</a> are Creative Commons CC0. 5 of the chairs, the clothes iron, the dumbbell and the desk lamp are original models.</p>
+          </div>
+        </section>
+
+        <button class="action" id="done-btn" type="button">Watch</button>
+      </div>
+    </div>
+
+    <script src="../shared/autohide.js"></script>
+    <script src="../shared/volume.js"></script>
+    <script src="../shared/menu-icon.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="./object-tile-scroll.js"></script>
+  </body>
+</html>

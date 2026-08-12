@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#05070c"/>
+  <!-- the frame on the left, the tones it turns into on the right -->
+  <rect x="5" y="8" width="10" height="16" rx="2" fill="none" stroke="#5ad2e6" stroke-width="1.8"/>
+  <path d="M10 8v16" stroke="#e8619f" stroke-width="1.6"/>
+  <g fill="#5ad2e6">
+    <rect x="18" y="10" width="9" height="1.8" rx=".9"/>
+    <rect x="18" y="14" width="5" height="1.8" rx=".9" opacity=".75"/>
+    <rect x="18" y="18" width="11" height="1.8" rx=".9"/>
+    <rect x="18" y="22" width="4" height="1.8" rx=".9" opacity=".6"/>
+  </g>
+</svg>
