@@ -68,14 +68,6 @@
         cursor: pointer;
         transition: background 0.15s ease;
       }
-      .bar .menu svg {
-        display: block;
-        width: 17px;
-        height: 13px;
-        stroke: currentColor;
-        stroke-width: 2;
-        stroke-linecap: round;
-      }
       .bar .menu:hover { background: rgba(255,255,255,0.15); }
 
       /* Hold the frame, write it out, put it back. Same pill as everything else
@@ -434,13 +426,7 @@
       <button class="bar-btn push" id="pause-btn" type="button" aria-pressed="false">Pause</button>
       <button class="bar-btn" id="save-btn" type="button">Save</button>
       <button class="bar-btn" id="load-btn" type="button">Load</button>
-      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false">
-        <svg viewBox="0 0 24 18" aria-hidden="true" focusable="false">
-          <line x1="2" y1="3" x2="22" y2="3" />
-          <line x1="2" y1="9" x2="22" y2="9" />
-          <line x1="2" y1="15" x2="22" y2="15" />
-        </svg>
-      </button>
+      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false"></button>
     </header>
 
     <div class="bpm" id="bpm-meter" hidden aria-live="off">
@@ -526,6 +512,7 @@
 
     <script src="../shared/autohide.js"></script>
     <script src="../shared/volume.js"></script>
+    <script src="../shared/menu-icon.js"></script>
     <script type="importmap">
       {
         "imports": {

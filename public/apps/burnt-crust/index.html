@@ -379,10 +379,6 @@
 
       /* ---- guide sheet behind the hamburger ---- */
       .bar-btn.menu { display: inline-flex; align-items: center; padding: 7px 11px; }
-      .bar-btn.menu svg {
-        display: block; width: 16px; height: 12px;
-        stroke: currentColor; stroke-width: 2; stroke-linecap: round;
-      }
 
       .scrim {
         position: fixed; inset: 0; z-index: 40;
@@ -487,13 +483,7 @@
       <button class="bar-btn" id="saveState" type="button">Save</button>
       <button class="bar-btn" id="loadState" type="button">Load</button>
       <button class="bar-btn menu" id="menu-btn" type="button" aria-label="Guide"
-              aria-haspopup="dialog" aria-expanded="false">
-        <svg viewBox="0 0 24 18" aria-hidden="true" focusable="false">
-          <line x1="2" y1="3" x2="22" y2="3" />
-          <line x1="2" y1="9" x2="22" y2="9" />
-          <line x1="2" y1="15" x2="22" y2="15" />
-        </svg>
-      </button>
+              aria-haspopup="dialog" aria-expanded="false"></button>
     </nav>
 
     <div class="scrim" id="scrim" hidden>
@@ -629,6 +619,7 @@
     </div>
 
     <script src="../shared/volume.js"></script>
+    <script src="../shared/menu-icon.js"></script>
     <script type="module" src="./burnt-crust.js"></script>
   </body>
 </html>

@@ -1770,6 +1770,7 @@ async function begin() {
   // The transport starts at bar 0, and the troupe waiting in the wings behind the
   // sheet is the one that performs — it walks on from there.
   started = true;
+  HeaderVolume.setUnlockable(true);
   await startAudio();
 }
 
@@ -1778,6 +1779,9 @@ async function begin() {
 // let go stale, but it does not start the show — the sheet's button does that.
 HeaderVolume.onGesture(() => { if (started) wakeAudio(); });
 HeaderVolume.onChange(setVolume);
+// Until the sheet's button puts the band on stage there is nothing for a tap on
+// the volume to wake, so the control does not offer one. begin() hands it back.
+HeaderVolume.setUnlockable(false);
 
 const tempo = document.getElementById('tempo');
 const tempoVal = document.getElementById('tempo-val');

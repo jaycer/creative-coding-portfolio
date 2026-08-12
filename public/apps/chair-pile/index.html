@@ -63,22 +63,15 @@
         justify-content: center;
         color: #fff;
         background: none;
-        /* The bars are an SVG, not the ☰ glyph, whose ink is not centred in its
-           em box: three symmetric lines flex-centred sit dead centre in the pill. */
+        /* The bars themselves come from shared/menu-icon.js — an SVG rather than
+           the ☰ glyph, and the reason why is written there. This is the pill they
+           stand in, which is this bar's business and not the shared file's. */
         height: 30px;
         padding: 0 13px;
         border: 1px solid rgba(255,255,255,0.35);
         border-radius: 999px;
         cursor: pointer;
         transition: background 0.15s ease;
-      }
-      .bar .menu svg {
-        display: block;
-        width: 17px;
-        height: 13px;
-        stroke: currentColor;
-        stroke-width: 2;
-        stroke-linecap: round;
       }
       .bar .menu:hover { background: rgba(255,255,255,0.15); }
       @media (max-width: 600px) {
@@ -386,13 +379,7 @@
       <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
       <h1>Chair Pile</h1>
       <span class="count" id="count">0 chairs</span>
-      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false">
-        <svg viewBox="0 0 24 18" aria-hidden="true" focusable="false">
-          <line x1="2" y1="3" x2="22" y2="3" />
-          <line x1="2" y1="9" x2="22" y2="9" />
-          <line x1="2" y1="15" x2="22" y2="15" />
-        </svg>
-      </button>
+      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false"></button>
     </header>
 
     <div id="ripples"></div>
@@ -474,5 +461,6 @@
     </script>
     <script type="module" src="./chair-pile.js"></script>
     <script src="../shared/autohide.js"></script>
+    <script src="../shared/menu-icon.js"></script>
   </body>
 </html>

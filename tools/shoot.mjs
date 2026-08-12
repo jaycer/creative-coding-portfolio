@@ -166,10 +166,10 @@ if (app === 'chairs-in-space' || app === 'hey-chair') {
   await page.waitForTimeout(300);
 }
 
-// hey-chair: a saved still goes in through the same hidden file input the Load
-// button drives, so the harness exercises the path a visitor does. Loading a
-// scene holds the frame on its own, so --pause is implied.
-if (app === 'hey-chair' && scene) {
+// hey-chair / object-tile-scroll: a saved still goes in through the same hidden
+// file input the Load button drives, so the harness exercises the path a visitor
+// does. Loading a scene holds the frame on its own, so --pause is implied.
+if ((app === 'hey-chair' || app === 'object-tile-scroll') && scene) {
   await page.setInputFiles('#scene-file', scene);
   await page.waitForTimeout(600);
 }
@@ -209,7 +209,9 @@ if (saveScene) {
   const data = await page.evaluate(() => (window.sceneSnapshot ? window.sceneSnapshot() : null));
   if (!data) throw new Error(`${app} has no sceneSnapshot() to save`);
   writeFileSync(saveScene, JSON.stringify(data, null, 2));
-  console.log('wrote', saveScene, `(${data.chairs?.length ?? '?'} chairs)`);
+  const n = data.chairs?.length
+    ?? data.columns?.reduce((s, c) => s + (c.objs?.length ?? 0), 0);
+  console.log('wrote', saveScene, `(${n ?? '?'} objects)`);
 }
 
 // Orbit by dragging the canvas. 'down' drags downward, which tilts the camera

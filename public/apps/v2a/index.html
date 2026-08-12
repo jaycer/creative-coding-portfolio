@@ -1,0 +1,561 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>V2A — Jayce Renner</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="description" content="Video to audio. Use a live camera feed or a video file, and hear the picture as a bank of tones. Four mapping modes, tunable pitch range, scale, and envelope. Video stays local." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="V2A" />
+    <meta property="og:description" content="Video to audio. Use a live camera feed or a video file, and hear the picture as a bank of tones. Four mapping modes, tunable pitch range, scale, and envelope. Video stays local." />
+    <meta property="og:url" content="https://jaycer.github.io/creative-coding-portfolio/apps/v2a/" />
+    <meta property="og:image" content="https://jaycer.github.io/creative-coding-portfolio/og/v2a.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="V2A" />
+    <meta name="twitter:description" content="Video to audio. Use a live camera feed or a video file, and hear the picture as a bank of tones." />
+    <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/v2a.jpg" />
+    <style>
+      /* Near-black with one cyan signal color and a magenta that only ever
+         means "the read head is here". Cool on purpose: this is an instrument
+         panel with a picture in it, and the picture supplies all the color the
+         page needs. */
+      :root {
+        --bg:        #05070c;
+        --bg-2:      #030407;
+        --panel:     #10141c;
+        --panel-2:   #171c26;
+        --line:      #232a36;
+        --line-soft: #1a202a;
+        --ink:       #dfe5ef;
+        --ink-dim:   #8e98a9;
+        --ink-faint: #626b7a;
+        --accent:    #5ad2e6;
+        --accent-dim:#2c7383;
+        --hot:       #e8619f;
+        --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+        /* The page is viewport-fit=cover, so the bar has to carry the notch
+           itself. Everything that sits under the bar measures from this, which
+           is why it is one variable and not three numbers. */
+        --bar-h: calc(52px + env(safe-area-inset-top, 0px));
+        --sheet-h: 64vh;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+        overscroll-behavior: none;
+      }
+
+      /* ---- top bar ---- */
+      .bar {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+        height: var(--bar-h);
+        display: flex; align-items: center; gap: 8px;
+        padding: env(safe-area-inset-top, 0px) 14px 0;
+        background: rgba(5, 7, 12, 0.78);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .bar .back, .bar-btn {
+        font-family: var(--sans); font-size: 0.8rem; letter-spacing: 0.01em;
+        text-decoration: none; color: var(--ink-dim); background: none;
+        height: 30px; padding: 0 12px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid var(--line); border-radius: 999px;
+        white-space: nowrap; cursor: pointer;
+        transition: color .15s ease, border-color .15s ease, background .15s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .bar .back:hover, .bar-btn:hover { color: var(--ink); border-color: var(--ink-faint); background: rgba(223,229,239,.05); }
+      .bar-btn:focus-visible, .back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      /* A held frame is a mode, and a mode should be legible from across the
+         room — otherwise a paused picture and a still one look identical. */
+      .bar-btn[aria-pressed="true"] {
+        color: #04252c; background: var(--accent); border-color: var(--accent); font-weight: 600;
+      }
+      .bar-btn[aria-pressed="true"]:hover { color: #04252c; background: #7ee0f0; border-color: #7ee0f0; }
+      .bar-btn[disabled] { opacity: .35; cursor: default; }
+      .bar-btn[disabled]:hover { color: var(--ink-dim); border-color: var(--line); background: none; }
+      .bar .crumb {
+        font-size: 0.66rem; letter-spacing: 0.28em; text-transform: uppercase; color: var(--ink-faint);
+      }
+      .bar .push { margin-left: auto; }
+      @media (max-width: 700px) { .bar .crumb, .bar .back-label { display: none; } }
+      @media (max-width: 460px) { .bar .save-load { display: none; } }
+
+      /* ---- stage ---- */
+      .stage {
+        position: fixed; inset: var(--bar-h) 0 0 0;
+        display: flex; align-items: center; justify-content: center;
+        transition: bottom .24s cubic-bezier(.2,.7,.3,1);
+        background:
+          radial-gradient(120% 100% at 50% 0%, #0a0f18 0%, var(--bg) 55%, var(--bg-2) 100%);
+      }
+      #view { display: block; width: 100%; height: 100%; touch-action: none; }
+
+      /* Nothing loaded yet. Deliberately the whole stage rather than a corner
+         hint: with no source there is nothing else on screen to look at. */
+      .idle {
+        position: absolute; inset: 0; z-index: 5;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 18px; padding: 28px; text-align: center;
+      }
+      .idle[hidden] { display: none; }
+      .idle h1 {
+        margin: 0; font-size: clamp(2.4rem, 9vw, 4.4rem); font-weight: 600;
+        letter-spacing: -0.04em; line-height: 1;
+        background: linear-gradient(120deg, var(--accent), var(--hot));
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .idle p { margin: 0; max-width: 30rem; color: var(--ink-dim); font-size: .95rem; line-height: 1.6; }
+      .idle .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
+      .idle .drop-note { font-size: .78rem; color: var(--ink-faint); }
+      .big-btn {
+        font-family: var(--sans); font-size: .92rem; font-weight: 600;
+        height: 44px; padding: 0 22px;
+        display: inline-flex; align-items: center; gap: 9px;
+        border-radius: 999px; cursor: pointer;
+        color: #04252c; background: var(--accent); border: 1px solid var(--accent);
+        transition: background .15s ease, border-color .15s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .big-btn:hover { background: #7ee0f0; border-color: #7ee0f0; }
+      .big-btn.ghost { color: var(--ink); background: none; border-color: var(--line); }
+      .big-btn.ghost:hover { background: rgba(223,229,239,.06); border-color: var(--ink-faint); }
+      .big-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+      /* Dragging a file anywhere over the stage. */
+      .stage.dragging::after {
+        content: 'Drop a video';
+        position: absolute; inset: 14px; z-index: 20;
+        display: flex; align-items: center; justify-content: center;
+        border: 2px dashed var(--accent); border-radius: 16px;
+        background: rgba(90, 210, 230, .08);
+        color: var(--accent); font-size: 1rem; font-weight: 600;
+        pointer-events: none;
+      }
+
+      /* ---- transport (files only) ---- */
+      .transport {
+        position: absolute; left: 50%; bottom: 18px; z-index: 12;
+        transform: translateX(-50%);
+        display: flex; align-items: center; gap: 12px;
+        width: min(560px, calc(100% - 32px));
+        padding: 9px 14px;
+        background: rgba(8, 11, 17, .8);
+        backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+        border: 1px solid var(--line); border-radius: 999px;
+      }
+      .transport[hidden] { display: none; }
+      .icon-btn {
+        flex: none; width: 30px; height: 30px; padding: 0;
+        display: inline-flex; align-items: center; justify-content: center;
+        color: var(--ink); background: none; border: 0; border-radius: 8px;
+        cursor: pointer; opacity: .85;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .icon-btn:hover { opacity: 1; background: rgba(223,229,239,.1); }
+      .icon-btn[aria-pressed="true"] { color: var(--accent); opacity: 1; }
+      .icon-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+      .transport .time { font-family: var(--mono); font-size: .72rem; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+      .transport input[type="range"] { flex: 1 1 auto; min-width: 0; }
+
+      /* ---- controls drawer ---- */
+      .scrim {
+        position: fixed; inset: 0; z-index: 45;
+        background: rgba(3, 4, 7, 0);
+        opacity: 0; pointer-events: none;
+        transition: opacity .2s ease, background .2s ease;
+      }
+      .scrim.show { opacity: 1; pointer-events: auto; }
+      /* Only the phone sheet dims what is behind it, because it covers most of
+         the screen and what is left is context. On a wide screen the drawer
+         sits beside a live picture you are tuning against, and dimming that
+         picture is dimming the work. Click-to-close survives either way. */
+      @media (max-width: 620px) { .scrim.show { background: rgba(3, 4, 7, .5); } }
+
+      .dock {
+        position: fixed; top: var(--bar-h); right: 0; bottom: 0; z-index: 50;
+        width: 342px; max-width: 100%;
+        padding: 16px 16px 40px;
+        overflow-y: auto; -webkit-overflow-scrolling: touch;
+        /* The whole drawer, contents and all, sits at 80%: you are tuning
+           against a picture, and the strip of it under this panel keeps
+           playing rather than being walled off. */
+        opacity: .8;
+        background: rgba(8, 11, 17, .94);
+        backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+        border-left: 1px solid var(--line-soft);
+        transform: translateX(100%);
+        transition: transform .24s cubic-bezier(.2,.7,.3,1);
+        overscroll-behavior: contain;
+      }
+      .dock.open { transform: none; }
+      @media (max-width: 620px) {
+        /* On a phone the drawer becomes a sheet: a 342px panel over a 390px
+           screen would leave a sliver of video that is not worth keeping. */
+        .dock {
+          top: auto; left: 0; right: 0; bottom: 0;
+          width: auto; max-height: var(--sheet-h);
+          padding-bottom: calc(28px + env(safe-area-inset-bottom));
+          border-left: 0; border-top: 1px solid var(--line);
+          border-radius: 16px 16px 0 0;
+          transform: translateY(100%);
+        }
+        /* And the stage gives up the space rather than hiding behind it. A
+           letterboxed 16:9 frame sits in the middle of a portrait stage, which
+           is exactly where a sheet rising from the bottom would bury it — you
+           would be tuning a picture you cannot see. */
+        body.sheet-open .stage { bottom: var(--sheet-h); }
+      }
+
+      .group { margin-bottom: 20px; }
+      .group__name {
+        margin: 0 0 10px; font-size: .66rem; letter-spacing: .22em;
+        text-transform: uppercase; color: var(--ink-faint);
+      }
+
+      /* Segmented pickers — mode, direction, waveform. */
+      .seg { display: grid; gap: 4px; grid-auto-flow: column; grid-auto-columns: 1fr;
+             padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+      .seg.wrap { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+      .seg button {
+        font-family: var(--sans); font-size: .78rem; font-weight: 500;
+        height: 30px; padding: 0 4px;
+        color: var(--ink-dim); background: none; border: 0; border-radius: 7px;
+        cursor: pointer; white-space: nowrap;
+        transition: color .12s ease, background .12s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .seg button:hover { color: var(--ink); }
+      .seg button[aria-checked="true"] { color: #04252c; background: var(--accent); font-weight: 600; }
+      .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .seg__note { margin: 7px 0 0; font-size: .74rem; line-height: 1.45; color: var(--ink-faint); }
+
+      /* Preset chips. */
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .chip {
+        font-family: var(--sans); font-size: .76rem;
+        padding: 6px 12px; color: var(--ink-dim);
+        background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+        cursor: pointer; transition: color .12s ease, border-color .12s ease, background .12s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .chip:hover { color: var(--ink); border-color: var(--ink-faint); }
+      .chip[aria-pressed="true"] { color: var(--accent); border-color: var(--accent-dim); background: rgba(90,210,230,.1); }
+
+      /* Slider rows. */
+      .ctl { margin-bottom: 11px; }
+      .ctl__top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+      .ctl__top label { font-size: .8rem; color: var(--ink-dim); }
+      .ctl__val {
+        margin-left: auto; font-family: var(--mono); font-size: .72rem;
+        color: var(--ink); font-variant-numeric: tabular-nums;
+      }
+      /* A control that does not apply in the current mode stays where it is and
+         goes quiet, rather than vanishing — a drawer whose rows move around
+         under your hand every time you change mode is a drawer you have to
+         re-read from the top. */
+      .ctl.disabled, .field.disabled { opacity: .35; pointer-events: none; }
+
+      input[type="range"] {
+        -webkit-appearance: none; appearance: none;
+        display: block; width: 100%; height: 18px; margin: 0; padding: 0;
+        background: none; cursor: pointer; touch-action: none;
+      }
+      input[type="range"]:focus { outline: none; }
+      input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 3px; border-radius: 2px; border: 0;
+        background: linear-gradient(to right, var(--accent) 0 var(--p,0%), var(--line) var(--p,0%) 100%);
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none;
+        width: 13px; height: 13px; margin-top: -5px; border-radius: 50%;
+        background: var(--ink); border: 0; box-shadow: 0 1px 3px rgba(0,0,0,.5);
+      }
+      input[type="range"]::-moz-range-track {
+        height: 3px; border-radius: 2px; border: 0;
+        background: linear-gradient(to right, var(--accent) 0 var(--p,0%), var(--line) var(--p,0%) 100%);
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 13px; height: 13px; border-radius: 50%;
+        background: var(--ink); border: 0; box-shadow: 0 1px 3px rgba(0,0,0,.5);
+      }
+
+      /* Selects. */
+      .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 11px; }
+      .field label { display: block; font-size: .8rem; color: var(--ink-dim); margin-bottom: 4px; }
+      select {
+        font-family: var(--sans); font-size: .82rem;
+        width: 100%; height: 32px; padding: 0 30px 0 10px;
+        color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+        cursor: pointer; -webkit-appearance: none; appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%238e98a9' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 9px center; background-size: 12px;
+      }
+      select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+      /* Switches. */
+      .switches { display: flex; flex-wrap: wrap; gap: 6px; }
+      .sw {
+        display: inline-flex; align-items: center; gap: 7px;
+        font-size: .78rem; color: var(--ink-dim);
+        padding: 6px 12px 6px 9px;
+        background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+        cursor: pointer; user-select: none; -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .sw input { position: absolute; opacity: 0; width: 0; height: 0; }
+      .sw__box {
+        flex: none; width: 14px; height: 14px; border-radius: 4px;
+        border: 1px solid var(--ink-faint); background: none;
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .sw__box::after {
+        content: ''; width: 6px; height: 6px; border-radius: 1px;
+        background: #04252c; transform: scale(0); transition: transform .12s ease;
+      }
+      .sw input:checked + .sw__box { background: var(--accent); border-color: var(--accent); }
+      .sw input:checked + .sw__box::after { transform: scale(1); }
+      .sw input:checked ~ .sw__text { color: var(--ink); }
+      .sw input:focus-visible + .sw__box { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      /* Source buttons inside the drawer, once something is already playing. */
+      .src-row { display: flex; gap: 6px; flex-wrap: wrap; }
+      .src-row .bar-btn { color: var(--ink-dim); }
+
+      .hint {
+        position: absolute; left: 50%; top: 14px; z-index: 12;
+        transform: translateX(-50%);
+        margin: 0; padding: 7px 15px;
+        font-size: .8rem; color: var(--ink);
+        background: rgba(8, 11, 17, .85);
+        backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+        border: 1px solid var(--line); border-radius: 999px;
+        white-space: nowrap; pointer-events: none;
+      }
+      .hint[hidden] { display: none; }
+
+      .toast {
+        position: fixed; bottom: 24px; left: 50%; z-index: 70;
+        transform: translateX(-50%) translateY(10px);
+        padding: 10px 18px; border-radius: 999px;
+        background: rgba(8,11,17,.96); border: 1px solid var(--line);
+        color: var(--ink); font-size: .86rem;
+        opacity: 0; pointer-events: none;
+        transition: opacity .2s ease, transform .2s ease;
+        max-width: min(90vw, 460px); text-align: center;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      .sr-only {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+      }
+
+      /* The source video is never seen — every pixel reaches the screen through
+         the canvas. It is still laid out at full size behind everything rather
+         than clipped to a pixel: WebKit has been known to skip decoding for a
+         video with no area, and a source that decodes nowhere draws nothing. */
+      #video {
+        position: fixed; inset: 0; width: 100%; height: 100%;
+        opacity: 0; pointer-events: none; z-index: -1;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="bar">
+      <a class="back" href="../../">&larr;&nbsp;<span class="back-label">Gallery</span></a>
+      <span class="crumb">Video to audio</span>
+      <button class="bar-btn push" id="holdBtn" type="button" aria-pressed="false" disabled title="Freeze the frame and hold the sound it makes">Hold</button>
+      <button class="bar-btn save-load" id="saveState" type="button">Save</button>
+      <button class="bar-btn save-load" id="loadState" type="button">Load</button>
+      <button class="bar-btn" id="dockBtn" type="button" aria-expanded="false" aria-controls="dock">Controls</button>
+      <!-- shared/volume.js appends the speaker + slider here, after the buttons -->
+    </nav>
+
+    <main class="stage" id="stage">
+      <canvas id="view"></canvas>
+
+      <p class="hint" id="hint" hidden></p>
+
+      <div class="idle" id="idle">
+        <h1>V2A</h1>
+        <p>Video in, audio out. The picture is read as a bank of tones: height is pitch, brightness is loudness, and the mode decides how the two meet. Everything stays on this device.</p>
+        <div class="row">
+          <button class="big-btn" id="camBtn" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h2L9 4h6l1.5 2h2A2.5 2.5 0 0 1 21 8.5v8A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"/><circle cx="12" cy="12.3" r="3.4"/></svg>
+            Use camera
+          </button>
+          <button class="big-btn ghost" id="fileBtn" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M10 9.5l5 2.5-5 2.5z"/></svg>
+            Open a video
+          </button>
+        </div>
+        <p class="drop-note">or drop a file anywhere on this page</p>
+      </div>
+
+      <div class="transport" id="transport" hidden>
+        <button class="icon-btn" id="playBtn" type="button" aria-label="Play">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path id="playIcon" d="M8 5.5l11 6.5-11 6.5z"/></svg>
+        </button>
+        <span class="time" id="timeNow">0:00</span>
+        <input type="range" id="seek" min="0" max="1000" step="1" value="0" aria-label="Position" />
+        <span class="time" id="timeAll">0:00</span>
+        <button class="icon-btn" id="loopBtn" type="button" aria-pressed="true" aria-label="Loop" title="Loop">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5A3.5 3.5 0 0 1 7.5 6H18"/><path d="M15.5 3.5 18.5 6l-3 2.5"/><path d="M20 14.5a3.5 3.5 0 0 1-3.5 3.5H6"/><path d="M8.5 20.5 5.5 18l3-2.5"/></svg>
+        </button>
+      </div>
+    </main>
+
+    <div class="scrim" id="scrim"></div>
+
+    <aside class="dock" id="dock" aria-label="Controls">
+      <section class="group">
+        <h2 class="group__name">Presets</h2>
+        <div class="chips" id="presets"></div>
+      </section>
+
+      <section class="group">
+        <h2 class="group__name">Mapping</h2>
+        <div class="seg wrap" id="mode" role="radiogroup" aria-label="Mode">
+          <button type="button" role="radio" data-v="scan" aria-checked="true">Scan</button>
+          <button type="button" role="radio" data-v="spectrum" aria-checked="false">Spectrum</button>
+          <button type="button" role="radio" data-v="hue" aria-checked="false">Hue</button>
+          <button type="button" role="radio" data-v="motion" aria-checked="false">Motion</button>
+        </div>
+        <p class="seg__note" id="modeNote"></p>
+        <div class="ctl" style="margin-top:12px">
+          <div class="ctl__top"><label for="bands">Bands</label><span class="ctl__val" id="bandsVal">48</span></div>
+          <input type="range" id="bands" min="0" max="8" step="1" value="7" />
+        </div>
+        <div class="ctl" id="rateCtl">
+          <div class="ctl__top"><label for="rate">Sweep rate</label><span class="ctl__val" id="rateVal">0.50/s</span></div>
+          <input type="range" id="rate" min="0" max="1000" step="1" value="0" />
+        </div>
+        <div class="field" id="dirField">
+          <label for="dir">Sweep direction</label>
+          <select id="dir">
+            <option value="lr">Left to right</option>
+            <option value="rl">Right to left</option>
+            <option value="ping">Back and forth</option>
+          </select>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="group__name">Pitch</h2>
+        <div class="ctl">
+          <div class="ctl__top"><label for="flow">Low</label><span class="ctl__val" id="flowVal">110 Hz</span></div>
+          <input type="range" id="flow" min="0" max="1000" step="1" value="0" />
+        </div>
+        <div class="ctl">
+          <div class="ctl__top"><label for="fhigh">High</label><span class="ctl__val" id="fhighVal">3520 Hz</span></div>
+          <input type="range" id="fhigh" min="0" max="1000" step="1" value="1000" />
+        </div>
+        <div class="pair">
+          <div class="field">
+            <label for="scale">Scale</label>
+            <select id="scale">
+              <option value="off">Continuous</option>
+              <option value="chromatic">Chromatic</option>
+              <option value="major">Major</option>
+              <option value="minor">Minor</option>
+              <option value="pentatonic">Pentatonic</option>
+              <option value="wholetone">Whole tone</option>
+              <option value="fifths">Fifths</option>
+              <option value="harmonic">Harmonic series</option>
+            </select>
+          </div>
+          <div class="field" id="rootField">
+            <label for="root">Root</label>
+            <select id="root"></select>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="group__name">Voice</h2>
+        <div class="seg" id="wave" role="radiogroup" aria-label="Waveform">
+          <button type="button" role="radio" data-v="sine" aria-checked="true">Sine</button>
+          <button type="button" role="radio" data-v="triangle" aria-checked="false">Tri</button>
+          <button type="button" role="radio" data-v="sawtooth" aria-checked="false">Saw</button>
+          <button type="button" role="radio" data-v="square" aria-checked="false">Square</button>
+        </div>
+        <div class="ctl" style="margin-top:12px">
+          <div class="ctl__top"><label for="attack">Attack</label><span class="ctl__val" id="attackVal">8 ms</span></div>
+          <input type="range" id="attack" min="0" max="1000" step="1" value="0" />
+        </div>
+        <div class="ctl">
+          <div class="ctl__top"><label for="release">Release</label><span class="ctl__val" id="releaseVal">120 ms</span></div>
+          <input type="range" id="release" min="0" max="1000" step="1" value="0" />
+        </div>
+        <div class="ctl">
+          <div class="ctl__top"><label for="glide">Glide</label><span class="ctl__val" id="glideVal">8 ms</span></div>
+          <input type="range" id="glide" min="0" max="1000" step="1" value="0" />
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="group__name">Image</h2>
+        <div class="ctl">
+          <div class="ctl__top"><label for="gate">Gate</label><span class="ctl__val" id="gateVal">0.22</span></div>
+          <input type="range" id="gate" min="0" max="1000" step="1" value="0" />
+        </div>
+        <div class="ctl">
+          <div class="ctl__top"><label for="contrast">Contrast</label><span class="ctl__val" id="contrastVal">1.60</span></div>
+          <input type="range" id="contrast" min="0" max="1000" step="1" value="0" />
+        </div>
+        <div class="switches">
+          <label class="sw"><input type="checkbox" id="invert" /><span class="sw__box"></span><span class="sw__text">Invert</span></label>
+          <label class="sw"><input type="checkbox" id="mirror" checked /><span class="sw__box"></span><span class="sw__text">Mirror</span></label>
+          <label class="sw"><input type="checkbox" id="overlay" checked /><span class="sw__box"></span><span class="sw__text">Overlay</span></label>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="group__name">Output</h2>
+        <div class="ctl">
+          <div class="ctl__top"><label for="width">Stereo width</label><span class="ctl__val" id="widthVal">0.80</span></div>
+          <input type="range" id="width" min="0" max="1000" step="1" value="0" />
+        </div>
+        <div class="ctl">
+          <div class="ctl__top"><label for="space">Space</label><span class="ctl__val" id="spaceVal">0.25</span></div>
+          <input type="range" id="space" min="0" max="1000" step="1" value="0" />
+        </div>
+        <div class="ctl">
+          <div class="ctl__top"><label for="tone">Tone</label><span class="ctl__val" id="toneVal">9.0 kHz</span></div>
+          <input type="range" id="tone" min="0" max="1000" step="1" value="1000" />
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="group__name">Source</h2>
+        <div class="src-row">
+          <button class="bar-btn" id="camBtn2" type="button">Camera</button>
+          <button class="bar-btn" id="flipBtn" type="button">Flip camera</button>
+          <button class="bar-btn" id="fileBtn2" type="button">Open a video</button>
+        </div>
+      </section>
+    </aside>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <video id="video" playsinline muted></video>
+    <input type="file" id="videoFile" accept="video/*" class="sr-only" tabindex="-1" aria-hidden="true" />
+    <input type="file" id="settingsFile" accept="application/json,.json" class="sr-only" tabindex="-1" aria-hidden="true" />
+
+    <script src="../shared/autohide.js"></script>
+    <script src="../shared/volume.js"></script>
+    <script type="module" src="./v2a.js"></script>
+  </body>
+</html>

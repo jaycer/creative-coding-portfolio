@@ -426,7 +426,11 @@ function wireUi() {
 
   menuBtn.addEventListener('click', () => { panel.hidden = !panel.hidden; });
   document.addEventListener('pointerdown', (e) => {
-    if (!panel.hidden && !panel.contains(e.target) && e.target !== menuBtn) panel.hidden = true;
+    // contains, not identity: the hamburger holds an SVG, so a press on the
+    // button lands on a <line> and never on the button itself. Comparing the
+    // two would close the panel here and let the button's own click reopen it,
+    // which is a menu that cannot be shut.
+    if (!panel.hidden && !panel.contains(e.target) && !menuBtn.contains(e.target)) panel.hidden = true;
   });
   btns.forEach((b) => b.addEventListener('click', () => applyTheme(Number(b.dataset.theme))));
 

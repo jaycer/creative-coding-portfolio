@@ -27,6 +27,14 @@
 // per the repo's iOS Web Audio note, iOS only grants audio activation when a
 // gesture *completes*, so resume() from a pointerdown handler silently no-ops
 // and the context stays suspended.
+//
+// Remembering the level has a cost, and it is the reason for the "Tap to Hear"
+// button: a reload comes back showing 70 and playing nothing, because browsers
+// only hand out audio on a completed gesture and a page load is not one. macOS
+// Safari does the same thing mid-session, suspending a context the moment its
+// tab goes to the background. Either way the control would be claiming sound
+// that is not coming out, so while it would be lying the control is covered
+// with a button that says what to do about it. See needsGesture() below.
 (function () {
   'use strict';
 
@@ -77,9 +85,12 @@
   // host app's own `input[type="range"]` styling, so every rule for it is
   // written through this three-class prefix.
   var R = '.bar .bar-vol .bar-vol__range';
+  // And the same for the "Tap to Hear" button: several of these bars style
+  // `.bar button` for their own pills, which outweighs a lone class.
+  var P = '.bar .bar-vol .bar-vol__prompt';
 
   var CSS =
-    '.bar-vol{pointer-events:auto;display:inline-flex;align-items:center;gap:7px;' +
+    '.bar-vol{position:relative;pointer-events:auto;display:inline-flex;align-items:center;gap:7px;' +
       'flex-shrink:0;color:inherit;-webkit-tap-highlight-color:transparent}' +
     '.bar-vol.push{margin-left:auto}' +
     // The icon is a button, but it should read as part of the control, not as
@@ -136,10 +147,41 @@
       'height:4px;border-radius:2px;border:0;box-shadow:none}' +
     R + '::-moz-range-thumb{width:12px;height:12px;border-radius:50%;' +
       'background:currentColor;border:0;box-shadow:0 1px 3px rgba(0,0,0,.45);cursor:pointer}' +
+    // The "Tap to Hear" button: a pill sitting on top of the whole control,
+    // icon and track both. Covering them is the point — a slider you can read
+    // but that is not doing anything is the problem being fixed, and a tap
+    // anywhere on the control is the gesture that fixes it. Drawn in
+    // currentColor over a wash of the same, so it belongs to whatever palette
+    // the host bar sets without knowing anything about it.
+    // What is underneath goes invisible rather than away: it still holds the
+    // width, so the pill is the size of the control it stands in for and the
+    // bar does not shuffle when the two swap.
+    '.bar-vol[data-prompt] .bar-vol__btn,.bar-vol[data-prompt] .bar-vol__range{visibility:hidden}' +
+    // Inset vertically but never horizontally: the pill is exactly as wide as
+    // the control it covers, so it cannot push a full phone bar into a scroll
+    // no matter which app it lands in.
+    P + '{position:absolute;inset:-3px 0;z-index:1;' +
+      'display:inline-flex;align-items:center;justify-content:center;' +
+      'padding:0 7px;margin:0;border-radius:999px;cursor:pointer;white-space:nowrap;' +
+      'background:rgba(128,128,128,.42);' +
+      'background:color-mix(in srgb,currentColor 16%,transparent);' +
+      'border:1px solid rgba(128,128,128,.6);' +
+      'border:1px solid color-mix(in srgb,currentColor 42%,transparent);' +
+      '-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);' +
+      'color:inherit;font:inherit;font-size:11px;font-weight:600;line-height:1;' +
+      'letter-spacing:.02em;box-shadow:none;animation:bar-vol-in .18s ease both}' +
+    P + '[hidden]{display:none}' +
+    P + ':hover{background:rgba(128,128,128,.55);' +
+      'background:color-mix(in srgb,currentColor 24%,transparent)}' +
+    P + ':focus-visible{outline:2px solid currentColor;outline-offset:2px}' +
+    '@keyframes bar-vol-in{from{opacity:0}to{opacity:1}}' +
+    '@media (prefers-reduced-motion:reduce){' + P + '{animation:none}}' +
     // Phone bars are already full. The track gives way; the icon never does,
     // because on a phone the icon is the whole unmute affordance.
-    '@media (max-width:600px){.bar-vol{gap:5px}' + R + '{width:52px}}' +
-    '@media (max-width:380px){' + R + '{width:40px}}';
+    '@media (max-width:600px){.bar-vol{gap:5px}' + R + '{width:52px}' +
+      P + '{font-size:10.5px;padding:0 5px}}' +
+    '@media (max-width:380px){' + R + '{width:40px}' +
+      P + '{font-size:10px;padding:0 2px;letter-spacing:0}}';
 
   var SVG =
     '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">' +
@@ -150,11 +192,120 @@
       '<path class="bar-vol__cross" d="M20.4 9.6l-4.8 4.8"/>' +
     '</svg>';
 
+  var PROMPT = (script && script.getAttribute('data-prompt')) || 'Tap to Hear';
+
   var changeFns = [];
   var gestureFns = [];
   var percent = 0;
   var lastOn = DEFAULT_ON;   // where the icon toggle returns you to
-  var root = null, input = null, btn = null;
+  var root = null, input = null, btn = null, prompt = null;
+
+  // ------------------------------------------------------------- is it audible
+  // Nothing is asked of the app for this. Every context a page plays through is
+  // built by one of these two constructors, so wrapping them here — which
+  // happens before any app script runs, since this file is loaded ahead of them
+  // — is enough to see all of them, however late they appear and however many
+  // there are. A Proxy is used rather than a wrapper function so that
+  // `instanceof`, subclassing and the statics all keep working.
+  var seen = [];   // [{ctx, ran}] — `ran` is "has been running at least once"
+
+  function track(ctx) {
+    for (var i = 0; i < seen.length; i++) if (seen[i].ctx === ctx) return ctx;
+    var rec = { ctx: ctx, ran: ctx.state === 'running' };
+    seen.push(rec);
+    try {
+      ctx.addEventListener('statechange', function () {
+        if (ctx.state === 'running') rec.ran = true;
+        refresh();
+      });
+    } catch (e) { /* an engine without the event still gets the poll-free checks */ }
+    refresh();
+    return ctx;
+  }
+
+  (function hookAudioContext() {
+    if (typeof Proxy !== 'function' || typeof Reflect !== 'object') return;
+    var names = ['AudioContext', 'webkitAudioContext'];
+    var origs = [], proxies = [];
+    for (var i = 0; i < names.length; i++) {
+      var C = window[names[i]];
+      if (typeof C !== 'function') continue;
+      // Safari has both names pointing at one constructor; patch it once and
+      // hang the same proxy off both, or the second pass wraps the first.
+      var at = origs.indexOf(C);
+      if (at === -1) {
+        at = origs.length;
+        origs.push(C);
+        proxies.push(new Proxy(C, {
+          construct: function (Target, args, NewTarget) {
+            return track(Reflect.construct(Target, args, NewTarget));
+          },
+        }));
+      }
+      try { window[names[i]] = proxies[at]; } catch (e) { /* frozen global: leave it alone */ }
+    }
+  })();
+
+  /** Is any context actually running, i.e. can this page make a sound right now? */
+  function audible() {
+    for (var i = 0; i < seen.length; i++) if (seen[i].ctx.state === 'running') return true;
+    return false;
+  }
+
+  /** A context that was playing and has had the output taken away from it. */
+  function interrupted() {
+    for (var i = 0; i < seen.length; i++) {
+      var s = seen[i].ctx.state;
+      if (seen[i].ran && s !== 'running' && s !== 'closed') return true;
+    }
+    return false;
+  }
+
+  var unlockable = true;   // apps whose sound needs more than this control say so
+
+  /**
+   * Should the control be covered by "Tap to Hear"? Only when it would be
+   * telling the user something untrue and a tap on it is the fix:
+   *
+   *  - it is claiming a level above silence, and nothing is coming out;
+   *  - the app has not already greyed the control out for a reason of its own,
+   *    which is a truthful state and says so already;
+   *  - and either the app unlocks its audio from this control, or a context has
+   *    been suspended out from under one that was running, which a tap resumes
+   *    here regardless of what the app wired up.
+   *
+   * That last pair is what keeps the button honest in apps whose sound starts
+   * somewhere else — Sleep Noise and Burnt Crust have their own transports, and
+   * a stopped transport is not a lie to paper over.
+   */
+  function needsGesture() {
+    if (!root || !unlockable || percent === 0) return false;
+    if (root.hasAttribute('data-off')) return false;
+    if (audible()) return false;
+    return gestureFns.length > 0 || interrupted();
+  }
+
+  function refresh() {
+    if (!prompt) return;
+    // A hidden tab is allowed to be silent, and several of these apps suspend
+    // themselves on the way out and resume on the way back. Deciding anything
+    // while nobody is looking only risks the prompt flashing up on return, a
+    // frame before the app has resumed.
+    if (document.hidden) return;
+    var want = needsGesture();
+    prompt.hidden = !want;
+    if (want) root.setAttribute('data-prompt', '');
+    else root.removeAttribute('data-prompt');
+  }
+
+  // resume() resolves on its own schedule, and an app's gesture handler may
+  // build its context a tick or two later still, so the answer is looked at
+  // again over the second after a gesture rather than once at the end of it.
+  // These are the only timers in the file: the rest is statechange events.
+  var RECHECK = [0, 120, 350, 800, 1600];
+  function recheck(late) {
+    for (var i = late ? 2 : 0; i < RECHECK.length; i++) setTimeout(refresh, RECHECK[i]);
+  }
 
   function gainFor(p) { return p <= 0 ? 0 : Math.pow(p / 100, CURVE); }
 
@@ -165,6 +316,7 @@
     input.setAttribute('aria-valuetext', percent === 0 ? 'Muted' : percent + ' percent');
     btn.setAttribute('aria-label', percent === 0 ? 'Unmute' : 'Mute');
     btn.title = percent === 0 ? 'Unmute' : 'Mute';
+    refresh();   // muting is a truthful silence; the prompt has nothing to say
   }
 
   function emit() {
@@ -178,6 +330,16 @@
     for (var i = 0; i < gestureFns.length; i++) {
       try { gestureFns[i](); } catch (e) { /* ditto */ }
     }
+    // Whatever the app does with the gesture, a context that has merely been
+    // suspended can be resumed from here, and this is the completed gesture
+    // that is allowed to do it.
+    for (var j = 0; j < seen.length; j++) {
+      var c = seen[j].ctx;
+      if (c.state !== 'running' && c.state !== 'closed') {
+        try { c.resume(); } catch (e) { /* it stays suspended and the prompt stays up */ }
+      }
+    }
+    recheck();
   }
 
   function apply(p, quiet) {
@@ -218,8 +380,19 @@
     input.value = String(percent);
     input.setAttribute('aria-label', LABEL);
 
+    // Last in the DOM, so tabbing still reaches the icon and the slider first:
+    // it covers them for the pointer, but a keyboard was never blocked from
+    // working them, and the arrow keys unlock the audio too.
+    prompt = document.createElement('button');
+    prompt.type = 'button';
+    prompt.className = 'bar-vol__prompt';
+    prompt.hidden = true;
+    prompt.textContent = PROMPT;
+    prompt.title = 'Browsers only allow sound after you interact with the page';
+
     root.appendChild(btn);
     root.appendChild(input);
+    root.appendChild(prompt);
 
     // Sit just left of the hamburger where there is one: the menu is the last
     // thing in every bar that has one, and it should stay the last thing.
@@ -241,6 +414,18 @@
       apply(percent > 0 ? 0 : lastOn, false);
       gesture();
     });
+
+    // click, not pointerup: a click is by definition a completed gesture, which
+    // is the only kind iOS grants audio on.
+    prompt.addEventListener('click', gesture);
+
+    // Coming back to a backgrounded tab is the other half of the Safari case:
+    // the context was suspended on the way out and is not always handed back on
+    // the way in, so the answer is worth asking again here — a beat late, to
+    // give an app that resumes itself on return the chance to do it first.
+    var onReturn = function () { if (!document.hidden) recheck(true); };
+    document.addEventListener('visibilitychange', onReturn);
+    window.addEventListener('pageshow', onReturn);
 
     paint();
   }
@@ -273,7 +458,16 @@
       return this;
     },
     /** Called when the user finishes a gesture on the control. Unlock audio here. */
-    onGesture: function (fn) { gestureFns.push(fn); return this; },
+    onGesture: function (fn) { gestureFns.push(fn); refresh(); return this; },
+    /**
+     * Say whether a gesture on this control can start sound at all right now.
+     * Apps whose sound begins somewhere else — Hey Chair does not put the band
+     * on stage until the sheet's button says so — turn it off until it can, so
+     * the control never offers a tap that would do nothing.
+     */
+    setUnlockable: function (on) { unlockable = !!on; refresh(); return this; },
+    /** Is sound actually coming out: a running context, at a level above zero. */
+    get audible() { return percent > 0 && audible(); },
     /**
      * Grey the control out while the app has taken the output away, with a
      * reason for the tooltip. The level is left where the user put it, so
@@ -285,6 +479,7 @@
       if (on) root.removeAttribute('data-off');
       else root.setAttribute('data-off', '');
       root.title = on ? '' : (why || '');
+      refresh();
     },
   };
 })();
