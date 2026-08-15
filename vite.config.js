@@ -25,6 +25,41 @@ if (!appVersion) {
   appVersion = gitSha ? `${pkg.version}+${gitSha}` : pkg.version;
 }
 
+/**
+ * Publish the build version at /version.json, for the static apps.
+ *
+ * `__APP_VERSION__` reaches only what the bundler touches, and the pages under
+ * /public ship verbatim — so a static app has no way to know which codebase it
+ * is. It matters for the ones that write a file: Meme Generator stamps its save
+ * files with this, so a save made before a breaking change can still be
+ * recognized as one afterwards.
+ *
+ * Served in dev and emitted into dist, at the site root either way, so
+ * `fetch('../../version.json')` from /apps/<slug>/ finds it in both.
+ */
+function versionJson() {
+  const body = () => JSON.stringify({ version: appVersion, built: new Date().toISOString() });
+  let base = '/';
+  return {
+    name: 'version-json',
+    configResolved(config) { base = config.base; },
+    configureServer(server) {
+      // req.url still carries the base at this point — a path-mounted middleware
+      // on '/version.json' answers the bare root and 404s the URL the apps
+      // actually ask for. Both spellings are matched by hand instead.
+      server.middlewares.use((req, res, next) => {
+        const path = (req.url || '').split('?')[0];
+        if (path !== '/version.json' && path !== base + 'version.json') return next();
+        res.setHeader('Content-Type', 'application/json');
+        res.end(body());
+      });
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: body() });
+    },
+  };
+}
+
 // Multi-page build: the main gallery plus every self-contained app folder.
 const input = { main: resolve(__dirname, 'index.html') };
 const appsDir = resolve(__dirname, 'apps');
@@ -41,6 +76,7 @@ export default defineConfig({
   // live under a different repo/subpath, so BASE_PATH overrides it when set
   // (the preview workflow passes e.g. /creative-coding-portfolio-preview/<branch>/).
   base: process.env.BASE_PATH || '/creative-coding-portfolio/',
+  plugins: [versionJson()],
   // This is a true multi-page site: the gallery links to real sub-app pages.
   // 'mpa' disables Vite's SPA index.html fallback so a directory request like
   // /apps/<slug>/ resolves to that folder's index.html (including the static

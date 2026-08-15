@@ -17,9 +17,12 @@
 // an editor a thumb has to be able to work, and a drag-to-reorder list on a
 // touch screen fights the drag that moves the layer on the canvas.
 //
-// Nothing is uploaded and nothing is remembered. An image lives in a bitmap in
-// this tab and goes away with it — which is also why there is no autosave: a
-// meme editor that reopens on yesterday's half-finished meme is a worse app.
+// Nothing is uploaded and nothing is kept between visits. An image lives in a
+// bitmap in this tab and goes away with it, so the work is only ever as safe as
+// the last Save — which writes the whole document, pictures and all, to a file
+// on the user's own disk. There is no autosave into storage: a meme editor that
+// reopens on yesterday's half-finished meme is a worse app, and a browser quota
+// is a bad place to put somebody's photographs.
 
 'use strict';
 
@@ -72,6 +75,23 @@ const state = {
   nextId: 1,
   textCount: 0,     // only for deciding where a new line of text lands
 };
+
+// Whether there is work in here that is not in a file yet. Set by every change
+// a person makes, cleared by Save, by Load (what is on screen IS the file), and
+// by clearing the whole thing out. Only ever consulted alongside the layer
+// count: an empty frame nobody has touched is not work to lose.
+let dirty = false;
+const touch = () => { dirty = true; };
+
+// The one thing standing between an afternoon of work and the back button.
+// Images live in this tab and nowhere else, so a reload is not a small mistake.
+window.addEventListener('beforeunload', (e) => {
+  if (!dirty || !state.layers.length) return;
+  e.preventDefault();
+  // Old spelling, still what some engines look at. The message itself is the
+  // browser's; none of them have shown a page's own words for years.
+  e.returnValue = '';
+});
 
 const W = () => state.format.w;
 const H = () => state.format.h;
@@ -306,12 +326,16 @@ function addText() {
   state.textCount++;
   state.layers.push(layer);
   selectLayer(layer.id);
+  touch();
   syncAll();
 }
 
-function addImage(bitmap, name) {
+function addImage(bitmap, name, blob) {
   const layer = Object.assign(baseLayer('image'), {
     bitmap,
+    // The bytes the picture came in as, kept so Save can write the original
+    // file back out rather than a re-encode of what was drawn.
+    blob,
     natW: bitmap.width,
     natH: bitmap.height,
     name: name || 'Image',
@@ -324,6 +348,7 @@ function addImage(bitmap, name) {
   if (firstText === -1) state.layers.push(layer);
   else state.layers.splice(firstText, 0, layer);
   selectLayer(layer.id);
+  touch();
   syncAll();
 }
 
@@ -345,6 +370,7 @@ function removeLayer(id) {
     const next = state.layers[Math.min(i, state.layers.length - 1)];
     state.selected = next ? next.id : null;
   }
+  touch();
   syncAll();
 }
 
@@ -359,6 +385,7 @@ function duplicateLayer(id) {
   const i = state.layers.indexOf(src);
   state.layers.splice(i + 1, 0, copy);
   selectLayer(copy.id);
+  touch();
   syncAll();
 }
 
@@ -369,6 +396,7 @@ function moveLayer(id, dir) {
   if (i === -1 || j < 0 || j >= state.layers.length) return;
   const [l] = state.layers.splice(i, 1);
   state.layers.splice(j, 0, l);
+  touch();
   syncAll();
 }
 
@@ -481,6 +509,7 @@ canvas.addEventListener('pointermove', (e) => {
   } else if (drag.mode === 'scale') {
     setSize(l, drag.s0 * (dist(p, l) / drag.d0));
   }
+  touch();
   syncTransformControls();
   draw();
 });
@@ -525,6 +554,7 @@ function movePinch() {
   l.rot = pinch.rot0 + (Math.atan2(b.y - a.y, b.x - a.x) - pinch.a0);
   l.x = clamp(pinch.x0 + (c.x - pinch.c0.x), -W() * 0.4, W() * 1.4);
   l.y = clamp(pinch.y0 + (c.y - pinch.c0.y), -H() * 0.4, H() * 1.4);
+  touch();
   syncTransformControls();
   draw();
 }
@@ -589,6 +619,7 @@ layerList.addEventListener('click', (e) => {
   else if (act === 'vis') {
     const l = byId(id);
     if (l) l.visible = !l.visible;
+    touch();
     syncAll();
   } else selectLayer(id);
 });
@@ -686,6 +717,7 @@ function onControl(node, event, fn, { relist = false } = {}) {
     const l = selected();
     if (!l) return;
     fn(l);
+    touch();
     if (relist) syncLayerList();
     draw();
   });
@@ -722,17 +754,19 @@ alignSeg.addEventListener('click', (e) => {
   const l = selected();
   if (!b || !l) return;
   l.align = b.dataset.align;
+  touch();
   syncInspector();
   draw();
 });
-capsOn.addEventListener('click', () => { const l = selected(); if (l) { l.caps = true; syncInspector(); draw(); } });
-capsOff.addEventListener('click', () => { const l = selected(); if (l) { l.caps = false; syncInspector(); draw(); } });
+capsOn.addEventListener('click', () => { const l = selected(); if (l) { l.caps = true; touch(); syncInspector(); draw(); } });
+capsOff.addEventListener('click', () => { const l = selected(); if (l) { l.caps = false; touch(); syncInspector(); draw(); } });
 
 for (const b of document.querySelectorAll('.fit-btn')) {
   b.addEventListener('click', () => {
     const l = selected();
     if (!l || l.type !== 'image') return;
     fitLayer(l, b.dataset.fit);
+    touch();
     syncInspector();
     draw();
   });
@@ -742,6 +776,7 @@ el('straighten-btn').addEventListener('click', () => {
   const l = selected();
   if (!l) return;
   l.rot = 0;
+  touch();
   syncInspector();
   draw();
 });
@@ -750,6 +785,7 @@ el('center-btn').addEventListener('click', () => {
   if (!l) return;
   l.x = W() / 2;
   l.y = H() / 2;
+  touch();
   draw();
 });
 el('dupe-btn').addEventListener('click', () => { if (state.selected != null) duplicateLayer(state.selected); });
@@ -769,7 +805,7 @@ async function loadImageFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
   try {
     const bitmap = await decode(file);
-    addImage(bitmap, file.name.replace(/\.[^.]+$/, '').slice(0, 28) || 'Image');
+    addImage(bitmap, file.name.replace(/\.[^.]+$/, '').slice(0, 28) || 'Image', file);
   } catch (err) {
     console.error('[meme] could not read that image', err);
     window.alert('That image could not be read.');
@@ -859,6 +895,237 @@ exportBtn.addEventListener('click', () => {
   }, 'image/jpeg', JPEG_QUALITY);
 });
 
+// ------------------------------------------------------------ save and load
+// The whole document, pictures and all, as one JSON file. A meme is usually
+// built on a photo somebody will not find again, so a save holding only
+// positions would be a save of nothing: the images ride along as data URLs,
+// which is why these files are megabytes where a settings file is bytes. Each
+// picture is stored once however many layers use it.
+//
+// Two different versions are stamped on every save. `version` is the shape of
+// the file, which is what this loader reads; `build` is the codebase that wrote
+// it, published by vite.config at /version.json. If the shape ever has to
+// change in a way this loader cannot read, `build` is what says which version
+// of the app to hand an old file back to.
+const FILE_VERSION = 1;
+let build = 'unknown';
+fetch('../../version.json')
+  .then((r) => (r.ok ? r.json() : null))
+  .then((v) => { if (v && v.version) build = String(v.version); })
+  .catch(() => { /* opened from a file:// copy, or offline. Stays 'unknown'. */ });
+
+const toastEl = el('toast');
+let toastTimer = 0;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
+}
+
+function stamp() {
+  const d = new Date();
+  const two = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
+}
+
+// Nine decimals: a saved file reads as "540" and "-12" where the numbers are
+// round, and loading one puts the identical picture back — measured, pixel for
+// pixel across the whole frame, not eyeballed. Coarser would probably also
+// survive that (four-decimal radians did), but the digits cost nothing next to
+// the base64 photograph two lines down.
+const round = (v, n) => Number(Number(v).toFixed(n));
+const toDeg = (rad) => round((rad * 180) / Math.PI, 9);
+
+function blobToDataUrl(blob) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = () => rej(new Error('could not read the picture back'));
+    r.readAsDataURL(blob);
+  });
+}
+
+function dataUrlToBlob(url) {
+  const comma = String(url).indexOf(',');
+  if (comma < 0) throw new Error('not a data URL');
+  const head = url.slice(0, comma);
+  const bin = atob(url.slice(comma + 1));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const mime = (head.match(/^data:([^;,]+)/) || [, 'image/jpeg'])[1];
+  return new Blob([bytes], { type: mime });
+}
+
+async function saveProject() {
+  const assets = {};
+  // Keyed by the blob itself, so a duplicated picture is written once and both
+  // layers point at it — otherwise Duplicate would double the size of the file.
+  const ids = new Map();
+  const layers = [];
+  for (const l of state.layers) {
+    const common = {
+      type: l.type,
+      x: round(l.x, 9), y: round(l.y, 9),
+      // Degrees on disk, radians in here: the file is something a person may
+      // open, and "-12" says what "-0.20943951" does.
+      rot: toDeg(l.rot),
+      opacity: round(l.opacity, 3),
+      visible: l.visible,
+    };
+    if (l.type === 'image') {
+      let id = ids.get(l.blob);
+      if (!id) {
+        id = 'a' + (ids.size + 1);
+        ids.set(l.blob, id);
+        assets[id] = { name: l.name, src: await blobToDataUrl(l.blob) };
+      }
+      layers.push({ ...common, asset: id, scale: round(l.scale, 9) });
+    } else {
+      layers.push({
+        ...common,
+        text: l.text, font: l.font, size: l.size,
+        color: l.color, stroke: l.stroke, strokeW: round(l.strokeW, 3),
+        align: l.align, caps: l.caps, wrap: round(l.wrap, 3),
+      });
+    }
+  }
+
+  const doc = {
+    app: 'meme-generator',
+    version: FILE_VERSION,
+    build,
+    savedAt: new Date().toISOString(),
+    format: state.format.id,
+    bg: state.bg,
+    assets,
+    layers,
+  };
+  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = `meme-${stamp()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 10000);
+  dirty = false;
+  const mb = blob.size / (1024 * 1024);
+  toast(`Saved, ${mb >= 1 ? mb.toFixed(1) + ' MB' : Math.max(1, Math.round(blob.size / 1024)) + ' KB'}`);
+}
+
+const numOr = (v, def) => (typeof v === 'number' && isFinite(v) ? v : def);
+const hexOr = (v, def) => (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v : def);
+
+/**
+ * Put a saved document back up. Everything coming off disk is a stranger, so
+ * each field is coerced and clamped on the way in rather than trusted: a file
+ * hand-edited into nonsense should open as something odd-looking, not break the
+ * app. Nothing on screen is touched until the whole file has been read and
+ * every picture in it decoded.
+ */
+async function loadProject(file) {
+  const doc = JSON.parse(await file.text());
+  if (!doc || doc.app !== 'meme-generator' || !Array.isArray(doc.layers)) throw new Error('shape');
+  if (numOr(doc.version, 1) > FILE_VERSION) throw new Error('newer');
+
+  const assets = {};
+  for (const [id, a] of Object.entries(doc.assets || {})) {
+    if (!a || typeof a.src !== 'string') continue;
+    const blob = dataUrlToBlob(a.src);
+    assets[id] = {
+      blob,
+      bitmap: await decode(blob),
+      name: typeof a.name === 'string' && a.name ? a.name : 'Image',
+    };
+  }
+
+  state.layers = [];
+  state.selected = null;
+  state.nextId = 1;
+  // Set before any layer lands: applyFormat rescales the y of everything in the
+  // stack, and the coordinates in the file are already in the saved format.
+  const fmt = FORMATS.find((f) => f.id === doc.format) ? doc.format : FORMATS[0].id;
+  applyFormat(fmt);
+  formatSelect.value = state.format.id;
+  state.bg = hexOr(doc.bg, '#000000');
+  bgColor.value = state.bg;
+
+  let texts = 0;
+  for (const raw of doc.layers) {
+    if (!raw || typeof raw !== 'object') continue;
+    const l = baseLayer(raw.type === 'image' ? 'image' : 'text');
+    l.x = numOr(raw.x, W() / 2);
+    l.y = numOr(raw.y, H() / 2);
+    l.rot = (numOr(raw.rot, 0) * Math.PI) / 180;
+    l.opacity = clamp(numOr(raw.opacity, 1), 0, 1);
+    l.visible = raw.visible !== false;
+    if (l.type === 'image') {
+      const a = assets[raw.asset];
+      if (!a) continue;   // a picture that did not survive; its layer goes too
+      l.bitmap = a.bitmap;
+      l.blob = a.blob;
+      l.name = a.name;
+      l.natW = a.bitmap.width;
+      l.natH = a.bitmap.height;
+      l.scale = clamp(numOr(raw.scale, 1), MIN_SCALE, MAX_SCALE);
+    } else {
+      l.text = typeof raw.text === 'string' ? raw.text : '';
+      l.font = fontById(raw.font).id;
+      l.size = clamp(Math.round(numOr(raw.size, 96)), MIN_TEXT, MAX_TEXT);
+      l.color = hexOr(raw.color, '#ffffff');
+      l.stroke = hexOr(raw.stroke, '#000000');
+      l.strokeW = clamp(numOr(raw.strokeW, 0.08), 0, 0.2);
+      l.align = raw.align === 'left' || raw.align === 'right' ? raw.align : 'center';
+      l.caps = raw.caps !== false;
+      l.wrap = clamp(numOr(raw.wrap, 0.9), 0.2, 1);
+      texts++;
+    }
+    state.layers.push(l);
+  }
+  state.textCount = texts;
+  // What is on screen is exactly the file that was just opened.
+  dirty = false;
+  syncAll();
+  return doc;
+}
+
+el('save-btn').addEventListener('click', () => {
+  saveProject().catch((err) => {
+    console.error('[meme] save failed', err);
+    toast('That could not be saved');
+  });
+});
+
+// Kept out of the markup so nothing in the panel can tab into it, and given an
+// id anyway so a headless harness can hand it a file.
+const projectFile = document.createElement('input');
+projectFile.type = 'file';
+projectFile.id = 'project-file';
+projectFile.accept = 'application/json,.json';
+projectFile.hidden = true;
+document.body.appendChild(projectFile);
+
+el('load-btn').addEventListener('click', () => projectFile.click());
+projectFile.addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  // Cleared straight away, or picking the same file twice fires no change event
+  // and the second load silently does nothing.
+  e.target.value = '';
+  if (!file) return;
+  if (state.layers.length && !window.confirm('Load this file over what is on screen?')) return;
+  try {
+    const doc = await loadProject(file);
+    const n = state.layers.length;
+    toast(`Loaded ${n} layer${n === 1 ? '' : 's'}`);
+    if (doc.build && doc.build !== build) console.info(`[meme] file was saved by build ${doc.build}, this is ${build}`);
+  } catch (err) {
+    console.error('[meme] load failed', err);
+    toast(err && err.message === 'newer' ? 'That file is from a newer Meme Generator' : 'Not a Meme Generator file');
+  }
+});
+
 // ------------------------------------------------------------ settings sheet
 const formatSelect = el('format-select');
 const bgColor = el('bg-color');
@@ -888,8 +1155,8 @@ function applyFormat(id) {
   draw();
 }
 
-formatSelect.addEventListener('change', () => applyFormat(formatSelect.value));
-bgColor.addEventListener('input', () => { state.bg = bgColor.value; draw(); });
+formatSelect.addEventListener('change', () => { applyFormat(formatSelect.value); touch(); });
+bgColor.addEventListener('input', () => { state.bg = bgColor.value; touch(); draw(); });
 
 function openMenu() {
   scrim.hidden = false;
@@ -909,6 +1176,7 @@ el('reset-btn').addEventListener('click', () => {
   state.layers = [];
   state.selected = null;
   state.textCount = 0;
+  dirty = false;
   closeMenu();
   syncAll();
 });
@@ -939,6 +1207,7 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight') l.x += step;
     if (e.key === 'ArrowUp') l.y -= step;
     if (e.key === 'ArrowDown') l.y += step;
+    touch();
     draw();
   }
 });

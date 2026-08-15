@@ -87,6 +87,26 @@
         transition: background 0.15s ease;
       }
       .bar .back:hover { background: rgba(255,255,255,0.12); }
+      /* Save and Load wear the back button's pill rather than Export's: they are
+         things you can do to the work, and Export is the one you came for. */
+      .bar .bar-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 30px;
+        padding: 0 13px;
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #fff;
+        background: none;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.15s ease;
+      }
+      .bar .bar-btn:hover { background: rgba(255,255,255,0.12); }
       .bar .menu {
         display: inline-flex;
         align-items: center;
@@ -116,6 +136,23 @@
         transition: background 0.15s ease;
       }
       .bar .export:hover { background: #fff; }
+
+      .toast {
+        position: fixed;
+        left: 50%; bottom: 30px;
+        z-index: 30;
+        transform: translateX(-50%) translateY(8px);
+        padding: 9px 16px;
+        font-size: 0.85rem;
+        color: #fff;
+        background: rgba(0,0,0,0.78);
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
       /* ------------------------------------------------------ stage + panel */
       .work {
@@ -471,9 +508,13 @@
     <header class="bar">
       <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
       <h1>Meme Generator</h1>
+      <button class="bar-btn" id="save-btn" type="button">Save</button>
+      <button class="bar-btn" id="load-btn" type="button">Load</button>
       <button class="export" id="export-btn" type="button">Export JPG</button>
       <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false"></button>
     </header>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <main class="work">
       <div class="stage" id="stage">
@@ -581,7 +622,7 @@
           <h2 id="sheet-title">Meme Generator</h2>
           <button class="close" id="close-btn" type="button" aria-label="Close settings">✕</button>
         </div>
-        <p class="intro">A meme in the tab. Pictures and text stack up as layers, the text turns to any angle, and Export writes a JPG at the size the app is set to. Images and text stay local.</p>
+        <p class="intro">A meme in the tab. Pictures and text stack up as layers, the text turns to any angle, and Export writes a JPG at the size the app is set to. Save writes the work itself, pictures and all, as a file to pick up later. Images and text stay local.</p>
 
         <div class="row">
           <label for="format-select">Format</label>
