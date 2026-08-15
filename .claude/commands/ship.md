@@ -29,4 +29,6 @@ Work through these steps in order. Stop and report if any step fails rather than
 
 9. **Verify it's actually live.** `curl -s -o /dev/null -w "%{http_code}"` the deployed URL(s) touched by this change under `https://jaycer.github.io/creative-coding-portfolio/` — expect `200`. For a new/renamed sub-app, check its `apps/<slug>/` page plus one asset (an AVIF or the card SVG). GitHub Pages can lag a few seconds after the run finishes; retry once if you get a stale code.
 
-10. **Report** the PR number/URL, that build + deploy went green, and the live URL you confirmed returned 200. Leave `main` checked out and up to date (`git checkout main && git pull`).
+10. **If a release is being cut, rebuild after tagging.** The version badge is baked into the bundle at build time from `git describe --tags`, so a release created *after* the deploy leaves the live site showing the previous tag plus a commit count. The tag cannot be cut any earlier — it has to point at the merged commit — so after `gh release create vX.Y.Z --generate-notes`, trigger one more build with `gh workflow run deploy.yml --ref main`, watch it, and confirm the badge: `curl -s <site>/ | grep -o '/assets/main-[^"]*\.js'`, then grep that bundle for `textContent="v`. Skip this step entirely when no release is being cut — the next merge would have fixed it anyway.
+
+11. **Report** the PR number/URL, that build + deploy went green, and the live URL you confirmed returned 200. Leave `main` checked out and up to date (`git checkout main && git pull`).

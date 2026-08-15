@@ -40,7 +40,9 @@ function makeUnlockableAudioContext() {
 let ctx = null;
 let bus = null;      // everything the objects make
 let volume = null;   // the header slider, kept apart from the mix
+let mute = null;     // and this apart from BOTH, so it can be taken away and given back
 let outLevel = 0;
+let muted = false;
 
 /** Build the graph and unlock it. Safe to call repeatedly. */
 export function startAudio() {
@@ -66,7 +68,13 @@ export function startAudio() {
     volume = ctx.createGain();
     volume.gain.value = outLevel;
 
-    bus.connect(comp).connect(volume).connect(ctx.destination);
+    // Its own node rather than a second thing writing to the volume gain: the
+    // slider's level and "the room has the floor" are two facts, and one node
+    // holding both means whichever was set last wins and the other is lost.
+    mute = ctx.createGain();
+    mute.gain.value = muted ? 0 : 1;
+
+    bus.connect(comp).connect(volume).connect(mute).connect(ctx.destination);
     a.unlock();
   } else if (ctx.state !== 'running') {
     ctx.resume().catch(() => {});
@@ -81,7 +89,25 @@ export function setVolume(v) {
   volume.gain.setTargetAtTime(outLevel, ctx.currentTime, 0.03);
 }
 
-/** True when there is a running graph worth hanging a voice on. */
+/**
+ * Take the sound away without touching the slider, and give it back exactly as
+ * it was. Used while the microphone is open: the voices are a continuous drone
+ * across the whole field, and a beat tracker listening to a room that the piece
+ * itself is droning into is partly listening to the piece.
+ */
+export function setMuted(on) {
+  muted = !!on;
+  if (!ctx) return;
+  mute.gain.cancelScheduledValues(ctx.currentTime);
+  mute.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.08);
+}
+
+/**
+ * True when there is a running graph worth hanging a voice on. Muted counts as
+ * live: the voices go on being built and mixed, silently, so the field is
+ * already singing the picture that is up when the sound comes back rather than
+ * fading two dozen things in from nothing.
+ */
 export function audioLive() {
   return !!ctx && ctx.state === 'running' && outLevel > 0;
 }

@@ -37,7 +37,7 @@ import {
 import {
   startListening, stopListening, listenState, inputName, inputChoices,
   currentInputId, useInput,
-} from './listen.js';
+} from '../shared/listen.js';
 
 // ---------------------------------------------------------------- the chairs
 // All in meters, y=0 at the floor, origin at the middle of the footprint, so a

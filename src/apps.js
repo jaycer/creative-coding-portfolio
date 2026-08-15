@@ -8,7 +8,7 @@
 // entries, not for static folders under /public. To add work: drop a folder in
 // either place and add a row here.
 export const apps = [
-  { slug: 'object-tile-scroll', title: 'Object Tile Scroll', blurb: 'Watch objects scroll by while forming an ambient chorus. Includes 3D models by Kenney and Quaternius.', entry: 'index.html' },
+  { slug: 'object-tile-scroll', title: 'Object Tile Scroll', blurb: 'Watch objects scroll by while forming an ambient chorus. Set how many of them breathe and whether they breathe together, or let it listen and breathe to whatever is playing in the room. Includes 3D models by Kenney and Quaternius.', entry: 'index.html' },
   { slug: 'v2a',            title: 'V2A',           blurb: 'Video in, audio out. Use a live camera feed or a video file, and hear the picture as a bank of tones. Height is pitch, brightness is loudness, and four mapping modes decide how the two meet. Video stays local.', entry: 'index.html' },
   { slug: 'hey-chair',      title: 'Hey Chair',     blurb: 'A troupe of chairs parades across the stage in time under theater lights, then carries on off the far side and is replaced by another set. Some of them glitch, wander, or spin. Tap to shout at them, or let it listen and dance to whatever is playing in the room.', entry: 'index.html' },
   { slug: 'gain-stage',     title: 'Gain Stage',    blurb: 'A mastering chain that runs in the tab. Drop in a file, shape it with EQ, compression, saturation and a look-ahead limiter, then export a WAV. Audio stays local.', entry: 'index.html' },
