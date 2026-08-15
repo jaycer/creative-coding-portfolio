@@ -6,8 +6,14 @@
 // bearing the Angle slider is set to. It never wanders, never crosses another,
 // never comes back. What it does IN that spot is the whole piece — some spin flat,
 // some tumble end over end, some stutter into a new attitude and stay wrong,
-// some breathe, some drift through colors, and a good share just stand there,
-// which is what makes the rest read as odd.
+// some drift through colors, and a good share just stand there, which is what
+// makes the rest read as odd.
+//
+// Breathing sits apart from those. It is the one habit the field can do
+// TOGETHER — in step, in opposition, or as a swell running up through the
+// picture — and it can be handed a clock from outside: with Follow the room on,
+// the microphone finds the beat of whatever is playing nearby and the field
+// breathes to it, and the stutterers land on it.
 //
 // The lattice is the reliability and the deal is the surprise. Columns are
 // spaced evenly across the frame at three depths, rows are spaced evenly along
@@ -32,9 +38,13 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
-  startAudio, setVolume, audioLive, makeVoice, setVoiceMix, stopVoice, pitchFor,
-  voiceCount,
+  startAudio, setVolume, audioLive, audioContext, setMuted, makeVoice, setVoiceMix,
+  stopVoice, pitchFor, voiceCount,
 } from './audio.js';
+import {
+  startListening, stopListening, listenState, inputName, inputChoices,
+  currentInputId, useInput,
+} from '../shared/listen.js';
 
 // ------------------------------------------------------------------ the parts
 // Everything is built from a list of primitives given in meters at the object's
@@ -540,7 +550,13 @@ const amb = new THREE.HemisphereLight(0x93a6c8, 0x1a1d26, 0.8);
 scene.add(key, fill, rim, bounce, amb);
 
 // ---------------------------------------------------------------- the settings
-const DEFAULTS = { speed: 1.0, spacing: 1.0, odd: 0.55, angle: 0 };
+// breathRate is in breaths per SECOND, like every other rate in here; the slider
+// that sets it is marked in breaths per minute, because that is the number a
+// person can picture.
+const DEFAULTS = {
+  speed: 1.0, spacing: 1.0, odd: 0.55, angle: 0,
+  breath: 0.4, breathRate: 0.35, breathDepth: 0.38, breathSync: 'scattered',
+};
 const cfg = { ...DEFAULTS };
 
 const BASE_ROW = 3.3;      // world units between rows at spacing 1
@@ -598,11 +614,18 @@ const field = [];    // columns: { ndcU, depth, rows, span, phase, objs[] }
 let scrolled = 0;    // how far the whole field has risen, for the record
 
 
+// Breathing is not in here. It used to be — one of the odd habits, dealt to a
+// fifth of the objects that got any habit at all — and it was moved out because
+// it is the one habit that wants to be shared. A field where a fixed share of
+// the objects happen to be swelling is a field of objects doing their own
+// thing; a field where you can say HOW MANY breathe, how fast, how deep and
+// whether they agree with each other is a different instrument. So the share of
+// breathers is its own setting, breathing rides on top of whatever else an
+// object is doing, and everything below is about attitude and color only.
 const PRIMARIES = [
   ['spin', 0.26],      // flat, about its own vertical axis
   ['tumble', 0.20],    // end over end
   ['glitch', 0.16],    // thrown into a new attitude and left there
-  ['breathe', 0.20],   // grows and shrinks
   ['hue', 0.18],       // walks through colors
 ];
 const PRIMARY_TOTAL = PRIMARIES.reduce((s, p) => s + p[1], 0);
@@ -621,6 +644,94 @@ function pickPrimary(rand) {
 // without every stutterer moving at the same moment — a shared pulse, dealt out
 // unevenly, which is the piece in one line.
 const GLITCH_HZ = 2.6;
+
+// ------------------------------------------------------------------ the breath
+// Every breathing object swells and shrinks on a sine. What differs between the
+// patterns is only where each one reads its phase from, so all four are the same
+// three lines with a different offset, and any of them can be handed the room's
+// beat instead of the field's own clock without knowing that happened.
+//
+// Both clocks below are ACCUMULATED rather than worked out from the elapsed
+// time. `t * rate` is shorter and wrong for a piece with a rate slider on it:
+// halve the rate at t = 300 and every breathing object in the frame is instantly
+// somewhere else in its cycle. Adding up the steps means a rate change bends the
+// breathing from wherever it had got to, which is what changing a rate should
+// look like — and is the same rule the rest of the settings here follow.
+const TAU = Math.PI * 2;
+let breathClock = 0;   // the shared breath, in radians
+let breathOwnT = 0;    // how far the private clocks have run, before each one's own pace
+
+// Depth is the one breathing setting that is a size rather than a speed, so it
+// is the one that can be seen to jump: an object at the top of its breath, given
+// a deeper one, is instantly bigger. Dragged, that never shows — every step is a
+// percent. Clicked halfway along the track, which is a perfectly ordinary way to
+// use a slider, it is a snap across every breathing thing in the frame. So the
+// number the field actually uses chases the number the slider is on.
+const DEPTH_FOLLOW = 0.22;   // seconds
+let depthNow = DEFAULTS.breathDepth;
+
+// How many rows apart two objects are breathing a whole cycle out of step, in
+// WAVE. Six is about a screen and a half at the default spacing: long enough to
+// read as one swell travelling through the field rather than as stripes.
+const WAVE_ROWS = 6;
+
+// A pattern change would otherwise jump every object to a new place in its
+// cycle at once, which is a flinch across the whole frame. Instead each object
+// keeps the difference between where it was and where the new pattern puts it,
+// and that difference is walked off over a few seconds: the field slides into
+// formation, which is a better answer to "synchronized" than arriving there
+// already synchronized.
+const ALIGN_FALL = 2.6;   // seconds to shed most of the difference
+const GAIN_RISE = 0.7;    // seconds for a breath to arrive or leave
+
+// Both of those ramps are the same exponential for every object in the frame,
+// since they depend only on how long the frame was. Worked out once a frame
+// rather than twice per breathing object.
+let gainStep = 0;
+let alignStep = 1;
+
+/**
+ * Where an object is in its breath, before its own alignment is added back.
+ * The pattern is a parameter rather than read straight off cfg so that the
+ * changeover can ask this the same question twice — once about the pattern being
+ * left and once about the one being taken up — without moving the setting.
+ */
+function breathBase(o, sync = cfg.breathSync) {
+  switch (sync) {
+    case 'together':
+      return breathClock;
+    case 'alternate':
+      // Every other column against the ones beside it. Dealing the two sides out
+      // at random reads as a mess rather than as an alternation: the eye can
+      // only see two groups taking turns if it can see where one group is.
+      return breathClock + (o.col.side ? Math.PI : 0);
+    case 'wave':
+      // Along the travel, so the swell runs up the field the way the field runs.
+      return breathClock - (o.v / (rowStep() * WAVE_ROWS)) * TAU;
+    default:
+      return breathOwnT * o.breathVar * TAU + o.breathPhase;
+  }
+}
+
+/** The shortest way round to the same angle, so an alignment decays rather than unwinds. */
+function wrapPi(a) {
+  a = (a + Math.PI) % TAU;
+  if (a < 0) a += TAU;
+  return a - Math.PI;
+}
+
+/**
+ * Hold the picture still across a change of pattern. Called with the pattern
+ * already changed: each object's alignment becomes whatever keeps it exactly
+ * where it is at this instant, and then decays to nothing on its own.
+ */
+function realignBreath(was) {
+  for (const c of field) {
+    for (const o of c.objs) {
+      o.breathAlign = wrapPi(breathBase(o, was) + o.breathAlign - breathBase(o));
+    }
+  }
+}
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const _base = new THREE.Color();
@@ -696,11 +807,24 @@ function deal(o, rand) {
   // not a fallback — a field where everything moves has nothing in it that is
   // moving.
   const odd = rand() < cfg.odd;
-  o.spin = false; o.tumble = false; o.glitch = false; o.breathe = false; o.hue = false;
+  o.spin = false; o.tumble = false; o.glitch = false; o.hue = false;
   if (odd) {
     o[pickPrimary(rand)] = true;
     if (rand() < 0.35) o[pickPrimary(rand)] = true;
   }
+
+  // Whether this one breathes is not decided here. It is dealt a number and the
+  // setting decides, every frame, whether the number is low enough — so moving
+  // the slider brings breathing to objects already standing in the field rather
+  // than only to whatever is dealt next. It can do that, where the habits above
+  // cannot, because a breath can arrive and leave smoothly: an object taking up
+  // breathing swells into it from exactly the size it was.
+  o.breathRoll = rand();
+  o.breathVar = 0.55 + rand() * 1.15;    // its own pace, in SCATTERED
+  o.breathSize = 0.65 + rand() * 0.7;    // and its own depth, in every pattern
+  o.breathPhase = rand() * Math.PI * 2;
+  o.breathAlign = 0;
+  o.breathGain = 0;
 
   // A thing standing still is turned a little off square so it reads as placed
   // rather than as installed; a thing that is going to spin anyway can start
@@ -712,9 +836,6 @@ function deal(o, rand) {
   o.spinRate = (0.35 + rand() * 1.15) * (rand() < 0.5 ? -1 : 1);
   o.tumbleAxis = rand() < 0.5 ? 'x' : 'z';
   o.tumbleRate = (0.3 + rand() * 0.85) * (rand() < 0.5 ? -1 : 1);
-  o.breatheRate = 0.09 + rand() * 0.28;
-  o.breatheAmp = 0.18 + rand() * 0.3;
-  o.breathePhase = rand() * Math.PI * 2;
   o.hueRate = (0.02 + rand() * 0.075) * (rand() < 0.5 ? -1 : 1);
   o.glitchEvery = 1 + Math.floor(rand() * 3);
   o.glitchOffset = Math.floor(rand() * 3);
@@ -890,6 +1011,10 @@ function respace() {
   for (let c = 0; c < field.length; c++) {
     const col = field[c];
     col.ndcU = -1 + ((c + 0.5) / cols) * 2;
+    // Which of the two sides this column takes in ALTERNATE. Set here rather
+    // than when the column is built, because a column's place across the frame
+    // is set here too and the alternation is a fact about where it stands.
+    col.side = c % 2;
     // The step this column is currently laid out at, read back off itself rather
     // than remembered: rows and span are kept in step by everything that touches
     // them, so their ratio is the truth about where its objects are standing.
@@ -1022,14 +1147,29 @@ function updateObject(o, t, dt) {
   // Scale. Objects further back are made a little larger in world terms so the
   // far band is legible without flattening the depth away entirely.
   let s = o.baseScale * Math.pow(-o.z / DEPTHS[0], 0.55);
-  if (o.breathe) s *= 1 + o.breatheAmp * Math.sin(t * o.breatheRate * Math.PI * 2 + o.breathePhase);
+  // The breath, on top of that. The gain is what makes the share of breathers a
+  // live setting: it walks to 1 or to 0 over the best part of a second, so an
+  // object handed a breath grows into it and one that loses it settles back to
+  // its own size, and neither of them jumps. At gain 0 this multiplies by
+  // exactly 1, so an object that does not breathe pays nothing but the ramp.
+  const breathing = o.breathRoll < cfg.breath;
+  if (breathing || o.breathGain > 0.0005) {
+    o.breathGain += ((breathing ? 1 : 0) - o.breathGain) * gainStep;
+    o.breathAlign *= alignStep;
+    s *= 1 + depthNow * o.breathSize * o.breathGain
+      * Math.sin(breathBase(o) + o.breathAlign);
+  }
   o.scale = s;
 
   // Attitude. The stutter replaces the pose outright rather than adding to it:
   // added, it would creep, and creeping is exactly what a thing that is stuck
   // must not do.
   if (o.glitch) {
-    const tick = Math.floor(t * GLITCH_HZ);
+    // On the beat when there is one to be on: the same shared pulse, counted off
+    // the room instead of off the clock in here. Everything downstream — every
+    // first, second or third tick — is untouched, so a stuttering field simply
+    // starts landing with the music.
+    const tick = Math.floor(roomLocked ? roomBeats : t * GLITCH_HZ);
     if (tick !== o.snapTick && (tick + o.glitchOffset) % o.glitchEvery === 0) {
       o.snapTick = tick;
       o.snapEuler.set(
@@ -1074,6 +1214,73 @@ function updateObject(o, t, dt) {
   }
 }
 
+// ------------------------------------------------------- the breath, advanced
+// The room's beat is followed rather than read. listen.js reports a grid — a
+// beat time and a period, both in the audio clock — and the obvious thing is to
+// work the phase out from those every frame. That gives a breath that jumps a
+// little every time the estimate is refined, several times a second, which on a
+// slow swell is plainly visible.
+//
+// So the field keeps its own clock and PULLS it toward the room: it runs at the
+// room's period, and any disagreement about where in the beat we are is closed
+// gradually. What comes out follows the music and is smooth even while the
+// estimate underneath it is still arguing with itself.
+const PULL = 1.8;          // how hard, per second
+const BEATS_PER = [1, 2, 4, 8, 16];   // a breath is this many beats long
+
+let roomLocked = false;    // the room is being followed AND has been found
+let roomBeats = 0;         // beats since the lock, fractional and always rising
+let roomBeatsPer = 4;
+
+/** Which musical length of breath comes nearest the rate the slider asks for. */
+function beatsPerBreath(period) {
+  const want = 1 / (cfg.breathRate * period);   // beats per breath, unrounded
+  let best = BEATS_PER[0];
+  for (const n of BEATS_PER) {
+    if (Math.abs(Math.log2(n / want)) < Math.abs(Math.log2(best / want))) best = n;
+  }
+  return best;
+}
+
+function advanceBreath(dt) {
+  gainStep = 1 - Math.exp(-dt / GAIN_RISE);
+  alignStep = Math.exp(-dt / ALIGN_FALL);
+  depthNow += (cfg.breathDepth - depthNow) * (1 - Math.exp(-dt / DEPTH_FOLLOW));
+  const s = roomState();
+  const period = s && s.status === 'locked' && s.period > 0 ? s.period : 0;
+  const wasLocked = roomLocked;
+  roomLocked = period > 0;
+
+  if (!roomLocked) {
+    breathClock += dt * cfg.breathRate * TAU;
+    breathOwnT += dt * cfg.breathRate;
+    return;
+  }
+
+  roomBeatsPer = beatsPerBreath(period);
+  const perBeat = TAU / roomBeatsPer;   // radians of breath in one beat
+  roomBeats += dt / period;
+  breathClock += (dt / period) * perBeat;
+  breathOwnT += dt / (period * roomBeatsPer);
+
+  // Where in the beat the room says we are, against where we think we are. Only
+  // ever compared WITHIN one beat: which beat of the breath the swell starts on
+  // is not a thing a beat tracker can know — there is no downbeat in an
+  // autocorrelation — so the grid is what gets matched, and which beat of it the
+  // breath happens to have begun on is left wherever it began.
+  const err = wrapPi(((audioNow() - s.beatTime) / period) * TAU - roomBeats * TAU);
+  if (!wasLocked) {
+    // The first one is free: nothing has been breathing to the room yet, so
+    // there is nothing to jolt.
+    roomBeats += err / TAU;
+    breathClock += (err / TAU) * perBeat;
+  } else {
+    const k = Math.min(1, PULL * dt);
+    roomBeats += (err / TAU) * k;
+    breathClock += (err / TAU) * perBeat * k;
+  }
+}
+
 // -------------------------------------------------------------------- the loop
 const clock = new THREE.Clock();
 let t = 0;
@@ -1088,6 +1295,7 @@ function animate() {
   t += dt;
   if (!paused) {
     scrolled += SPEED_BASE * cfg.speed * dt;
+    advanceBreath(dt);
     for (const c of field) for (const o of c.objs) updateObject(o, t, dt);
   }
   updateMix(t);
@@ -1152,10 +1360,15 @@ function sceneSnapshot() {
     app: 'object-tile-scroll',
     // 2 renamed the columns' screen fraction from ndcX to ndcU: it is measured
     // across the travel now, and the travel is not always across the screen.
-    version: 2,
+    // 3 took breathing out of the odd habits and made it a setting of its own, so
+    // an object no longer says WHETHER it breathes — it carries the number the
+    // setting is compared against, and the file carries the shared clock.
+    version: 3,
     seed: RUN_SEED,
     t: num(t, 3),
     scrolled: num(scrolled, 3),
+    breathClock: num(breathClock, 4),
+    breathOwnT: num(breathOwnT, 4),
     settings: { ...cfg },
     aspect: num(camera.aspect, 4),
     columns: field.map((c) => ({
@@ -1175,7 +1388,12 @@ function sceneSnapshot() {
         baseScale: num(o.baseScale, 4),
         note: num(o.note, 2),
         does: [o.spin && 'spin', o.tumble && 'tumble', o.glitch && 'glitch',
-          o.breathe && 'breathe', o.hue && 'hue'].filter(Boolean),
+          o.hue && 'hue'].filter(Boolean),
+        // Not whether it is breathing, which is the setting's business: the
+        // numbers the setting reads. A frame saved at one share and opened at
+        // another is then the same objects, breathing or not as asked.
+        breath: [num(o.breathRoll, 4), num(o.breathVar, 3), num(o.breathSize, 3),
+          num(o.breathPhase, 3), num(o.breathGain, 3), num(o.breathAlign, 3)],
       })),
     })),
   };
@@ -1198,12 +1416,16 @@ function loadSceneSnapshot(data) {
   field.length = 0;
 
   if (data.settings) {
-    for (const k of ['speed', 'spacing', 'odd']) {
+    for (const k of ['speed', 'spacing', 'odd', 'breath', 'breathRate', 'breathDepth']) {
       if (typeof data.settings[k] === 'number') cfg[k] = data.settings[k];
     }
     // A file written before the field could be aimed is a file of a field going
     // straight up, whatever the angle happens to be set to now.
     cfg.angle = typeof data.settings.angle === 'number' ? data.settings.angle : 0;
+    // And one written before breathing was a setting is a file of the old
+    // behavior: a fifth of the odd share breathing, each on its own clock.
+    if (SYNCS.includes(data.settings.breathSync)) cfg.breathSync = data.settings.breathSync;
+    else if (data.version < 3) { cfg.breathSync = 'scattered'; cfg.breath = 0.2 * cfg.odd; }
     syncControls();
     // A file you opened is where you are now, so it is what you come back to.
     saveSettings();
@@ -1213,11 +1435,14 @@ function loadSceneSnapshot(data) {
   aimField();
   t = data.t || 0;
   scrolled = data.scrolled || 0;
+  breathClock = data.breathClock || 0;
+  breathOwnT = data.breathOwnT || 0;
+  depthNow = cfg.breathDepth;
 
   for (const cs of data.columns) {
     const column = {
       ndcU: cs.ndcU ?? cs.ndcX, depth: cs.depth, rows: cs.rows, span: cs.span,
-      phase: cs.phase || 0, objs: [],
+      phase: cs.phase || 0, side: field.length % 2, objs: [],
     };
     field.push(column);
     for (const os of cs.objs || []) {
@@ -1241,7 +1466,22 @@ function loadSceneSnapshot(data) {
       o.note = os.note;
       const does = new Set(os.does || []);
       o.spin = does.has('spin'); o.tumble = does.has('tumble');
-      o.glitch = does.has('glitch'); o.breathe = does.has('breathe'); o.hue = does.has('hue');
+      o.glitch = does.has('glitch'); o.hue = does.has('hue');
+      if (os.breath) {
+        [o.breathRoll, o.breathVar, o.breathSize,
+          o.breathPhase, o.breathGain, o.breathAlign] = os.breath;
+      } else {
+        // An older file says only whether this one was breathing. Put it either
+        // side of the share the settings above were just set to, so it comes
+        // back doing what it was doing — and already at full swell, since it was
+        // already at full swell when the frame was saved. Spread across its side
+        // rather than pinned to the end of it: pinned, the picture would be right
+        // and the slider dead, because no share short of all or nothing would
+        // ever cross a roll of exactly 0 or exactly 1.
+        const was = does.has('breathe');
+        o.breathRoll = was ? rng() * cfg.breath : cfg.breath + rng() * (1 - cfg.breath);
+        o.breathGain = was ? 1 : 0;
+      }
       o.voiceName = KINDS[o.kindIdx].voice;
       // Straight to the pose in the file: everything else about the object is a
       // rule for how it got there, and a saved frame is a picture, not a rule.
@@ -1356,6 +1596,14 @@ const spacingEl = document.getElementById('spacing');
 const spacingVal = document.getElementById('spacing-val');
 const oddEl = document.getElementById('odd');
 const oddVal = document.getElementById('odd-val');
+const breathEl = document.getElementById('breath');
+const breathVal = document.getElementById('breath-val');
+const breathRateEl = document.getElementById('breath-rate');
+const breathRateVal = document.getElementById('breath-rate-val');
+const breathDepthEl = document.getElementById('breath-depth');
+const breathDepthVal = document.getElementById('breath-depth-val');
+const syncEls = [...document.querySelectorAll('input[name="sync"]')];
+const SYNCS = syncEls.map((el) => el.value);
 
 /**
  * How many objects are in frame right now. Counted rather than worked out from
@@ -1380,6 +1628,20 @@ function paintReadouts() {
   angleVal.textContent = `${deg}°${BEARINGS[deg] ? ' ' + BEARINGS[deg] : ''}`;
   spacingVal.textContent = `${onScreenNow()} on screen`;
   oddVal.textContent = `${Math.round(cfg.odd * 100)}%`;
+  breathVal.textContent = `${Math.round(cfg.breath * 100)}%`;
+  breathDepthVal.textContent = `${Math.round(cfg.breathDepth * 100)}%`;
+  // Following a room, the rate is not what the slider says: it is the whole
+  // number of beats nearest to it, which at 96 in the room and 20 a minute asked
+  // for is three a minute out. Say what it actually settled on, and what that is
+  // in the room's own terms, because "4 beats" is the fact that explains why the
+  // number beside it is not the one under the thumb.
+  if (roomLocked) {
+    const s = listenState();
+    const per = Math.round(60 / (s.period * roomBeatsPer));
+    breathRateVal.textContent = `${per} / min, ${roomBeatsPer} beat${roomBeatsPer === 1 ? '' : 's'}`;
+  } else {
+    breathRateVal.textContent = `${Math.round(cfg.breathRate * 60)} / min`;
+  }
 }
 
 speedEl.addEventListener('input', () => {
@@ -1422,6 +1684,39 @@ oddEl.addEventListener('input', () => {
   // piece rather than as a setting.
 });
 
+// All four breathing controls apply to the field as it stands, which is the
+// whole reason breathing is not one of the habits above. None of them needs to
+// do anything beyond writing the number down: every one of them is read fresh
+// on every frame, by every object, and the ramps in updateObject() are what
+// keep a change from arriving as a jolt.
+breathEl.addEventListener('input', () => {
+  cfg.breath = breathEl.valueAsNumber / 100;
+  paintReadouts();
+  saveSettings();
+});
+breathRateEl.addEventListener('input', () => {
+  cfg.breathRate = breathRateEl.valueAsNumber / 60;
+  paintReadouts();
+  saveSettings();
+});
+breathDepthEl.addEventListener('input', () => {
+  cfg.breathDepth = breathDepthEl.valueAsNumber / 100;
+  paintReadouts();
+  saveSettings();
+});
+for (const el of syncEls) {
+  el.addEventListener('change', () => {
+    if (!el.checked) return;
+    const was = cfg.breathSync;
+    cfg.breathSync = el.value;
+    // The one breathing control that needs more than a number written down: the
+    // objects are somewhere in a cycle and the new pattern puts them somewhere
+    // else, so they are handed the difference and walk it off.
+    if (was !== cfg.breathSync) realignBreath(was);
+    saveSettings();
+  });
+}
+
 // ------------------------------------------------------- the settings, kept
 // Every setting, with the control that shows it and what a cfg value is
 // multiplied by to get there — one place that knows a speed of 1.0 is a slider
@@ -1437,13 +1732,24 @@ const CONTROLS = [
   { key: 'angle', el: angleEl, per: 1, roll: [0, 359] },
   { key: 'spacing', el: spacingEl, per: 100, roll: [80, 135] },
   { key: 'odd', el: oddEl, per: 100, roll: [30, 80] },
+  { key: 'breath', el: breathEl, per: 100, roll: [20, 65] },
+  { key: 'breathRate', el: breathRateEl, per: 60, roll: [9, 34] },
+  { key: 'breathDepth', el: breathDepthEl, per: 100, roll: [22, 55] },
+  // The one setting that is a word rather than a number, so it carries its own
+  // three lines instead of a multiplier. It is rolled like the rest: a first
+  // visit can arrive at a field breathing in unison as easily as at one
+  // breathing at random, and both are the piece.
+  { key: 'breathSync', pick: SYNCS },
 ];
 
 const SETTINGS_KEY = 'object-tile-scroll:settings';
 
 /** Push cfg back out to the controls, after a file or a first visit set it. */
 function syncControls() {
-  for (const c of CONTROLS) c.el.value = String(Math.round(cfg[c.key] * c.per));
+  for (const c of CONTROLS) {
+    if (c.pick) for (const el of syncEls) el.checked = el.value === cfg[c.key];
+    else c.el.value = String(Math.round(cfg[c.key] * c.per));
+  }
   paintReadouts();
 }
 
@@ -1489,10 +1795,14 @@ function openingSettings() {
 
   if (saved && typeof saved === 'object') {
     for (const c of CONTROLS) {
+      const raw = saved[c.key];
+      if (c.pick) {
+        cfg[c.key] = c.pick.includes(raw) ? raw : DEFAULTS[c.key];
+        continue;
+      }
       // typeof, not just arithmetic: null and '' and false all multiply to 0,
       // which is a real slider position, so a key that has gone missing would
       // come back as that control pinned to its minimum rather than left alone.
-      const raw = saved[c.key];
       const v = typeof raw === 'number' ? onSlider(c.el, Math.round(raw * c.per)) : null;
       cfg[c.key] = v === null ? DEFAULTS[c.key] : v / c.per;
     }
@@ -1501,6 +1811,10 @@ function openingSettings() {
 
   const roll = makeRng(RUN_SEED ^ 0x5eed);
   for (const c of CONTROLS) {
+    if (c.pick) {
+      cfg[c.key] = c.pick[Math.floor(roll() * c.pick.length)];
+      continue;
+    }
     const step = Number(c.el.step) || 1;
     const [lo, hi] = c.roll;
     cfg[c.key] = (lo + Math.floor(roll() * (Math.floor((hi - lo) / step) + 1)) * step) / c.per;
@@ -1508,9 +1822,206 @@ function openingSettings() {
   saveSettings();   // the piece they were shown is the piece they come back to
 }
 
+// --------------------------------------------------------------- the room
+// The field can be handed a clock from outside. listen.js takes the microphone
+// and reports what the room is playing; everything above reads that through the
+// two functions here and nothing else, so the breath does not know whether it is
+// running on the rate slider or on a record somebody put on in the next room.
+//
+// The piece goes silent for the duration. Its own voices are a continuous drone
+// across two dozen objects, which is not a beat and would not be mistaken for
+// one — but it is a wash sitting on top of the thing being measured, and a
+// detector this careful about a quiet room should not be handed one that the
+// piece is filling up itself.
+const listenToggle = document.getElementById('listen-toggle');
+const listenStatus = document.getElementById('listen-status');
+const micRow = document.getElementById('mic-row');
+const micSelect = document.getElementById('mic-select');
+// Remembered, because the browser offers the system default every time, and on a
+// machine with any audio work on it the system default may well be a loopback
+// device with nothing routed into it.
+const MIC_KEY = 'object-tile-scroll:input';
+const rememberedMic = () => { try { return localStorage.getItem(MIC_KEY) || ''; } catch { return ''; } };
+let statusTimer = null;
+let following = false;
+
+/** What the room is doing, or nothing at all if we are not listening to it. */
+function roomState() {
+  return following ? listenState() : null;
+}
+
+/** The clock every beat time is quoted in. */
+function audioNow() {
+  const ac = audioContext();
+  return ac ? ac.currentTime : 0;
+}
+
+const LISTEN_TEXT = {
+  asking: ['Asking for the microphone…', false],
+  listening: ['Listening for a beat…', false],
+  quiet: ['Too quiet to hear a beat.', false],
+  silent: ['The microphone is open but completely silent.', true],
+  asleep: ['Waiting for the audio clock.', false],
+  lost: ['The microphone was taken away. Switch this off and on to get it back.', true],
+  denied: ['The microphone is blocked. Allow it for this site, then try again.', true],
+  missing: ['No microphone found.', true],
+  busy: ['The microphone would not open. Another app may have it, or this browser may need turning on under System Settings, Privacy and Security, Microphone.', true],
+  insecure: ['The microphone needs a secure connection.', true],
+  error: ['The microphone could not be opened.', true],
+};
+
+function showStatus(text, warn) {
+  listenStatus.textContent = text;
+  listenStatus.classList.toggle('warn', !!warn);
+  listenStatus.hidden = false;
+}
+
+/** A failure nobody anticipated should at least say its own name. */
+function sayStatus(status, fallback) {
+  const [text, warn] = LISTEN_TEXT[status] || fallback;
+  const detail = listenState().detail;
+  showStatus(status === 'error' && detail ? `${text} (${detail})` : text, warn);
+}
+
+/**
+ * How loud the room is, as a percentage of the range this can work with. On a
+ * log scale, because loudness is: half of everything a microphone hears lives in
+ * the bottom tenth of a linear one.
+ */
+function inputMeter(level) {
+  if (!(level > 0)) return 0;
+  const u = Math.log10(level / 0.0004) / Math.log10(0.3 / 0.0004);
+  return Math.max(0, Math.min(100, Math.round(u * 100)));
+}
+
+/**
+ * A microphone that opened and delivers nothing but zeros is almost never a
+ * quiet room. Overwhelmingly it is the wrong device, so name the one we were
+ * given and name the others, which is the fact that actually resolves it.
+ */
+function silentText() {
+  const name = inputName();
+  const others = inputChoices().map((d) => d.label).filter((n) => n !== name);
+  const which = name ? ` The input is "${name}".` : '';
+  const rest = others.length
+    ? ` Other inputs on this machine: ${others.join(', ')}.`
+    : ' Check the input the system is using, and that this browser is allowed a microphone in System Settings.';
+  return `The microphone is open but completely silent.${which}${rest}`;
+}
+
+/** Keep the picker on what is actually being heard: a dead input gets abandoned on its own. */
+function refreshInputs() {
+  const choices = inputChoices();
+  const live = currentInputId();
+  if (choices.length < 2) { micRow.hidden = true; micSelect.hidden = true; return; }
+  const want = choices.map((d) => `${d.id} ${d.label}`).join('|');
+  if (micSelect.dataset.built !== want) {
+    micSelect.dataset.built = want;
+    micSelect.textContent = '';
+    for (const d of choices) {
+      const opt = document.createElement('option');
+      opt.value = d.id;
+      opt.textContent = d.label;
+      micSelect.appendChild(opt);
+    }
+  }
+  if (live && micSelect.value !== live) micSelect.value = live;
+  micRow.hidden = false;
+  micSelect.hidden = false;
+}
+
+function refreshStatus() {
+  refreshInputs();
+  // The rate readout says something different once the room has the clock, and
+  // this is the only thing that runs while it changes.
+  paintReadouts();
+  const s = listenState();
+  if (s.status === 'locked') {
+    const per = Math.round(60 / (s.period * roomBeatsPer));
+    showStatus(`${Math.round(s.heard)} BPM in the room, breathing every ${roomBeatsPer} `
+      + `beat${roomBeatsPer === 1 ? '' : 's'} at ${per} a minute.`, false);
+    return;
+  }
+  // Until it has found something, say what it can hear: without a level there is
+  // no telling a room that is too quiet from a microphone handing over nothing.
+  if (s.status === 'listening' || s.status === 'quiet' || s.status === 'silent') {
+    if (s.status === 'silent') { showStatus(silentText(), true); return; }
+    const [text, warn] = LISTEN_TEXT[s.status] || LISTEN_TEXT.listening;
+    showStatus(`${text} Input ${inputMeter(s.level)}%.`, warn);
+    return;
+  }
+  sayStatus(s.status, LISTEN_TEXT.listening);
+}
+
+async function beginListening() {
+  showStatus(...LISTEN_TEXT.asking);
+  // The context has to exist before anything can be quoted in its clock, and on
+  // a visit where the header slider was never touched there is no context at
+  // all. Started here, and started FIRST: it is what sets the audio session,
+  // and listen.js has to change that session before it asks for a device.
+  startAudio();
+  const status = await startListening(audioContext(), null, null, rememberedMic());
+  // A permission prompt that is dismissed rather than answered never settles, so
+  // the toggle stays live throughout and turning it back off is the way out. If
+  // that is what happened, hand the device straight back.
+  if (!listenToggle.checked) {
+    stopListening();
+    listenStatus.hidden = true;
+    return;
+  }
+  if (status !== 'listening') {
+    listenToggle.checked = false;
+    sayStatus(status, LISTEN_TEXT.error);
+    return;
+  }
+  following = true;
+  setMuted(true);
+  window.HeaderVolume.setEnabled(false, 'Silent while listening to the room');
+  // The Rate slider is deliberately NOT taken away here, the way a tempo fader
+  // would be. The room owns the pulse; the slider still owns how many beats of
+  // it a breath is worth, which is the difference between breathing on every
+  // beat and breathing once a bar. It is a live control, and its readout says
+  // which whole number of beats the ask actually landed on.
+  statusTimer = setInterval(refreshStatus, 250);
+  refreshStatus();
+}
+
+function endListening() {
+  stopListening();
+  if (statusTimer) clearInterval(statusTimer);
+  statusTimer = null;
+  listenStatus.hidden = true;
+  micRow.hidden = true;
+  micSelect.hidden = true;
+  // Turned off again before it ever took anything over: there is nothing to give
+  // back, and giving back a volume we never took would clobber it.
+  if (!following) return;
+  following = false;
+  roomLocked = false;
+  setMuted(false);
+  window.HeaderVolume.setEnabled(true);
+  paintReadouts();
+}
+
+listenToggle.addEventListener('change', () => {
+  if (listenToggle.checked) beginListening();
+  else endListening();
+});
+
+micSelect.addEventListener('change', async () => {
+  const id = micSelect.value;
+  try { localStorage.setItem(MIC_KEY, id); } catch { /* private window */ }
+  showStatus('Switching microphone…', false);
+  await useInput(id);
+  refreshStatus();
+});
+
 // ----------------------------------------------------------------------- start
 lastCols = 0;
 openingSettings();
+// Whatever a first visit rolled or a return visit remembered is where the depth
+// STARTS, not somewhere it eases to from the default.
+depthNow = cfg.breathDepth;
 aimField();
 resize();
 syncControls();

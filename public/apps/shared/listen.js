@@ -1,9 +1,15 @@
-// Hey Chair — listening to the room.
+// Listening to the room. Shared: Hey Chair dances a band to it, Object Tile
+// Scroll breathes to it.
 //
 // Nothing in this file makes a sound. It takes the microphone, works out how
 // fast whatever is playing nearby is going and where its beats fall, and hands
-// that to the band's clock, so the chairs dance to the room instead of to the
-// synthesized band.
+// that back, so a piece can run on the room instead of on its own clock.
+//
+// Two answers come out of it and they are not the same. `heard`, `period` and
+// `beatTime` are the measurement: the tempo actually out there and the grid its
+// beats sit on. `bpm` is that folded into the window a show can be danced at,
+// which is a convenience for the caller that has one — anything working in the
+// room's own terms should read `heard` and ignore it.
 //
 // The chain is the standard one, and each link exists for a reason:
 //

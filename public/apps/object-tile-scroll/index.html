@@ -276,6 +276,11 @@
         font-size: 0.9rem;
         font-weight: 500;
       }
+      /* [hidden] is only display:none at the very bottom of the cascade, and the
+         rule above sets display on every one of these — so the microphone row,
+         which is a slider-label with nothing but a name in it, would sit there
+         labelling a picker that is not on the page. */
+      .sheet .slider-label[hidden] { display: none; }
       .sheet .slider-label .val {
         font-size: 0.8rem;
         font-variant-numeric: tabular-nums;
@@ -287,6 +292,74 @@
         accent-color: #7fe8c0;
         cursor: pointer;
       }
+      /* The pattern control. Four words that are a set, so they are shown as a
+         set: one row, one of them lit. A dropdown would hide three quarters of
+         the choice behind a click, and four checkboxes would suggest they can be
+         combined, which they cannot — an object breathes on one clock. */
+      .sheet .pick-label {
+        margin: 16px 0 6px;
+        font-size: 0.9rem;
+        font-weight: 500;
+      }
+      .sheet .pick {
+        display: flex;
+        gap: 6px;
+      }
+      .sheet .pick label {
+        flex: 1;
+        text-align: center;
+        cursor: pointer;
+      }
+      .sheet .pick input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .sheet .pick span {
+        display: block;
+        padding: 7px 2px;
+        font-size: 0.76rem;
+        color: rgba(255,255,255,0.72);
+        background: rgba(255,255,255,0.08);
+        border: 1px solid rgba(255,255,255,0.16);
+        border-radius: 999px;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      .sheet .pick label:hover span { background: rgba(255,255,255,0.16); color: #fff; }
+      .sheet .pick input:checked + span {
+        color: #10231d;
+        background: #7fe8c0;
+        border-color: transparent;
+      }
+      .sheet .pick input:focus-visible + span { border-color: rgba(255,255,255,0.7); }
+
+      .sheet .status {
+        margin: 8px 0 0;
+        font-size: 0.78rem;
+        line-height: 1.4;
+        font-variant-numeric: tabular-nums;
+        opacity: 0.85;
+      }
+      .sheet .status[hidden] { display: none; }
+      .sheet .status.warn { color: #ffb4a8; }
+      .sheet .status + .setting,
+      .sheet .status + .slider-label { margin-top: 16px; }
+
+      .sheet select {
+        width: 100%;
+        margin: 0;
+        padding: 7px 10px;
+        font: inherit;
+        font-size: 0.82rem;
+        color: #fff;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.28);
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      .sheet select[hidden] { display: none; }
+      .sheet select option { color: #08080e; }
+
       /* No rule between the groups: with the descriptions hidden the sheet is
          already a short list, and a divider across it made two paragraphs look
          like two documents. The gap is the same 16px the controls inside a group
@@ -374,7 +447,54 @@
             <span class="val" id="odd-val">55%</span>
           </label>
           <input type="range" id="odd" min="0" max="100" step="5" value="55" aria-label="Share of objects that do something odd" />
-          <p class="desc">The share that will not simply stand there: spinning flat, tumbling end over end, stuttering into a new attitude and staying wrong, breathing in and out, or drifting through colors. The rest ride up perfectly still, which is what makes the others read.</p>
+          <p class="desc">The share that will not simply stand there: spinning flat, tumbling end over end, stuttering into a new attitude and staying wrong, or drifting through colors. The rest ride up perfectly still, which is what makes the others read. Breathing is set on its own, below.</p>
+        </section>
+
+        <section class="group">
+          <div class="setting">Breathing</div>
+          <p class="desc">Swelling and shrinking where they stand. It is the one thing the field can do together, so it is set apart from the rest: any object can breathe, whatever else it is doing, and all four of these apply to what is already on screen rather than to what is dealt next.</p>
+
+          <label class="slider-label" for="breath">
+            Breathers
+            <span class="val" id="breath-val">40%</span>
+          </label>
+          <input type="range" id="breath" min="0" max="100" step="5" value="40" aria-label="Share of objects that breathe" />
+          <p class="desc">How many of them breathe. Move it and the field takes it up or lets it go where it stands, swelling in from the size it was.</p>
+
+          <label class="slider-label" for="breath-rate">
+            Rate
+            <span class="val" id="breath-rate-val">21 / min</span>
+          </label>
+          <input type="range" id="breath-rate" min="3" max="60" step="1" value="21" aria-label="Breaths per minute" />
+          <p class="desc">Breaths a minute. Scattered, they take their own pace either side of it; in the other three they all take this one.</p>
+
+          <label class="slider-label" for="breath-depth">
+            Depth
+            <span class="val" id="breath-depth-val">38%</span>
+          </label>
+          <input type="range" id="breath-depth" min="5" max="80" step="1" value="38" aria-label="How far the breathing swells" />
+          <p class="desc">How far the swell goes, as a share of the object's own size. Deep enough and a field of things standing still becomes a field that is plainly alive.</p>
+
+          <div class="pick-label" id="sync-label">Pattern</div>
+          <div class="pick" role="radiogroup" aria-labelledby="sync-label">
+            <label><input type="radio" name="sync" value="scattered" checked /><span>Scattered</span></label>
+            <label><input type="radio" name="sync" value="together" /><span>Together</span></label>
+            <label><input type="radio" name="sync" value="alternate" /><span>Alternate</span></label>
+            <label><input type="radio" name="sync" value="wave" /><span>Wave</span></label>
+          </div>
+          <p class="desc">Whether they agree. Scattered, every one is on its own clock, which is the field breathing by accident. Together, all of them at once. Alternate, every other column against the ones beside it. Wave, a swell running up the field the way the field runs. Changing this does not jerk anything: whatever is on screen slides into formation over a few seconds.</p>
+
+          <label class="setting">
+            Follow the room
+            <input type="checkbox" id="listen-toggle" />
+          </label>
+          <p class="desc">Listens through the microphone, finds the beat of whatever is playing near you, and breathes to it: the rate snaps to the nearest whole number of beats, and the stutterers land on the beat too. The piece goes quiet while it listens, or it would be following itself. Nothing is recorded or sent anywhere.</p>
+          <p class="status" id="listen-status" hidden></p>
+
+          <label class="slider-label" for="mic-select" id="mic-row" hidden>
+            Microphone
+          </label>
+          <select id="mic-select" hidden aria-label="Which microphone to listen with"></select>
         </section>
 
         <section class="group">
