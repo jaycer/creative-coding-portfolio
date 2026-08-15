@@ -8,6 +8,7 @@
 // entries, not for static folders under /public. To add work: drop a folder in
 // either place and add a row here.
 export const apps = [
+  { slug: 'meme-generator', title: 'Meme Generator', blurb: 'Make a meme in the tab. Drop in a photo, stack pictures and text as layers you can reorder, turn any line of text to the angle you want, and export a JPG at Instagram\'s 4:5 size. Images and text stay local.', entry: 'index.html' },
   { slug: 'static-color-display', title: 'Static Color Display', blurb: 'One color, the whole screen, and nothing else. Pick it in the overlay or type a hex. It opens on pure red.', entry: 'index.html' },
   { slug: 'object-tile-scroll', title: 'Object Tile Scroll', blurb: 'Watch objects scroll by while forming an ambient chorus. Set how many of them breathe and whether they breathe together, or let it listen and breathe to whatever is playing in the room. Includes 3D models by Kenney and Quaternius.', entry: 'index.html' },
   { slug: 'v2a',            title: 'V2A',           blurb: 'Video in, audio out. Use a live camera feed or a video file, and hear the picture as a bank of tones. Height is pitch, brightness is loudness, and four mapping modes decide how the two meet. Video stays local.', entry: 'index.html' },
