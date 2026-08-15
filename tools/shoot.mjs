@@ -125,7 +125,12 @@ page.on('console', (m) => { if (m.type() === 'error') console.log('PAGE ERR', m.
 page.on('pageerror', (e) => console.log('PAGE EXC', e.message));
 
 await page.goto(url, { waitUntil: 'load' });
-await page.waitForFunction(() => !!document.querySelector('canvas'));
+// A canvas is the usual sign that an app has actually started — it is the first
+// thing every sketch here builds, and waiting for it is what makes a shot a shot
+// of the piece rather than of an empty page. Not every app has one: Static Color
+// Display is a div with a background on it, so there is nothing to wait for and
+// --no-canvas says so rather than sitting here until the timeout.
+if (!flag('no-canvas')) await page.waitForFunction(() => !!document.querySelector('canvas'));
 await page.waitForTimeout(600);
 
 // --slider: applied before any settings sheet is dismissed, because a setting

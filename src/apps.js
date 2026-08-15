@@ -8,6 +8,7 @@
 // entries, not for static folders under /public. To add work: drop a folder in
 // either place and add a row here.
 export const apps = [
+  { slug: 'static-color-display', title: 'Static Color Display', blurb: 'One color, the whole screen, and nothing else. Pick it in the overlay or type a hex. It opens on pure red.', entry: 'index.html' },
   { slug: 'object-tile-scroll', title: 'Object Tile Scroll', blurb: 'Watch objects scroll by while forming an ambient chorus. Set how many of them breathe and whether they breathe together, or let it listen and breathe to whatever is playing in the room. Includes 3D models by Kenney and Quaternius.', entry: 'index.html' },
   { slug: 'v2a',            title: 'V2A',           blurb: 'Video in, audio out. Use a live camera feed or a video file, and hear the picture as a bank of tones. Height is pitch, brightness is loudness, and four mapping modes decide how the two meet. Video stays local.', entry: 'index.html' },
   { slug: 'hey-chair',      title: 'Hey Chair',     blurb: 'A troupe of chairs parades across the stage in time under theater lights, then carries on off the far side and is replaced by another set. Some of them glitch, wander, or spin. Tap to shout at them, or let it listen and dance to whatever is playing in the room.', entry: 'index.html' },

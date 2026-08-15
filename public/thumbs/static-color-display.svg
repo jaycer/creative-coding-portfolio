@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
+  <defs>
+    <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.55"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="400" fill="#ff0000"/>
+  <rect x="0" y="300" width="600" height="100" fill="url(#scrim)"/>
+  <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="32" font-weight="600" fill="#fff">Static Color Display</text>
+</svg>
