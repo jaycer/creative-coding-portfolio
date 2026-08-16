@@ -56,6 +56,35 @@ letter tile. Each page needs two lines beside its `<link rel="icon">`:
 Keep the name short; iOS truncates the home-screen label around 12 characters.
 `npm run build` fails with instructions if either piece is missing.
 
+## Serving these apps from somewhere else
+
+The sub-apps are a portable payload; the gallery is a skin over it. A second site
+can serve the same apps under its own domain without forking anything.
+
+**`SITE_URL`** — pages carry a `%SITE_URL%` token rather than a hardcoded host,
+because Open Graph tags cannot be relative. It is filled in at build time:
+
+```bash
+SITE_URL=https://apps.example.org BASE_PATH=/ npm run build
+```
+
+The result contains no reference to any other domain, so preview cards point at
+whatever site is actually serving them. Default is the live site above. The
+token is what lives in the source files, so an app copied out of this repo
+arrives site-neutral.
+
+**`/apps.manifest.json`** — the app list as data, published at the site root,
+so another gallery does not have to import `src/apps.js` to know what exists.
+Paths are relative to the site root, no leading slash, ready to be joined to a
+different base. Each entry carries a `kind`:
+
+- `static` — the folder under `source` ships verbatim and can be copied as-is.
+- `bundled` — a Vite entry that has to go through a build. Currently `pantry`
+  and `brick-layer`.
+
+`src/apps.js` stays the one place the list is edited; the manifest is generated
+from it.
+
 ## License
 
 Code is [MIT](./LICENSE) — use it, commercially included, as long as the
