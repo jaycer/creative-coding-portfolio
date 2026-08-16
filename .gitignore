@@ -1,5 +1,8 @@
 node_modules
 dist
+# Object Scanner debug fixtures dropped by the dev server. A few MB of PNG
+# frames each, and working material rather than part of the piece.
+captures/
 .DS_Store
 *.local
 .vite
