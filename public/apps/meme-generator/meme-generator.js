@@ -1483,7 +1483,7 @@ function applyFormat(id) {
   canvas.width = next.w;
   canvas.height = next.h;
   formatSelect.value = next.id;
-  pxVal.textContent = `${next.w}×${next.h}`;
+  pxVal.textContent = `${next.w} × ${next.h} pixels`;
   draw();
 }
 
@@ -1572,7 +1572,7 @@ window.addEventListener('resize', draw);
 // --------------------------------------------------------------------- start
 formatSelect.value = state.format.id;
 bgColor.value = state.bg;
-pxVal.textContent = `${W()}×${H()}`;
+pxVal.textContent = `${W()} × ${H()} pixels`;
 syncAll();
 
 // Anton is a file, and a file takes a moment. Text measured before it arrives is

@@ -507,6 +507,16 @@
       }
       .sheet .close:hover { background: rgba(255,255,255,0.14); opacity: 1; }
       .sheet .intro { margin: 0 0 14px; font-size: 0.82rem; line-height: 1.45; color: var(--dim); }
+      /* What the chosen format actually measures, on its own line under the
+         menu that sets it. Indented past the label column so it sits under the
+         control it belongs to, rather than reading as part of the next row. */
+      .sheet .px {
+        margin: 5px 0 0;
+        padding-left: 84px;
+        font-size: 0.76rem;
+        font-variant-numeric: tabular-nums;
+        color: rgba(255,255,255,0.45);
+      }
       .sheet .action {
         display: block;
         width: 100%;
@@ -689,10 +699,10 @@
           <label for="format-select">Format</label>
           <select id="format-select"></select>
         </div>
+        <p class="px" id="px-val">–</p>
         <div class="row">
           <label for="bg-color">Backdrop</label>
           <input type="color" id="bg-color" aria-label="Background color" />
-          <span class="val" id="px-val">–</span>
         </div>
         <p class="hint">The backdrop is what shows wherever no picture reaches, and a JPG has no transparency, so it is always in the export.</p>
 
