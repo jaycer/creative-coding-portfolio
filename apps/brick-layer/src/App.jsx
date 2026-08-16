@@ -1,0 +1,1034 @@
+import { useEffect, useRef, useState, useCallback } from "react";
+
+// ============================================================
+// SHADER LIBRARY — add your own layers here
+// Each shader receives: iTime, iResolution, iMouse, uPrev (previous layer texture)
+// ============================================================
+
+const SHADERS = {
+  plasma: {
+    name: "Plasma",
+    color: "#ff6b35",
+    frag: `
+      precision highp float;
+      uniform float iTime;
+      uniform vec2 iResolution;
+      uniform vec2 iMouse;
+      varying vec2 vUv;
+
+      float plasma(vec2 uv, float t) {
+        float v = 0.0;
+        v += sin(uv.x * 6.0 + t);
+        v += sin(uv.y * 4.0 + t * 0.8);
+        v += sin((uv.x + uv.y) * 5.0 + t * 1.2);
+        float cx = uv.x + 0.5 * sin(t * 0.5);
+        float cy = uv.y + 0.5 * cos(t * 0.3);
+        v += sin(sqrt(cx*cx + cy*cy) * 8.0 + t);
+        return v;
+      }
+
+      void main() {
+        vec2 uv = vUv * 2.0 - 1.0;
+        uv.x *= iResolution.x / iResolution.y;
+        float v = plasma(uv, iTime * 0.6);
+        vec3 col = vec3(
+          sin(v * 3.14159) * 0.5 + 0.5,
+          sin(v * 3.14159 + 2.094) * 0.5 + 0.5,
+          sin(v * 3.14159 + 4.189) * 0.5 + 0.5
+        );
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  },
+
+  voronoi: {
+    name: "Voronoi",
+    color: "#00d4ff",
+    frag: `
+      precision highp float;
+      uniform float iTime;
+      uniform vec2 iResolution;
+      uniform vec2 iMouse;
+      varying vec2 vUv;
+
+      vec2 hash2(vec2 p) {
+        p = mod(p, 289.0);
+        vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+        p3 += dot(p3, p3.yzx + 19.19);
+        return fract((p3.xx + p3.yz) * p3.zy);
+      }
+
+      void main() {
+        vec2 uv = vUv * 5.0;
+        vec2 i_uv = floor(uv);
+        vec2 f_uv = fract(uv);
+        float minDist = 8.0;
+
+        for (int y = -1; y <= 1; y++) {
+          for (int x = -1; x <= 1; x++) {
+            vec2 neighbor = vec2(float(x), float(y));
+            // hash gives base position, then animate — always stays in [0,1]
+            vec2 h = hash2(i_uv + neighbor);
+            vec2 point = 0.5 + 0.45 * sin(iTime * 0.5 + 6.28318 * h);
+            vec2 diff = neighbor + point - f_uv;
+            float dist = length(diff);
+            minDist = min(minDist, dist);
+          }
+        }
+
+        vec3 col = vec3(
+          0.1 + 0.9 * minDist,
+          0.3 + 0.7 * (1.0 - minDist),
+          0.6 + 0.4 * sin(minDist * 6.28 + iTime)
+        );
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  },
+
+  warp: {
+    name: "Domain Warp",
+    color: "#c084fc",
+    frag: `
+      precision highp float;
+      uniform float iTime;
+      uniform vec2 iResolution;
+      varying vec2 vUv;
+
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5);
+        float b = fract(sin(dot(i + vec2(1,0), vec2(127.1, 311.7))) * 43758.5);
+        float c = fract(sin(dot(i + vec2(0,1), vec2(127.1, 311.7))) * 43758.5);
+        float d = fract(sin(dot(i + vec2(1,1), vec2(127.1, 311.7))) * 43758.5);
+        return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+      }
+
+      float fbm(vec2 p) {
+        float v = 0.0; float a = 0.5;
+        for (int i = 0; i < 5; i++) {
+          v += a * noise(p); p *= 2.0; a *= 0.5;
+        }
+        return v;
+      }
+
+      void main() {
+        vec2 uv = vUv * 3.0;
+        float t = iTime * 0.2;
+        vec2 q = vec2(fbm(uv + t), fbm(uv + vec2(1.7, 9.2) + t));
+        vec2 r = vec2(fbm(uv + 4.0*q + vec2(1.7,9.2) + t*0.5),
+                      fbm(uv + 4.0*q + vec2(8.3,2.8) + t*0.5));
+        float f = fbm(uv + 4.0 * r);
+        vec3 col = mix(
+          vec3(0.05, 0.02, 0.15),
+          mix(vec3(0.4, 0.1, 0.6), vec3(0.9, 0.5, 0.1), clamp(f*f*4.0, 0.0, 1.0)),
+          clamp(f * 2.0, 0.0, 1.0)
+        );
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  },
+
+  // COMPOSITE LAYER — reads from uPrev texture
+  composite: {
+    name: "Composite",
+    color: "#4ade80",
+    isComposite: true,
+    frag: `
+      precision highp float;
+      uniform float iTime;
+      uniform vec2 iResolution;
+      uniform sampler2D uPrev;
+      varying vec2 vUv;
+
+      void main() {
+        vec4 prev = texture2D(uPrev, vUv);
+        // Invert + hue rotate over time
+        vec3 col = prev.rgb;
+        float angle = iTime * 0.3;
+        float c = cos(angle), s = sin(angle);
+        mat3 hue = mat3(
+          0.213+c*0.787-s*0.213, 0.715-c*0.715-s*0.715, 0.072-c*0.072+s*0.928,
+          0.213-c*0.213+s*0.143, 0.715+c*0.285+s*0.140, 0.072-c*0.072-s*0.283,
+          0.213-c*0.213-s*0.787, 0.715-c*0.715+s*0.715, 0.072+c*0.928+s*0.072
+        );
+        col = hue * col;
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  },
+
+  underwater: {
+    name: "Underwater",
+    color: "#00aaff",
+    frag: `
+      precision highp float;
+      uniform float iTime;
+      uniform vec2 iResolution;
+      uniform float uRays;
+      uniform float uRayCount;
+      varying vec2 vUv;
+
+      float noise(vec2 p) {
+        vec2 i = floor(p);
+        vec2 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5);
+        float b = fract(sin(dot(i + vec2(1,0), vec2(127.1, 311.7))) * 43758.5);
+        float c = fract(sin(dot(i + vec2(0,1), vec2(127.1, 311.7))) * 43758.5);
+        float d = fract(sin(dot(i + vec2(1,1), vec2(127.1, 311.7))) * 43758.5);
+        return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+      }
+
+      void main() {
+        vec2 uv = vUv;
+        float t = iTime * 0.25;
+
+        // Caustic light ripples on the surface
+        vec2 wuv = uv * 6.0;
+        float w1 = noise(wuv + vec2(t, t * 0.7));
+        float w2 = noise(wuv * 1.4 - vec2(t * 0.8, t * 0.5));
+        float w3 = noise(wuv * 0.7 + vec2(-t * 0.4, t * 0.9));
+        float caustic = pow(w1 * w2 * w3, 0.4) * 2.5;
+
+        // Depth gradient — darker toward bottom
+        float depth = 1.0 - uv.y * 0.7;
+
+        // Slow horizontal sway distortion
+        float sway = sin(uv.y * 8.0 + t * 1.2) * 0.012
+                   + sin(uv.y * 3.5 - t * 0.7) * 0.008;
+        float swayNoise = noise(vec2(uv.y * 4.0, t)) * 0.015;
+        vec2 swayUv = vec2(uv.x + sway + swayNoise, uv.y);
+
+        // Soft volumetric light rays from above
+        float ray = abs(fract((swayUv.x + sin(t * 0.3) * 0.05) * uRayCount) - 0.5);
+        ray = pow(max(0.0, 1.0 - ray * 6.0), 3.0);
+        ray *= (1.0 - uv.y) * 0.6;
+
+        // Floating particle motes
+        float motes = 0.0;
+        for (float i = 0.0; i < 6.0; i++) {
+          float seed = i * 3.7;
+          float px = fract(sin(seed * 127.1) * 43758.5);
+          float py = fract(cos(seed * 311.7) * 43758.5);
+          float speed = 0.03 + fract(sin(seed * 7.3) * 4375.5) * 0.05;
+          vec2 motePos = vec2(
+            fract(px + sin(t * 0.3 + seed) * 0.04),
+            fract(py - t * speed)
+          );
+          float d = length(uv - motePos);
+          motes += smoothstep(0.012, 0.0, d);
+        }
+
+        // Base underwater blue-green palette
+        vec3 deep  = vec3(0.0, 0.08, 0.22);
+        vec3 mid   = vec3(0.0, 0.28, 0.52);
+        vec3 light = vec3(0.1, 0.65, 0.75);
+
+        vec3 col = mix(deep, mid, depth);
+        col = mix(col, light, caustic * 0.35);
+        col += ray * uRays * vec3(0.15, 0.35, 0.4);
+        col += caustic * 0.12 * vec3(0.4, 0.9, 1.0);
+        col += motes * vec3(0.8, 0.95, 1.0);
+        col = clamp(col, 0.0, 1.0);
+
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  },
+
+  crt: {
+    name: "CRT Static",
+    color: "#b0b0b0",
+    frag: `
+      precision highp float;
+      uniform float iTime;
+      uniform vec2 iResolution;
+      varying vec2 vUv;
+
+      float hash(vec2 p) {
+        p = fract(p * vec2(234.34, 435.345));
+        p += dot(p, p + 34.23);
+        return fract(p.x * p.y);
+      }
+
+      void main() {
+        vec2 uv = vUv;
+
+        // Roll the noise frame every ~3 frames for that chunky CRT feel
+        float frame = floor(iTime * 24.0);
+        float noise = hash(uv * iResolution + frame * 17.3);
+
+        // Scanlines — thin dark bands scrolling downward
+        float scan = sin((uv.y + iTime * 0.12) * iResolution.y * 0.6) * 0.5 + 0.5;
+        scan = pow(scan, 6.0) * 0.35;
+
+        // Occasional horizontal interference bands
+        float bandY = fract(uv.y * 8.0 - iTime * 0.4);
+        float band = smoothstep(0.92, 1.0, bandY) * 0.5;
+
+        // Horizontal smear: blur noise along x slightly
+        float smear = hash(vec2(floor(uv.x * iResolution.x * 0.25), uv.y * iResolution.y) + frame * 3.1);
+
+        float val = mix(noise, smear, 0.3) + scan + band;
+        val = clamp(val, 0.0, 1.0);
+
+        // Slight green tint like old phosphor screens
+        vec3 col = val * vec3(0.82, 0.95, 0.78);
+
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  },
+
+  hlines: {
+    name: "H Lines",
+    color: "#f0e040",
+    frag: `
+      precision highp float;
+      uniform float iTime;
+      uniform vec2 iResolution;
+      varying vec2 vUv;
+
+      float rand(float n) {
+        return fract(sin(n * 127.1) * 43758.5453);
+      }
+
+      void main() {
+        float y = vUv.y;
+        float t = iTime * 0.18;
+
+        vec3 col = vec3(0.0);
+        float NUM_LINES = 24.0;
+
+        for (float i = 0.0; i < 24.0; i++) {
+          float seed = i + 0.5;
+          // Each line drifts vertically at its own speed
+          float center = fract(rand(seed) + rand(seed * 3.7) * t);
+          // Thickness varies per line: thin to chunky
+          float thickness = 0.004 + rand(seed * 1.3) * 0.06;
+          float dist = abs(y - center);
+          float line = smoothstep(thickness, thickness * 0.3, dist);
+
+          // Color per line — cycle through hues with time offset
+          float hue = fract(rand(seed * 2.1) + iTime * rand(seed * 0.5) * 0.08);
+          float sat = 0.5 + rand(seed * 5.3) * 0.5;
+          // HSV to RGB
+          vec3 c = clamp(abs(mod(hue * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+          c = mix(vec3(1.0), c, sat);
+
+          col += line * c;
+        }
+
+        col = clamp(col, 0.0, 1.0);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  },
+};
+
+// ============================================================
+// VERTEX SHADER (shared)
+// ============================================================
+const VERT = `
+  attribute vec2 aPosition;
+  varying vec2 vUv;
+  void main() {
+    vUv = aPosition * 0.5 + 0.5;
+    gl_Position = vec4(aPosition, 0.0, 1.0);
+  }
+`;
+
+// ============================================================
+// WebGL helpers
+// ============================================================
+function compileShader(gl, type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    gl.deleteShader(s);
+    return null;
+  }
+  return s;
+}
+
+function createProgram(gl, fragSrc) {
+  const vert = compileShader(gl, gl.VERTEX_SHADER, VERT);
+  const frag = compileShader(gl, gl.FRAGMENT_SHADER, fragSrc);
+  if (!vert || !frag) return null;
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vert);
+  gl.attachShader(prog, frag);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(prog));
+    return null;
+  }
+  return prog;
+}
+
+function createFBO(gl, w, h) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { tex, fb };
+}
+
+// ============================================================
+// Main compositor component
+// ============================================================
+export default function ShaderCompositor() {
+  const canvasRef = useRef(null);
+  const stateRef = useRef(null);
+  const animRef = useRef(null);
+  const mouseRef = useRef([0, 0]);
+
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+  const [cursorHidden, setCursorHidden] = useState(false);
+  const cursorTimerRef = useRef(null);
+  const canvasWrapRef = useRef(null);
+
+  useEffect(() => {
+    const handleMouseMove = () => {
+      setCursorHidden(false);
+      clearTimeout(cursorTimerRef.current);
+      cursorTimerRef.current = setTimeout(() => setCursorHidden(true), 10000);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    cursorTimerRef.current = setTimeout(() => setCursorHidden(true), 10000);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      clearTimeout(cursorTimerRef.current);
+    };
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = canvasWrapRef.current;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.() || el.webkitRequestFullscreen?.();
+    } else {
+      document.exitFullscreen?.() || document.webkitExitFullscreen?.();
+    }
+  }, []);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    document.addEventListener("webkitfullscreenchange", onChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("webkitfullscreenchange", onChange);
+    };
+  }, []);
+
+  // Default layer state — used as the base when loading saved files.
+  // New properties added here will automatically get their defaults when
+  // loading older save files that don't include them.
+  const DEFAULT_LAYERS = [
+    { id: "plasma",    opacity: 1.0, blendMode: "add",      enabled: true,  speed: 1.0, zoom: 1.0, rotation: 0, expanded: true  },
+    { id: "voronoi",   opacity: 0.6, blendMode: "screen",   enabled: true,  speed: 1.0, zoom: 1.0, rotation: 0, expanded: true  },
+    { id: "underwater",opacity: 0.9, blendMode: "screen",   enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false, raysIntensity: 1.0, rayCount: 7.0 },
+    { id: "crt",       opacity: 0.6, blendMode: "screen",   enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+    { id: "hlines",    opacity: 0.8, blendMode: "screen",   enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+    { id: "warp",      opacity: 0.5, blendMode: "multiply", enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+    { id: "composite", opacity: 1.0, blendMode: "normal",   enabled: false, speed: 1.0, zoom: 1.0, rotation: 0, expanded: false },
+  ];
+
+  const [layers, setLayers] = useState(DEFAULT_LAYERS);
+  const [fps, setFps] = useState(0);
+  const layersRef = useRef(layers);
+  layersRef.current = layers;
+  const fileInputRef = useRef(null);
+
+  // Which build of the gallery is serving this app, published at /version.json
+  // by its vite config. A ref rather than state: nothing renders it, and a
+  // re-render on arrival would restart the shaders for no reason. Stays
+  // "unknown" when the app runs on its own, where that file does not exist.
+  const buildRef = useRef("unknown");
+  useEffect(() => {
+    fetch("../../version.json")
+      .then(r => (r.ok ? r.json() : null))
+      .then(v => { if (v && v.version) buildRef.current = String(v.version); })
+      .catch(() => { /* offline, or standalone. Stays "unknown". */ });
+  }, []);
+
+  const saveState = () => {
+    const state = {
+      version: 1,
+      // The codebase that wrote the file, matching what the other sub-apps in
+      // the gallery stamp. Read at save time rather than at startup because the
+      // fetch is async; "unknown" when running outside the gallery.
+      build: buildRef.current,
+      savedAt: new Date().toISOString(),
+      layers: layers.map(l => ({ ...l })),
+    };
+    const json = JSON.stringify(state, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `bricks-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const loadState = (json) => {
+    try {
+      const data = JSON.parse(json);
+      if (!Array.isArray(data.layers)) throw new Error("Invalid format: missing layers array");
+      // Walk the SAVED order, not the default order — stacking is the whole point
+      // of the compositor (each layer blends over the accumulator and feeds the
+      // next shader), so restoring the default order silently rebuilds a
+      // different picture. Each saved layer is merged over its defaults, so
+      // missing keys fall back and unknown layer IDs are dropped.
+      const defById = Object.fromEntries(DEFAULT_LAYERS.map(d => [d.id, d]));
+      const seen = new Set();
+      const merged = [];
+      for (const saved of data.layers) {
+        if (!defById[saved.id] || seen.has(saved.id)) continue;
+        seen.add(saved.id);
+        merged.push({ ...defById[saved.id], ...saved });
+      }
+      // Layers added to the app since this file was saved aren't in it — drop
+      // each one back in at its default position so older files still open.
+      DEFAULT_LAYERS.forEach((def, i) => {
+        if (!seen.has(def.id)) merged.splice(Math.min(i, merged.length), 0, { ...def });
+      });
+      setLayers(merged);
+    } catch (e) {
+      alert(`Could not load file: ${e.message}`);
+    }
+  };
+
+  const onFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => loadState(ev.target.result);
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
+  // Init WebGL
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const wrap = canvasWrapRef.current;
+    const gl = canvas.getContext("webgl", { antialias: false, alpha: false });
+    if (!gl) return;
+
+    // Fullscreen quad
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+    // Compile all programs
+    const programs = {};
+    for (const [key, shader] of Object.entries(SHADERS)) {
+      programs[key] = createProgram(gl, shader.frag);
+    }
+
+    // Final blit to screen with opacity + blendmode
+    const blitFrag = `
+      precision highp float;
+      uniform sampler2D uTex;
+      uniform sampler2D uBase;
+      uniform float uOpacity;
+      uniform int uBlend;
+      uniform float uZoom;
+      uniform float uRotation;
+      varying vec2 vUv;
+      void main() {
+        float angle = uRotation * 3.14159265 / 180.0;
+        float s = sin(angle); float c = cos(angle);
+        vec2 uv = (vUv - 0.5) / uZoom;
+        uv = vec2(c * uv.x - s * uv.y, s * uv.x + c * uv.y) + 0.5;
+        vec4 src = texture2D(uTex, uv);
+        vec4 dst = texture2D(uBase, vUv);
+        vec3 col;
+        if (uBlend == 0) col = src.rgb;
+        else if (uBlend == 1) col = clamp(dst.rgb + src.rgb, 0.0, 1.0);
+        else if (uBlend == 2) col = 1.0 - (1.0-dst.rgb)*(1.0-src.rgb);
+        else if (uBlend == 3) col = dst.rgb * src.rgb;
+        else col = src.rgb;
+        gl_FragColor = vec4(mix(dst.rgb, col, uOpacity), 1.0);
+      }
+    `;
+    const blitProg = createProgram(gl, blitFrag);
+
+    // Build/rebuild FBOs at current canvas size
+    function buildFBOs(w, h) {
+      return {
+        fbos: [createFBO(gl, w, h), createFBO(gl, w, h)],
+        accFBOs: [createFBO(gl, w, h), createFBO(gl, w, h)],
+      };
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    let w = Math.round(wrap.clientWidth * dpr);
+    let h = Math.round(wrap.clientHeight * dpr);
+    canvas.width = w;
+    canvas.height = h;
+    let { fbos, accFBOs } = buildFBOs(w, h);
+
+    stateRef.current = { gl, programs, buf, w, h };
+
+    // Resize observer — rebuilds FBOs whenever the container changes size
+    const ro = new ResizeObserver(entries => {
+      const entry = entries[0];
+      const dpr = window.devicePixelRatio || 1;
+      const newW = Math.round(entry.contentRect.width * dpr);
+      const newH = Math.round(entry.contentRect.height * dpr);
+      if (newW === w && newH === h) return;
+      w = newW; h = newH;
+      canvas.width = w;
+      canvas.height = h;
+      ({ fbos, accFBOs } = buildFBOs(w, h));
+      stateRef.current.w = w;
+      stateRef.current.h = h;
+    });
+    ro.observe(wrap);
+
+    const startTime = performance.now();
+    let lastFpsTime = startTime;
+    let frames = 0;
+
+    function drawLayer(prog, fboTarget, prevTex, time, mouse, w, h, extraUniforms = {}) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fboTarget);
+      gl.viewport(0, 0, w, h);
+      gl.useProgram(prog);
+
+      const posLoc = gl.getAttribLocation(prog, "aPosition");
+      gl.bindBuffer(gl.ARRAY_BUFFER, stateRef.current.buf);
+      gl.enableVertexAttribArray(posLoc);
+      gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+      const tLoc = gl.getUniformLocation(prog, "iTime");
+      const rLoc = gl.getUniformLocation(prog, "iResolution");
+      const mLoc = gl.getUniformLocation(prog, "iMouse");
+      const pLoc = gl.getUniformLocation(prog, "uPrev");
+
+      if (tLoc) gl.uniform1f(tLoc, time);
+      if (rLoc) gl.uniform2f(rLoc, w, h);
+      if (mLoc) gl.uniform2f(mLoc, mouse[0], mouse[1]);
+      if (pLoc && prevTex) {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, prevTex);
+        gl.uniform1i(pLoc, 0);
+      }
+
+      for (const [name, val] of Object.entries(extraUniforms)) {
+        const loc = gl.getUniformLocation(prog, name);
+        if (loc !== null) gl.uniform1f(loc, val);
+      }
+
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    function render() {
+      const now = performance.now();
+      const time = (now - startTime) / 1000;
+      frames++;
+      if (now - lastFpsTime > 500) {
+        setFps(Math.round(frames / ((now - lastFpsTime) / 1000)));
+        frames = 0;
+        lastFpsTime = now;
+      }
+
+      const cw = stateRef.current.w;
+      const ch = stateRef.current.h;
+      const activeLayers = layersRef.current.filter(l => l.enabled);
+      let ping = 0;
+
+      // Clear acc
+      gl.bindFramebuffer(gl.FRAMEBUFFER, accFBOs[0].fb);
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      let prevLayerTex = null;
+
+      for (let i = 0; i < activeLayers.length; i++) {
+        const layer = activeLayers[i];
+        const prog = programs[layer.id];
+        if (!prog) continue;
+
+        const extraUniforms = layer.id === "underwater" ? { uRays: layer.raysIntensity ?? 1.0, uRayCount: layer.rayCount ?? 7.0 } : {};
+        drawLayer(prog, fbos[ping].fb, prevLayerTex, time * (layer.speed ?? 1.0), mouseRef.current, cw, ch, extraUniforms);
+        prevLayerTex = fbos[ping].tex;
+        ping = 1 - ping;
+
+        const blendMap = { normal: 0, add: 1, screen: 2, multiply: 3 };
+        const blendInt = blendMap[layer.blendMode] ?? 0;
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, accFBOs[1].fb);
+        gl.viewport(0, 0, cw, ch);
+        gl.useProgram(blitProg);
+
+        const posLoc = gl.getAttribLocation(blitProg, "aPosition");
+        gl.bindBuffer(gl.ARRAY_BUFFER, stateRef.current.buf);
+        gl.enableVertexAttribArray(posLoc);
+        gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, prevLayerTex);
+        gl.uniform1i(gl.getUniformLocation(blitProg, "uTex"), 0);
+
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, accFBOs[0].tex);
+        gl.uniform1i(gl.getUniformLocation(blitProg, "uBase"), 1);
+
+        gl.uniform1f(gl.getUniformLocation(blitProg, "uOpacity"), layer.opacity);
+        gl.uniform1i(gl.getUniformLocation(blitProg, "uBlend"), blendInt);
+        gl.uniform1f(gl.getUniformLocation(blitProg, "uZoom"), layer.zoom ?? 1.0);
+        gl.uniform1f(gl.getUniformLocation(blitProg, "uRotation"), layer.rotation ?? 0.0);
+
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+        [accFBOs[0], accFBOs[1]] = [accFBOs[1], accFBOs[0]];
+      }
+
+      // Final blit to canvas
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, cw, ch);
+      gl.useProgram(blitProg);
+
+      const posLoc = gl.getAttribLocation(blitProg, "aPosition");
+      gl.bindBuffer(gl.ARRAY_BUFFER, stateRef.current.buf);
+      gl.enableVertexAttribArray(posLoc);
+      gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, accFBOs[0].tex);
+      gl.uniform1i(gl.getUniformLocation(blitProg, "uTex"), 0);
+
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, accFBOs[0].tex);
+      gl.uniform1i(gl.getUniformLocation(blitProg, "uBase"), 1);
+      gl.uniform1f(gl.getUniformLocation(blitProg, "uOpacity"), 1.0);
+      gl.uniform1i(gl.getUniformLocation(blitProg, "uBlend"), 0);
+      gl.uniform1f(gl.getUniformLocation(blitProg, "uZoom"), 1.0);
+      gl.uniform1f(gl.getUniformLocation(blitProg, "uRotation"), 0.0);
+
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      animRef.current = requestAnimationFrame(render);
+    }
+
+    animRef.current = requestAnimationFrame(render);
+    return () => {
+      cancelAnimationFrame(animRef.current);
+      ro.disconnect();
+    };
+  }, []);
+
+  // Mouse tracking
+  const handleMouseMove = useCallback((e) => {
+    const rect = canvasRef.current.getBoundingClientRect();
+    mouseRef.current = [
+      e.clientX - rect.left,
+      canvasRef.current.height - (e.clientY - rect.top),
+    ];
+  }, []);
+
+  const updateLayer = (id, key, val) => {
+    setLayers(prev => prev.map(l => l.id === id ? { ...l, [key]: val } : l));
+  };
+
+  const toggleEnabled = (id) => {
+    setLayers(prev => prev.map(l => {
+      if (l.id !== id) return l;
+      const newEnabled = !l.enabled;
+      return { ...l, enabled: newEnabled, expanded: newEnabled ? true : l.expanded };
+    }));
+  };
+
+  const moveLayer = (idx, dir) => {
+    setLayers(prev => {
+      const next = [...prev];
+      const swap = idx + dir;
+      if (swap < 0 || swap >= next.length) return prev;
+      [next[idx], next[swap]] = [next[swap], next[idx]];
+      return next;
+    });
+  };
+
+  const BLEND_MODES = ["normal", "add", "screen", "multiply"];
+
+  const layerPanel = (
+    <div id="layer-list" style={{ padding: "10px 12px", display: "flex", flexDirection: "row", gap: 10, flexWrap: "wrap", alignItems: "flex-start", overflowY: "auto", flex: 1 }}>
+      {layers.map((layer, idx) => {
+        const meta = SHADERS[layer.id];
+        if (!meta) return null;
+        return (
+          <div id={`layer-${layer.id}`} key={layer.id} style={{
+            flex: "1 1 180px", minWidth: 180, maxWidth: 260,
+            border: `1px solid ${layer.enabled ? meta.color + "44" : "#222"}`,
+            borderRadius: 4, overflow: "hidden",
+            opacity: layer.enabled ? 1 : 0.35,
+            transition: "opacity 0.2s, border-color 0.2s"
+          }}>
+            {/* Header */}
+            <div id={`layer-${layer.id}-header`} style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "8px 10px", background: layer.enabled ? meta.color + "18" : "#16161a",
+            }}>
+              <div id={`layer-${layer.id}-indicator`} onClick={() => toggleEnabled(layer.id)} style={{
+                width: 28, height: 28, borderRadius: "50%", flexShrink: 0, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                margin: "-10px -6px",
+              }}>
+                <div style={{
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: layer.enabled ? meta.color : "#333",
+                  boxShadow: layer.enabled ? `0 0 6px ${meta.color}` : "none",
+                  transition: "all 0.2s", pointerEvents: "none"
+                }} />
+              </div>
+              <span id={`layer-${layer.id}-name`} onClick={() => toggleEnabled(layer.id)} style={{ fontSize: "0.65em", fontWeight: 600, letterSpacing: "0.1em", flex: 1, color: layer.enabled ? "#eee" : "#bbb", cursor: "pointer" }}>
+                {meta.name.toUpperCase()}
+                {meta.isComposite && <span style={{ marginLeft: 6, fontSize: "0.65em", color: "#4ade80", opacity: 0.7 }}>FX</span>}
+              </span>
+              <div id={`layer-${layer.id}-move-btns`} style={{ display: "flex", gap: 2 }}>
+                <button id={`layer-${layer.id}-move-up`} onClick={() => moveLayer(idx, -1)} style={btnStyle}>↑</button>
+                <button id={`layer-${layer.id}-move-down`} onClick={() => moveLayer(idx, 1)} style={btnStyle}>↓</button>
+                <button id={`layer-${layer.id}-expand`} onClick={() => updateLayer(layer.id, "expanded", !layer.expanded)} style={btnStyle}>
+                  {layer.expanded ? "▲" : "▼"}
+                </button>
+              </div>
+            </div>
+
+            {layer.expanded && (
+              <div id={`layer-${layer.id}-controls`} style={{ padding: "8px 10px 10px", background: "rgba(10,10,14,0.6)" }}>
+                {/* Opacity */}
+                <label id={`layer-${layer.id}-opacity-label`} style={labelStyle}>OPACITY</label>
+                <div id={`layer-${layer.id}-opacity-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input id={`layer-${layer.id}-opacity-slider`} type="range" min={0} max={1} step={0.01}
+                    value={layer.opacity}
+                    onChange={e => updateLayer(layer.id, "opacity", parseFloat(e.target.value))}
+                    style={sliderStyle(meta.color)}
+                  />
+                  <span id={`layer-${layer.id}-opacity-value`} style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
+                    {Math.round(layer.opacity * 100)}
+                  </span>
+                </div>
+
+                {/* Speed */}
+                <label id={`layer-${layer.id}-speed-label`} style={{ ...labelStyle, marginTop: 8 }}>SPEED</label>
+                <div id={`layer-${layer.id}-speed-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input id={`layer-${layer.id}-speed-slider`} type="range" min={0} max={4} step={0.01}
+                    value={layer.speed}
+                    onChange={e => updateLayer(layer.id, "speed", parseFloat(e.target.value))}
+                    style={sliderStyle(meta.color)}
+                  />
+                  <span id={`layer-${layer.id}-speed-value`} style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
+                    {layer.speed.toFixed(1)}x
+                  </span>
+                </div>
+
+                {/* Zoom */}
+                <label id={`layer-${layer.id}-zoom-label`} style={{ ...labelStyle, marginTop: 8 }}>ZOOM</label>
+                <div id={`layer-${layer.id}-zoom-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input id={`layer-${layer.id}-zoom-slider`} type="range" min={1} max={4} step={0.01}
+                    value={layer.zoom}
+                    onChange={e => updateLayer(layer.id, "zoom", parseFloat(e.target.value))}
+                    style={sliderStyle(meta.color)}
+                  />
+                  <span id={`layer-${layer.id}-zoom-value`} style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
+                    {layer.zoom.toFixed(1)}x
+                  </span>
+                </div>
+
+                {/* Rotation */}
+                <label id={`layer-${layer.id}-rotation-label`} style={{ ...labelStyle, marginTop: 8 }}>ROTATE</label>
+                <div id={`layer-${layer.id}-rotation-row`} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input id={`layer-${layer.id}-rotation-slider`} type="range" min={0} max={360} step={1}
+                    value={layer.rotation}
+                    onChange={e => updateLayer(layer.id, "rotation", parseFloat(e.target.value))}
+                    style={sliderStyle(meta.color)}
+                  />
+                  <span id={`layer-${layer.id}-rotation-value`} style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
+                    {Math.round(layer.rotation)}°
+                  </span>
+                </div>
+
+                {/* Layer-specific controls */}
+                {layer.id === "underwater" && <>
+                  <label id="layer-underwater-rays-label" style={{ ...labelStyle, marginTop: 8 }}>RAYS</label>
+                  <div id="layer-underwater-rays-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input id="layer-underwater-rays-slider" type="range" min={0} max={3} step={0.01}
+                      value={layer.raysIntensity}
+                      onChange={e => updateLayer(layer.id, "raysIntensity", parseFloat(e.target.value))}
+                      style={sliderStyle(meta.color)}
+                    />
+                    <span id="layer-underwater-rays-value" style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
+                      {(layer.raysIntensity ?? 1).toFixed(1)}x
+                    </span>
+                  </div>
+                  <label id="layer-underwater-raycount-label" style={{ ...labelStyle, marginTop: 8 }}>RAY COUNT</label>
+                  <div id="layer-underwater-raycount-row" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input id="layer-underwater-raycount-slider" type="range" min={1} max={40} step={1}
+                      value={layer.rayCount}
+                      onChange={e => updateLayer(layer.id, "rayCount", parseFloat(e.target.value))}
+                      style={sliderStyle(meta.color)}
+                    />
+                    <span id="layer-underwater-raycount-value" style={{ fontSize: "0.65em", color: "#999", width: 30, textAlign: "right" }}>
+                      {Math.round(layer.rayCount ?? 7)}
+                    </span>
+                  </div>
+                </>}
+
+                {/* Blend mode */}
+                <label id={`layer-${layer.id}-blend-label`} style={{ ...labelStyle, marginTop: 8 }}>BLEND</label>
+                <div id={`layer-${layer.id}-blend-btns`} style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {BLEND_MODES.map(mode => (
+                    <button id={`layer-${layer.id}-blend-${mode}`} key={mode}
+                      onClick={() => updateLayer(layer.id, "blendMode", mode)}
+                      style={{
+                        padding: "3px 7px", fontSize: "0.65em", borderRadius: 2,
+                        border: `1px solid ${layer.blendMode === mode ? meta.color : "#333"}`,
+                        background: layer.blendMode === mode ? meta.color + "22" : "transparent",
+                        color: layer.blendMode === mode ? meta.color : "#aaa",
+                        cursor: "pointer", letterSpacing: "0.08em", textTransform: "uppercase",
+                        transition: "all 0.15s"
+                      }}>
+                      {mode}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  return (
+    <div id="app" style={{
+      width: "100vw", height: "100dvh", background: "#0a0a0c",
+      fontFamily: "system-ui, 'Segoe UI', Roboto, sans-serif",
+      color: "#e0e0e0", overflow: "hidden", position: "relative",
+      cursor: cursorHidden ? "none" : "default"
+    }}>
+      {/* Canvas — always fills full screen */}
+      <div id="canvas-wrap" ref={canvasWrapRef} style={{
+        position: "absolute", inset: 0
+      }}>
+        <canvas
+          id="gl-canvas"
+          ref={canvasRef}
+          onMouseMove={handleMouseMove}
+          style={{ width: "100%", height: "100%", display: "block" }}
+        />
+      </div>
+
+      {/* HUD — title + controls button */}
+      <div id="hud" style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+        <div id="title-bar" style={{
+          position: "absolute", top: 14, left: 18,
+          fontSize: "0.65em", fontWeight: 700, color: "rgba(255,255,255,0.6)", letterSpacing: "0.12em"
+        }}>
+          BENT MACE BRICK LAYER — {fps} FPS
+        </div>
+        {!showControls && !cursorHidden && <>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            onChange={onFileChange}
+            style={{ display: "none" }}
+          />
+          {/* Button row — flex so buttons never overlap */}
+          <div id="hud-btn-row" style={{
+            position: "absolute", top: 14, right: 14, pointerEvents: "all",
+            display: "flex", gap: 6, alignItems: "center"
+          }}>
+            <button id="load-btn" onClick={() => fileInputRef.current.click()} style={hudBtnStyle}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.15)"}
+            >⬆ LOAD</button>
+            <button id="save-btn" onClick={saveState} style={hudBtnStyle}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.15)"}
+            >⬇ SAVE</button>
+            <button id="controls-btn" onClick={() => setShowControls(v => !v)} style={hudBtnStyle}
+              onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
+              onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.15)"}
+            >🧱 BRICKS</button>
+          </div>
+        </>}
+      </div>
+
+      {/* Controls modal — transparent, floating */}
+      {showControls && (
+        <div id="controls-modal" style={{
+          position: "absolute",
+          top: "5%", left: "5%", right: "5%", bottom: "5%",
+          background: "rgba(10, 10, 14, 0.4)",
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+          border: "1px solid rgba(255,255,255,0.1)",
+          borderRadius: 12,
+          boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+          display: "flex", flexDirection: "column",
+          overflow: "hidden",
+        }}>
+          <div id="modal-header" style={{
+            padding: "14px 16px 10px", borderBottom: "1px solid rgba(255,255,255,0.08)",
+            fontSize: "0.65em", letterSpacing: "0.2em", color: "#ccc",
+            display: "flex", alignItems: "center", justifyContent: "space-between"
+          }}>
+            BRICKS
+            <button id="modal-close" onClick={() => setShowControls(false)} style={{
+              background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.3)",
+              borderRadius: 3, color: "#fff", cursor: "pointer",
+              fontSize: "14px", lineHeight: 1, padding: "2px 6px",
+              display: "flex", alignItems: "center"
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.25)"}
+            onMouseLeave={e => e.currentTarget.style.background = "rgba(255,255,255,0.1)"}
+            >✕</button>
+          </div>
+          {layerPanel}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const btnStyle = {
+  width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
+  background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 2,
+  color: "#fff", fontSize: "0.65em", cursor: "pointer", padding: 0,
+  lineHeight: 1
+};
+
+const hudBtnStyle = {
+  background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.4)",
+  borderRadius: 4, color: "#fff", cursor: "pointer", padding: "5px 10px",
+  fontSize: "12px", letterSpacing: "0.1em", lineHeight: 1,
+  transition: "background 0.15s", whiteSpace: "nowrap"
+};
+
+const labelStyle = {
+  display: "block", fontSize: "0.65em", letterSpacing: "0.15em",
+  color: "#aaa", marginBottom: 4, marginTop: 2
+};
+
+const sliderStyle = (color) => ({
+  flex: 1, appearance: "none", height: 2,
+  background: `linear-gradient(to right, ${color}, ${color}44)`,
+  outline: "none", cursor: "pointer", borderRadius: 1,
+  accentColor: color
+});

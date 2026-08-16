@@ -1,4 +1,8 @@
 import { defineConfig } from 'vite';
+// Brick Layer is the one sub-app written in React. It used to live in its own
+// repo and be vendored in as a prebuilt bundle; it is source here now, so the
+// plugin that compiles its JSX has to live here too.
+import react from '@vitejs/plugin-react';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readdirSync, existsSync, readFileSync } from 'node:fs';
@@ -84,16 +88,28 @@ function touchIcons() {
         for (const slug of readdirSync(base)) {
           const html = resolve(base, slug, 'index.html');
           if (!existsSync(html)) continue;
-          if (!existsSync(resolve(base, slug, 'favicon.svg'))) continue;
-          if (!existsSync(resolve(base, slug, 'apple-touch-icon.png'))) {
-            problems.push(`${dir}/${slug}: no apple-touch-icon.png — run: npm run icons`);
-          }
-          if (!/rel="apple-touch-icon"/.test(readFileSync(html, 'utf-8'))) {
+
+          const source = readFileSync(html, 'utf-8');
+          const link = source.match(/<link[^>]+rel="apple-touch-icon"[^>]*>/i);
+          if (!link) {
             problems.push(
               `${dir}/${slug}/index.html: add, next to <link rel="icon">\n` +
               `      <link rel="apple-touch-icon" href="./apple-touch-icon.png" />\n` +
               `      <meta name="apple-mobile-web-app-title" content="Short Name" />`
             );
+            continue;
+          }
+
+          // Follow the href rather than assuming the PNG sits beside the page.
+          // Brick Layer's source is bundled from apps/ while its icon ships
+          // verbatim from public/, so a folder-shaped check would skip it in
+          // both places and quietly pass an app with no icon at all.
+          const href = (link[0].match(/href="([^"]+)"/) || [])[1] || '';
+          const file = href.startsWith('/')
+            ? resolve(__dirname, 'public', href.replace(/^\//, ''))
+            : resolve(base, slug, href);
+          if (!existsSync(file)) {
+            problems.push(`${dir}/${slug}/index.html: href="${href}" resolves to nothing — run: npm run icons`);
           }
         }
       }
@@ -123,7 +139,7 @@ export default defineConfig({
   // live under a different repo/subpath, so BASE_PATH overrides it when set
   // (the preview workflow passes e.g. /creative-coding-portfolio-preview/<branch>/).
   base: process.env.BASE_PATH || '/creative-coding-portfolio/',
-  plugins: [versionJson(), touchIcons()],
+  plugins: [react(), versionJson(), touchIcons()],
   // This is a true multi-page site: the gallery links to real sub-app pages.
   // 'mpa' disables Vite's SPA index.html fallback so a directory request like
   // /apps/<slug>/ resolves to that folder's index.html (including the static

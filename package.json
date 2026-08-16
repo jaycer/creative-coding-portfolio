@@ -12,11 +12,14 @@
     "icons": "node tools/make-touch-icons.mjs"
   },
   "devDependencies": {
+    "@vitejs/plugin-react": "^5.2.0",
     "playwright-core": "^1.61.1",
     "vite": "^7.0.0"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1",
-    "qrcode-generator": "^2.0.4"
+    "qrcode-generator": "^2.0.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }
