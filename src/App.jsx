@@ -452,9 +452,25 @@ export default function ShaderCompositor() {
   layersRef.current = layers;
   const fileInputRef = useRef(null);
 
+  // Which build of the gallery is serving this app, published at /version.json
+  // by its vite config. A ref rather than state: nothing renders it, and a
+  // re-render on arrival would restart the shaders for no reason. Stays
+  // "unknown" when the app runs on its own, where that file does not exist.
+  const buildRef = useRef("unknown");
+  useEffect(() => {
+    fetch("../../version.json")
+      .then(r => (r.ok ? r.json() : null))
+      .then(v => { if (v && v.version) buildRef.current = String(v.version); })
+      .catch(() => { /* offline, or standalone. Stays "unknown". */ });
+  }, []);
+
   const saveState = () => {
     const state = {
       version: 1,
+      // The codebase that wrote the file, matching what the other sub-apps in
+      // the gallery stamp. Read at save time rather than at startup because the
+      // fetch is async; "unknown" when running outside the gallery.
+      build: buildRef.current,
       savedAt: new Date().toISOString(),
       layers: layers.map(l => ({ ...l })),
     };
@@ -472,14 +488,24 @@ export default function ShaderCompositor() {
     try {
       const data = JSON.parse(json);
       if (!Array.isArray(data.layers)) throw new Error("Invalid format: missing layers array");
-      // Merge each saved layer over its defaults — unknown keys in save files
-      // are preserved, missing keys fall back to defaults. Unknown layer IDs
-      // in the save file are ignored; new layers not in the file get defaults.
-      const savedById = Object.fromEntries(data.layers.map(l => [l.id, l]));
-      const merged = DEFAULT_LAYERS.map(def => ({
-        ...def,
-        ...(savedById[def.id] ?? {}),
-      }));
+      // Walk the SAVED order, not the default order — stacking is the whole point
+      // of the compositor (each layer blends over the accumulator and feeds the
+      // next shader), so restoring the default order silently rebuilds a
+      // different picture. Each saved layer is merged over its defaults, so
+      // missing keys fall back and unknown layer IDs are dropped.
+      const defById = Object.fromEntries(DEFAULT_LAYERS.map(d => [d.id, d]));
+      const seen = new Set();
+      const merged = [];
+      for (const saved of data.layers) {
+        if (!defById[saved.id] || seen.has(saved.id)) continue;
+        seen.add(saved.id);
+        merged.push({ ...defById[saved.id], ...saved });
+      }
+      // Layers added to the app since this file was saved aren't in it — drop
+      // each one back in at its default position so older files still open.
+      DEFAULT_LAYERS.forEach((def, i) => {
+        if (!seen.has(def.id)) merged.splice(Math.min(i, merged.length), 0, { ...def });
+      });
       setLayers(merged);
     } catch (e) {
       alert(`Could not load file: ${e.message}`);
