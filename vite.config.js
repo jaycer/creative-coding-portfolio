@@ -5,8 +5,9 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readdirSync, existsSync, readFileSync } from 'node:fs';
+import { readdirSync, existsSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { execSync } from 'node:child_process';
+import { apps } from './src/apps.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'));
@@ -60,6 +61,130 @@ function versionJson() {
     },
     generateBundle() {
       this.emitFile({ type: 'asset', fileName: 'version.json', source: body() });
+    },
+  };
+}
+
+// Where this build will be served from, absolute and without a trailing slash.
+// Open Graph is the reason it has to exist: og:image and og:url cannot be
+// relative, so the pages have to name a host. Naming it in one place instead of
+// 71 means the same app can be served from somewhere else — a preview deploy,
+// or a second site — and still hand out preview cards that point at itself.
+const SITE_URL = (process.env.SITE_URL || 'https://jaycer.github.io/creative-coding-portfolio')
+  .replace(/\/+$/, '');
+
+/**
+ * Substitute %SITE_URL% in every page.
+ *
+ * The pages under /public ship verbatim and never go through Vite's HTML
+ * pipeline, so this happens in three places rather than one: transformIndexHtml
+ * covers the bundled entries in dev and build, a dev middleware covers the
+ * static ones, and a sweep of dist at the end covers whatever the copy of
+ * /public dropped in. The sweep alone is enough for a build; the other two are
+ * so that what you see in dev is what ships.
+ *
+ * The token, not the finished URL, is what lives in the source files — so an
+ * app copied out of this repo arrives site-neutral rather than quietly
+ * advertising jaycer.github.io from someone else's domain.
+ */
+function siteUrls() {
+  const TOKEN = '%SITE_URL%';
+  const fill = (html) => html.split(TOKEN).join(SITE_URL);
+
+  const sweep = (dir) => {
+    let n = 0;
+    for (const name of readdirSync(dir)) {
+      const path = resolve(dir, name);
+      if (statSync(path).isDirectory()) { n += sweep(path); continue; }
+      if (!name.endsWith('.html')) continue;
+      const html = readFileSync(path, 'utf-8');
+      if (!html.includes(TOKEN)) continue;
+      writeFileSync(path, fill(html));
+      n++;
+    }
+    return n;
+  };
+
+  let outDir = 'dist';
+  return {
+    name: 'site-urls',
+    configResolved(config) { outDir = config.build.outDir; },
+    transformIndexHtml: { order: 'post', handler: fill },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const url = (req.url || '').split('?')[0];
+        if (!url.endsWith('.html') && !url.endsWith('/')) return next();
+        // Only files that really are under /public reach this; anything Vite
+        // owns is left alone so its own transforms and HMR still apply.
+        const rel = url.replace(/^\/+/, '').replace(/^creative-coding-portfolio\//, '');
+        let file = resolve(__dirname, 'public', rel);
+        if (url.endsWith('/')) file = resolve(file, 'index.html');
+        if (!existsSync(file) || !statSync(file).isFile()) return next();
+        const html = readFileSync(file, 'utf-8');
+        if (!html.includes(TOKEN)) return next();
+        res.setHeader('Content-Type', 'text/html');
+        res.end(fill(html));
+      });
+    },
+    closeBundle() {
+      const dir = resolve(__dirname, outDir);
+      if (existsSync(dir)) sweep(dir);
+    },
+  };
+}
+
+/**
+ * Publish the app list at /apps.manifest.json.
+ *
+ * src/apps.js is the one place the gallery is edited, but it is JavaScript, and
+ * a second gallery on another domain should not have to import this project's
+ * source to know what exists. This is the same list as data, with the paths a
+ * consumer needs and, for each app, whether it is a folder that can be copied
+ * as-is or an entry that has to be built.
+ *
+ * Paths are relative to the site root on purpose — no leading slash, no host —
+ * so they can be joined to whatever base is serving them.
+ */
+function appsManifest() {
+  const body = () => JSON.stringify({
+    version: appVersion,
+    site: SITE_URL,
+    apps: apps.map((app) => {
+      // Decided by where the page itself lives, not by whether a folder of that
+      // name exists under /public. Brick Layer has both: its source is a Vite
+      // entry under apps/, while its favicon, home-screen icon and manifest
+      // ship verbatim from public/apps/brick-layer/. A folder-shaped test calls
+      // it static and sends a consumer off to copy three sidecars and no app.
+      const isStatic = existsSync(resolve(__dirname, 'public/apps', app.slug, 'index.html'));
+      return {
+        slug: app.slug,
+        title: app.title,
+        blurb: app.blurb,
+        // "static" ships verbatim and can be copied folder and all; "bundled"
+        // is a Vite entry and has to go through a build.
+        kind: isStatic ? 'static' : 'bundled',
+        source: `${isStatic ? 'public/apps' : 'apps'}/${app.slug}/`,
+        path: `apps/${app.slug}/${app.entry ?? ''}`,
+        thumb: `thumbs/${app.slug}.svg`,
+        og: `og/${app.slug}.jpg`,
+      };
+    }),
+  }, null, 2);
+
+  let base = '/';
+  return {
+    name: 'apps-manifest',
+    configResolved(config) { base = config.base; },
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const path = (req.url || '').split('?')[0];
+        if (path !== '/apps.manifest.json' && path !== base + 'apps.manifest.json') return next();
+        res.setHeader('Content-Type', 'application/json');
+        res.end(body());
+      });
+    },
+    generateBundle() {
+      this.emitFile({ type: 'asset', fileName: 'apps.manifest.json', source: body() });
     },
   };
 }
@@ -139,7 +264,7 @@ export default defineConfig({
   // live under a different repo/subpath, so BASE_PATH overrides it when set
   // (the preview workflow passes e.g. /creative-coding-portfolio-preview/<branch>/).
   base: process.env.BASE_PATH || '/creative-coding-portfolio/',
-  plugins: [react(), versionJson(), touchIcons()],
+  plugins: [react(), versionJson(), appsManifest(), siteUrls(), touchIcons()],
   // This is a true multi-page site: the gallery links to real sub-app pages.
   // 'mpa' disables Vite's SPA index.html fallback so a directory request like
   // /apps/<slug>/ resolves to that folder's index.html (including the static
@@ -152,6 +277,9 @@ export default defineConfig({
   },
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
+    // For the bundled apps, which cannot use the %SITE_URL% token: pantry prints
+    // this into the PDF it generates, QR code and all.
+    __SITE_URL__: JSON.stringify(SITE_URL),
   },
   build: {
     outDir: 'dist',

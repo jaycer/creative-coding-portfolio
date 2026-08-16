@@ -144,9 +144,15 @@ export function buildModel(records: PantryRecord[], lang: Lang = "en"): RegionGr
   return out;
 }
 
-/** The live, always-fresher directory — encoded in the PDF QR + printed credit. */
-export const LIVE_URL = "https://jaycer.github.io/creative-coding-portfolio/apps/pantry/";
-export const LIVE_URL_SHORT = "jaycer.github.io/creative-coding-portfolio/apps/pantry";
+/**
+ * The live, always-fresher directory — encoded in the PDF QR + printed credit.
+ *
+ * Substituted at build time from the site this was built for, so a printed copy
+ * sends people back to the site they got it from rather than to whichever
+ * domain happened to be hardcoded here. __SITE_URL__ comes from vite.config.
+ */
+export const LIVE_URL = `${__SITE_URL__}/apps/pantry/`;
+export const LIVE_URL_SHORT = LIVE_URL.replace(/^https?:\/\//, "").replace(/\/$/, "");
 
 /** Total entry count (with duplicates) — handy for a cover/subtitle. */
 export function countEntries(model: RegionGroup[]): number {
