@@ -76,16 +76,32 @@ function vividLight(cb, cs) {
   return d >= 1 ? 1 : Math.min(1, cb / (1 - d));
 }
 
+// In the order the darkroom thinks about them, and grouped the way Photoshop
+// groups them, because seventeen entries in a flat list is a wall. `group` is
+// the heading the menu draws above the run of modes that share it.
 const BLENDS = [
   { id: 'normal', label: 'Normal', op: 'source-over' },
-  { id: 'multiply', label: 'Multiply', op: 'multiply' },
-  { id: 'screen', label: 'Screen', op: 'screen' },
-  { id: 'overlay', label: 'Overlay', op: 'overlay' },
-  { id: 'soft-light', label: 'Soft light', op: 'soft-light' },
-  { id: 'hard-light', label: 'Hard light', op: 'hard-light' },
-  { id: 'vivid-light', label: 'Vivid light', op: null, fn: vividLight },
-  { id: 'difference', label: 'Difference', op: 'difference' },
-  { id: 'luminosity', label: 'Luminosity', op: 'luminosity' },
+
+  { id: 'darken', label: 'Darken', op: 'darken', group: 'Darker' },
+  { id: 'multiply', label: 'Multiply', op: 'multiply', group: 'Darker' },
+  { id: 'color-burn', label: 'Color burn', op: 'color-burn', group: 'Darker' },
+
+  { id: 'lighten', label: 'Lighten', op: 'lighten', group: 'Lighter' },
+  { id: 'screen', label: 'Screen', op: 'screen', group: 'Lighter' },
+  { id: 'color-dodge', label: 'Color dodge', op: 'color-dodge', group: 'Lighter' },
+
+  { id: 'overlay', label: 'Overlay', op: 'overlay', group: 'Contrast' },
+  { id: 'soft-light', label: 'Soft light', op: 'soft-light', group: 'Contrast' },
+  { id: 'hard-light', label: 'Hard light', op: 'hard-light', group: 'Contrast' },
+  { id: 'vivid-light', label: 'Vivid light', op: null, fn: vividLight, group: 'Contrast' },
+
+  { id: 'difference', label: 'Difference', op: 'difference', group: 'Compare' },
+  { id: 'exclusion', label: 'Exclusion', op: 'exclusion', group: 'Compare' },
+
+  { id: 'hue', label: 'Hue', op: 'hue', group: 'Color' },
+  { id: 'saturation', label: 'Saturation', op: 'saturation', group: 'Color' },
+  { id: 'color', label: 'Color', op: 'color', group: 'Color' },
+  { id: 'luminosity', label: 'Luminosity', op: 'luminosity', group: 'Color' },
 ];
 const blendById = (id) => BLENDS.find((b) => b.id === id) || BLENDS[0];
 const blendOf = (layer) => blendById(layer.blend).op || 'source-over';
@@ -820,11 +836,23 @@ const rotRange = el('rot-range');
 const blendSelect = el('blend-select');
 const opacityRange = el('opacity-range');
 
+let blendGroup = null;
 for (const b of BLENDS) {
   const o = document.createElement('option');
   o.value = b.id;
   o.textContent = b.label;
-  blendSelect.appendChild(o);
+  if (b.group) {
+    // A new heading each time the run changes; the ungrouped first entry
+    // (Normal) hangs above all of them, which is where it belongs.
+    if (!blendGroup || blendGroup.label !== b.group) {
+      blendGroup = document.createElement('optgroup');
+      blendGroup.label = b.group;
+      blendSelect.appendChild(blendGroup);
+    }
+    blendGroup.appendChild(o);
+  } else {
+    blendSelect.appendChild(o);
+  }
 }
 
 for (const f of FONTS) {
@@ -1387,17 +1415,38 @@ window.addEventListener('keydown', (e) => {
     removeLayer(l.id);
     return;
   }
-  if (l && e.key.startsWith('Arrow')) {
-    e.preventDefault();
-    const step = e.shiftKey ? 20 : 2;
+  if (!l || !e.key.startsWith('Arrow')) return;
+  e.preventDefault();
+
+  // Held down, the arrows place the layer. Bare, they walk the blend modes:
+  // seventeen of them is more than anybody will find by opening a menu
+  // seventeen times, and the point of a blend is what it does to THIS picture,
+  // which you can only see by watching the picture while you step through them.
+  if (e.shiftKey) {
+    const step = 2;
     if (e.key === 'ArrowLeft') l.x -= step;
     if (e.key === 'ArrowRight') l.x += step;
     if (e.key === 'ArrowUp') l.y -= step;
     if (e.key === 'ArrowDown') l.y += step;
     touch();
     draw();
+    return;
   }
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') cycleBlend(l, e.key === 'ArrowDown' ? 1 : -1);
 });
+
+/** Step to the next blend mode, wrapping at both ends. */
+function cycleBlend(layer, dir) {
+  const i = BLENDS.indexOf(blendById(layer.blend));
+  const next = BLENDS[(i + dir + BLENDS.length) % BLENDS.length];
+  layer.blend = next.id;
+  touch();
+  syncInspector();
+  draw();
+  // Named out loud, because the whole reason to do this from the keyboard is
+  // that you are looking at the picture rather than at the panel.
+  toast(next.label);
+}
 
 // The canvas is scaled by CSS, so a window resize changes how many canvas units
 // a screen pixel is worth — and with it the size the handles have to be drawn.
