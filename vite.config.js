@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readdirSync, existsSync, readFileSync, writeFileSync, statSync } from 'node:fs';
+import { readdirSync, existsSync, readFileSync, writeFileSync, statSync, realpathSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { apps } from './src/apps.js';
 
@@ -24,9 +24,31 @@ const sh = (cmd) => {
     return '';
   }
 };
-let appVersion = sh('git describe --tags').replace(/^v/, '');
+// git answers from whatever repository encloses this directory, and that is not
+// always this one. Unpack this tree inside another project — a tarball of a
+// release, vendored into a site that serves these apps — and git walks up to
+// THAT project's .git and reports its tag. Measured: a copy extracted inside a
+// repo tagged v9.9.9 reports 9.9.9, and every save file stamped by the apps
+// would name a release of this project that does not exist.
+//
+// So git is only believed when it is answering about this project, and
+// APP_VERSION lets a consumer state the version outright instead.
+const sameDir = (a, b) => {
+  try { return realpathSync(a) === realpathSync(b); } catch { return false; }
+};
+const ownRepo = sameDir(sh('git rev-parse --show-toplevel') || '.', __dirname);
+
+let appVersion = process.env.APP_VERSION || '';
+if (!appVersion && ownRepo) appVersion = sh('git describe --tags').replace(/^v/, '');
 if (!appVersion) {
-  const gitSha = sh('git rev-parse --short HEAD');
+  if (!ownRepo) {
+    console.warn(
+      '[version] this tree is not its own git repo, so the tag cannot be read from it.\n' +
+      '          Falling back to package.json. Clone the tag instead of unpacking a\n' +
+      '          tarball, or pass APP_VERSION, or save files will be stamped wrong.'
+    );
+  }
+  const gitSha = ownRepo ? sh('git rev-parse --short HEAD') : '';
   appVersion = gitSha ? `${pkg.version}+${gitSha}` : pkg.version;
 }
 
