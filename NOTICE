@@ -1,0 +1,50 @@
+NOTICE — what the MIT license in LICENSE does not cover
+=======================================================
+
+The code in this repository is MIT licensed. Four things that travel with it
+are not mine to license that way, and the photographs are not licensed at all.
+
+
+Photographs — all rights reserved
+---------------------------------
+    public/apps/photo-gallery/photos/
+    public/thumbs/photo-gallery.svg
+    public/og/photo-gallery.jpg
+
+    Copyright (c) 2026 Jayce Renner. All rights reserved.
+
+Professional work, published here to be looked at. NOT covered by the MIT
+license, and not to be copied, redistributed, or used in any work, commercial
+or otherwise, without written permission.
+
+
+Anton (font) — SIL Open Font License 1.1
+----------------------------------------
+    public/apps/meme-generator/fonts/anton-latin.woff2
+    public/apps/meme-generator/fonts/anton-latin-ext.woff2
+
+By Vernon Adams / Cyreal, from Google Fonts, embedded verbatim.
+https://openfontlicense.org
+
+
+3D models — CC0 1.0 Universal (public domain)
+---------------------------------------------
+    public/apps/object-tile-scroll/models/
+
+By Kenney (https://kenney.nl) and Quaternius (https://quaternius.com). CC0 asks
+for no attribution; they are credited anyway in that folder's CREDITS.md.
+
+
+Food location data — Greater Cleveland Food Bank
+------------------------------------------------
+    apps/pantry/data.json
+
+Compiled from the GCFB's public food locator, cleansed and enriched. The
+underlying facts are theirs, and this repository makes no claim to them. Check
+with the GCFB before reusing that file, and note that hours change and the data
+goes stale.
+
+
+Libraries loaded at runtime (p5.js, three.js, cannon-es, Bootstrap) are fetched
+from public CDNs rather than vendored, so they are not redistributed here and
+keep their own licenses.

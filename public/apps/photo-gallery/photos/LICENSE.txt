@@ -1,0 +1,10 @@
+These photographs are Copyright (c) 2026 Jayce Renner. All rights reserved.
+
+They are NOT covered by the MIT license that applies to the rest of this
+repository. They may not be copied, redistributed, or used in any work,
+commercial or otherwise, without written permission.
+
+The code that displays them is MIT licensed and free to reuse. Bring your own
+pictures.
+
+See /NOTICE at the root of this repository.

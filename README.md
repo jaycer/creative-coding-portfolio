@@ -61,10 +61,12 @@ Keep the name short; iOS truncates the home-screen label around 12 characters.
 Code is [MIT](./LICENSE) — use it, commercially included, as long as the
 copyright notice comes along.
 
-Four things are carved out and spelled out at the top of the LICENSE file: the
-**photographs are all rights reserved**, the Anton font is SIL OFL, the 3D
-models are CC0, and the food location data belongs to the Greater Cleveland Food
-Bank.
+Four things are carved out, listed in [NOTICE](./NOTICE): the **photographs are
+all rights reserved**, the Anton font is SIL OFL, the 3D models are CC0, and the
+food location data belongs to the Greater Cleveland Food Bank.
+
+The photographs are the one to know about — the code that displays them is free
+to reuse, the pictures are not.
 
 ## Notes
 
