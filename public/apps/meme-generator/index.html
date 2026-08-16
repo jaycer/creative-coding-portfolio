@@ -430,6 +430,10 @@
         cursor: pointer;
       }
       .layer-btn:hover { color: #fff; background: rgba(255,255,255,0.14); }
+      .layer-btn svg { display: block; width: 13px; height: 13px; }
+      /* A closed padlock is a state, not an action, so it stays lit rather than
+         waiting to be hovered. */
+      .layer-btn.on { color: var(--accent); }
       .layer-btn:disabled { opacity: 0.22; cursor: default; }
       .layer-btn:disabled:hover { background: none; color: var(--dim); }
       .layer-btn.danger:hover { color: #ffb4a8; }

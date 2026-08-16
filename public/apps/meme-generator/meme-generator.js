@@ -445,6 +445,19 @@ function handlePoints(layer) {
 function paintSelection(c, layer) {
   const hp = handlePoints(layer);
   const k = hp.k;
+  if (layer.locked) {
+    // Selected, and saying so, but with nothing on it to take hold of.
+    c.save();
+    c.strokeStyle = 'rgba(255,255,255,0.45)';
+    c.lineWidth = 1.5 * k;
+    c.setLineDash([4 * k, 6 * k]);
+    c.beginPath();
+    hp.corners.forEach((pt, i) => (i ? c.lineTo(pt.x, pt.y) : c.moveTo(pt.x, pt.y)));
+    c.closePath();
+    c.stroke();
+    c.restore();
+    return;
+  }
   c.save();
   c.strokeStyle = '#7fe8c0';
   c.fillStyle = '#7fe8c0';
@@ -495,6 +508,11 @@ function baseLayer(type) {
     opacity: 1,
     blend: 'normal',
     visible: true,
+    // A locked layer is ignored by the pointer: it cannot be picked up, sized
+    // or spun on the canvas. It still draws, still selects from the list, and
+    // its controls in the panel still work — the lock is there to stop the
+    // accidents, not to make the layer read-only.
+    locked: false,
   };
 }
 
@@ -634,17 +652,24 @@ function hitLayer(layer, p) {
 }
 
 function pickLayer(p) {
-  // Front to back, so the thing you can see is the thing you grab.
+  // Whatever is selected answers first, however much is stacked on top of it.
+  // Otherwise one full-bleed photo at the front of a pile swallows every click
+  // in the frame and the layers underneath cannot be moved at all. The handles
+  // have always worked this way — they are tested against the selected layer
+  // and nothing else — and this is the same rule for the layer's own body.
+  const sel = selected();
+  if (sel && sel.visible && !sel.locked && hitLayer(sel, p)) return sel;
+  // Failing that, front to back: the thing you can see is the thing you grab.
   for (let i = state.layers.length - 1; i >= 0; i--) {
     const l = state.layers[i];
-    if (l.visible && hitLayer(l, p)) return l;
+    if (l.visible && !l.locked && hitLayer(l, p)) return l;
   }
   return null;
 }
 
 function pickHandle(p) {
   const sel = selected();
-  if (!sel || !sel.visible) return null;
+  if (!sel || !sel.visible || sel.locked) return null;
   const hp = handlePoints(sel);
   const near = 20 * hp.k;
   if (dist(p, hp.rotate) <= near) return 'rotate';
@@ -754,6 +779,20 @@ function movePinch() {
 const layerList = document.getElementById('layer-list');
 const layersEmpty = document.getElementById('layers-empty');
 
+// Drawn, not typed: the padlock characters are emoji on most platforms and
+// would arrive in full color in a row of monochrome glyphs. Shackle closed on
+// the body when locked, lifted off it when not.
+const LOCK_CLOSED =
+  '<svg viewBox="0 0 14 14" aria-hidden="true" focusable="false">' +
+    '<path d="M4.6 6.6V4.7a2.4 2.4 0 0 1 4.8 0v1.9" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+    '<rect x="2.9" y="6.4" width="8.2" height="5.8" rx="1.3" fill="currentColor"/>' +
+  '</svg>';
+const LOCK_OPEN =
+  '<svg viewBox="0 0 14 14" aria-hidden="true" focusable="false">' +
+    '<path d="M4.6 6.6V4.7a2.4 2.4 0 0 1 4.8 0" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+    '<rect x="2.9" y="6.4" width="8.2" height="5.8" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+  '</svg>';
+
 function layerName(l) {
   if (l.type === 'image') return l.name;
   const first = (l.text || '').split('\n')[0].trim();
@@ -793,6 +832,9 @@ function syncLayerList() {
     };
     btn('↑', 'Move up', 'up', i === state.layers.length - 1);
     btn('↓', 'Move down', 'down', i === 0);
+    const lock = btn('', l.locked ? 'Unlock' : 'Lock so the pointer ignores it', 'lock');
+    lock.innerHTML = l.locked ? LOCK_CLOSED : LOCK_OPEN;
+    if (l.locked) lock.classList.add('on');
     btn(l.visible ? '◉' : '○', l.visible ? 'Hide' : 'Show', 'vis');
     btn('✕', 'Delete layer', 'remove');
     layerList.appendChild(li);
@@ -807,6 +849,12 @@ layerList.addEventListener('click', (e) => {
   if (act === 'up') moveLayer(id, 1);
   else if (act === 'down') moveLayer(id, -1);
   else if (act === 'remove') removeLayer(id);
+  else if (act === 'lock') {
+    const l = byId(id);
+    if (l) l.locked = !l.locked;
+    touch();
+    syncAll();
+  }
   else if (act === 'vis') {
     const l = byId(id);
     if (l) l.visible = !l.visible;
@@ -1154,7 +1202,11 @@ exportBtn.addEventListener('click', () => {
   off.width = W();
   off.height = H();
   paint(off.getContext('2d'), false);
-  const name = `meme-${W()}x${H()}.jpg`;
+  // Stamped with the moment rather than the size: a folder full of exports
+  // wants to sort by when you made them, and every export at a given format
+  // has the same dimensions anyway. Same stamp the save files carry, so a JPG
+  // and the document it came from sit next to each other.
+  const name = `meme-${stamp()}.jpg`;
   off.toBlob((blob) => {
     if (!blob) { window.alert('The export failed.'); return; }
     const url = URL.createObjectURL(blob);
@@ -1249,6 +1301,7 @@ async function saveProject() {
       opacity: round(l.opacity, 3),
       blend: l.blend,
       visible: l.visible,
+      locked: l.locked,
     };
     if (l.type === 'image') {
       let id = ids.get(l.blob);
@@ -1339,6 +1392,7 @@ async function loadProject(file) {
     l.opacity = clamp(numOr(raw.opacity, 1), 0, 1);
     l.blend = blendById(raw.blend).id;
     l.visible = raw.visible !== false;
+    l.locked = raw.locked === true;
     if (l.type === 'image') {
       const a = assets[raw.asset];
       if (!a) continue;   // a picture that did not survive; its layer goes too
