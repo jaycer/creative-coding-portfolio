@@ -60,6 +60,22 @@ const fontById = (id) => FONTS.find((f) => f.id === id) || FONTS[0];
 // retouching and this is an app for putting words on a picture. Overlay, Soft
 // light and Hard light are the contrast family — they push the layer below away
 // from mid gray rather than simply darkening or lightening it.
+// Vivid light is the punchy one, and the only one here the browser cannot do:
+// below mid gray it burns the picture down, above it it dodges it up, and mid
+// gray leaves it exactly alone. That is the mode an editor means when it puts a
+// button marked "Contrast" on the screen — the standard name for it is Vivid
+// light, and it is the strongest member of the contrast family that Overlay and
+// the two Lights belong to. Written out per pixel below, since canvas has no
+// composite operation for it.
+function vividLight(cb, cs) {
+  if (cs <= 0.5) {
+    const d = 2 * cs;                                   // color burn
+    return d <= 0 ? 0 : 1 - Math.min(1, (1 - cb) / d);
+  }
+  const d = 2 * (cs - 0.5);                             // color dodge
+  return d >= 1 ? 1 : Math.min(1, cb / (1 - d));
+}
+
 const BLENDS = [
   { id: 'normal', label: 'Normal', op: 'source-over' },
   { id: 'multiply', label: 'Multiply', op: 'multiply' },
@@ -67,11 +83,32 @@ const BLENDS = [
   { id: 'overlay', label: 'Overlay', op: 'overlay' },
   { id: 'soft-light', label: 'Soft light', op: 'soft-light' },
   { id: 'hard-light', label: 'Hard light', op: 'hard-light' },
+  { id: 'vivid-light', label: 'Vivid light', op: null, fn: vividLight },
   { id: 'difference', label: 'Difference', op: 'difference' },
   { id: 'luminosity', label: 'Luminosity', op: 'luminosity' },
 ];
 const blendById = (id) => BLENDS.find((b) => b.id === id) || BLENDS[0];
-const blendOf = (layer) => blendById(layer.blend).op;
+const blendOf = (layer) => blendById(layer.blend).op || 'source-over';
+/** The ones done by hand rather than by the compositor. */
+const manualBlend = (layer) => blendById(layer.blend).fn || null;
+
+// A blend done by hand is a function of two bytes, so it is really a 256×256
+// table. Built once on first use; after that a pixel costs a lookup rather than
+// two divides and a branch, which is the difference between a slider that moves
+// and one that lurches.
+const lutCache = new Map();
+function blendLut(blend) {
+  let lut = lutCache.get(blend.id);
+  if (lut) return lut;
+  lut = new Uint8Array(256 * 256);
+  for (let cs = 0; cs < 256; cs++) {
+    for (let cb = 0; cb < 256; cb++) {
+      lut[cs * 256 + cb] = Math.round(255 * blend.fn(cb / 255, cs / 255));
+    }
+  }
+  lutCache.set(blend.id, lut);
+  return lut;
+}
 
 const LINE_H = 1.16;      // multiples of the font size, tight enough for caps
 const MIN_TEXT = 12;
@@ -224,6 +261,9 @@ function paint(c, overlay) {
  * the direct path and costs nothing extra.
  */
 function needsBuffer(layer) {
+  // A blend done by hand always needs it: the arithmetic reads the layer and
+  // the picture as two separate images, so the layer has to exist as one.
+  if (manualBlend(layer)) return true;
   if (layer.type !== 'text' || layer.strokeW <= 0) return false;
   return blendOf(layer) !== 'source-over' || layer.opacity < 1;
 }
@@ -251,14 +291,72 @@ function paintThroughBuffer(c, layer) {
   bc.rotate(layer.rot);
   // Composed at full strength and with no blend: what lands in here is the
   // layer as a thing in itself, outline and letters already resolved.
-  paintText(bc, layer);
+  if (layer.type === 'image') {
+    const w = layer.natW * layer.scale;
+    const h = layer.natH * layer.scale;
+    bc.imageSmoothingEnabled = true;
+    bc.imageSmoothingQuality = 'high';
+    bc.drawImage(layer.bitmap, -w / 2, -h / 2, w, h);
+  } else {
+    paintText(bc, layer);
+  }
   bc.restore();
+
+  const manual = manualBlend(layer);
+  if (manual) { compositeByHand(c, layer); return; }
 
   c.save();
   c.globalAlpha = layer.opacity;
   c.globalCompositeOperation = blendOf(layer);
   c.drawImage(bc.canvas, 0, 0);
   c.restore();
+}
+
+/** The screen-space box a layer covers, rounded out and clipped to the frame. */
+function layerBox(layer) {
+  const b = bounds(layer);
+  const cos = Math.abs(Math.cos(layer.rot));
+  const sin = Math.abs(Math.sin(layer.rot));
+  const w = b.w * cos + b.h * sin;
+  const h = b.w * sin + b.h * cos;
+  const x0 = clamp(Math.floor(layer.x - w / 2) - 2, 0, W());
+  const y0 = clamp(Math.floor(layer.y - h / 2) - 2, 0, H());
+  const x1 = clamp(Math.ceil(layer.x + w / 2) + 2, 0, W());
+  const y1 = clamp(Math.ceil(layer.y + h / 2) + 2, 0, H());
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/**
+ * Blend a composed layer onto the picture with arithmetic the compositor does
+ * not offer. Only over the layer's own box, so a line of text costs a band of
+ * pixels rather than the whole frame.
+ *
+ * The picture underneath is always opaque — the frame starts life filled with
+ * the backdrop color — so this is the simple case of the compositing formula:
+ * the result is the blend of the two colors, faded in by the layer's own alpha.
+ */
+function compositeByHand(c, layer) {
+  const blend = blendById(layer.blend);
+  const box = layerBox(layer);
+  if (box.w <= 0 || box.h <= 0) return;
+
+  const lut = blendLut(blend);
+  const under = c.getImageData(box.x, box.y, box.w, box.h);
+  const over = bufferCanvas.getContext('2d').getImageData(box.x, box.y, box.w, box.h);
+  const u = under.data;
+  const o = over.data;
+  for (let i = 0; i < u.length; i += 4) {
+    const a = (o[i + 3] / 255) * layer.opacity;
+    if (a === 0) continue;
+    for (let k = 0; k < 3; k++) {
+      const cb = u[i + k];
+      const mixed = lut[o[i + k] * 256 + cb];
+      u[i + k] = cb + (mixed - cb) * a;
+    }
+  }
+  // putImageData ignores globalAlpha and the composite mode, which is right
+  // here: both of them have already been paid, above, by hand.
+  c.putImageData(under, box.x, box.y);
 }
 
 function paintText(c, layer) {
