@@ -127,8 +127,12 @@ function blendLut(blend) {
 }
 
 const LINE_H = 1.16;      // multiples of the font size, tight enough for caps
+// The same pair of numbers the size slider carries in the markup. Three routes
+// set a text size — the slider, the number typed beside it, and a corner
+// handle dragged on the canvas — and they have to agree on where the ends are,
+// or a size you can drag to is one you cannot type.
 const MIN_TEXT = 12;
-const MAX_TEXT = 400;
+const MAX_TEXT = 500;
 const MIN_SCALE = 0.02;
 const MAX_SCALE = 8;
 const JPEG_QUALITY = 0.92;
