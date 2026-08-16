@@ -248,14 +248,50 @@
         font-size: 0.82rem;
         color: var(--dim);
       }
+      /* The readout is a field you can type in, and it has to go on reading as a
+         number until you do. No border, no background, no spinner: it looks like
+         the label it used to be, and grows a box under the pointer and a real
+         one when the caret is in it. */
+      /* The box belongs to the pair, not to the field: a unit sitting outside the
+         focus ring reads as a separate thing, and "90 %" with a gap in it is not
+         how a number is written. */
       .row .val {
         flex: none;
-        width: 46px;
-        text-align: right;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        width: 52px;
+        padding: 2px 4px;
         font-size: 0.78rem;
         font-variant-numeric: tabular-nums;
         color: var(--dim);
+        border: 1px solid transparent;
+        border-radius: 5px;
+        cursor: text;
       }
+      .row .val:hover { border-color: var(--line); }
+      .row .val:focus-within {
+        color: #fff;
+        background: rgba(255,255,255,0.1);
+        border-color: rgba(255,255,255,0.55);
+      }
+      .row .val .num {
+        width: 100%;
+        min-width: 0;
+        padding: 0;
+        font: inherit;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+        color: inherit;
+        background: none;
+        border: none;
+        cursor: text;
+      }
+      .row .val .num:focus, .row .val .num:focus-visible { outline: none; }
+      /* A typed value out of range is said quietly rather than refused: the
+         keystroke still lands, the number just is not one the slider can hold. */
+      .row .val .num[aria-invalid="true"] { color: #ffb4a8; }
+      .row .val .unit { flex: none; }
       input[type="range"] {
         flex: 1;
         min-width: 0;
@@ -569,12 +605,12 @@
             <div class="row">
               <label for="size-range">Size</label>
               <input type="range" id="size-range" min="16" max="320" step="1" />
-              <span class="val" id="size-val">–</span>
+              <span class="val"><input class="num" id="size-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Size in pixels" value="–" /></span>
             </div>
             <div class="row">
               <label for="wrap-range">Width</label>
               <input type="range" id="wrap-range" min="20" max="100" step="1" />
-              <span class="val" id="wrap-val">–</span>
+              <span class="val"><input class="num" id="wrap-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Width as a percentage" value="–" /><span class="unit">%</span></span>
             </div>
             <div class="row">
               <span class="name">Align</span>
@@ -610,14 +646,14 @@
             <div class="row">
               <label for="scale-range">Scale</label>
               <input type="range" id="scale-range" min="5" max="400" step="1" />
-              <span class="val" id="scale-val">–</span>
+              <span class="val"><input class="num" id="scale-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Scale as a percentage" value="–" /><span class="unit">%</span></span>
             </div>
           </div>
 
           <div class="row">
             <label for="rot-range">Rotate</label>
             <input type="range" id="rot-range" min="-180" max="180" step="1" />
-            <span class="val" id="rot-val">–</span>
+            <span class="val"><input class="num" id="rot-val" type="text" inputmode="text" autocomplete="off" spellcheck="false" aria-label="Rotation in degrees" value="–" /><span class="unit">°</span></span>
           </div>
           <div class="row">
             <label for="blend-select">Blend</label>
@@ -626,7 +662,7 @@
           <div class="row">
             <label for="opacity-range">Opacity</label>
             <input type="range" id="opacity-range" min="0" max="100" step="1" />
-            <span class="val" id="opacity-val">–</span>
+            <span class="val"><input class="num" id="opacity-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Opacity as a percentage" value="–" /><span class="unit">%</span></span>
           </div>
           <div class="row">
             <span class="name"></span>

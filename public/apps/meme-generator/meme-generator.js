@@ -863,6 +863,62 @@ for (const f of FONTS) {
   fontSelect.appendChild(o);
 }
 
+// ------------------------------------------------------- the numbers, typed
+// Every readout beside a slider is the slider's own value, which is what makes
+// them editable for almost nothing: a typed number is written into the range
+// and dispatched as an `input` event, so it arrives at the very same handler a
+// drag arrives at. One path, one place that can be wrong.
+
+/** Put a number in a readout — unless that is the one being typed into, where
+ *  rewriting it under the caret would eat the next keystroke. */
+function showNum(id, value) {
+  const node = el(id);
+  if (node === document.activeElement) return;
+  node.value = String(value);
+  node.setAttribute('aria-invalid', 'false');
+}
+
+function bindNumberField(id, range) {
+  const field = el(id);
+  const lo = Number(range.min);
+  const hi = Number(range.max);
+
+  const commit = (raw) => {
+    const v = parseFloat(raw);
+    if (!isFinite(v)) return false;
+    // Clamped rather than refused, and the field is left saying what was typed
+    // while it has the caret: half of "-120" is "-1", and a field that argues
+    // with you halfway through a number is unusable.
+    range.value = String(clamp(v, lo, hi));
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+    field.setAttribute('aria-invalid', String(v < lo || v > hi));
+    return true;
+  };
+
+  field.addEventListener('input', () => { commit(field.value); });
+  // Leaving it settles it: whatever is in there becomes the number the slider
+  // actually holds, or goes back to it if it never became a number at all.
+  const settle = () => {
+    field.setAttribute('aria-invalid', 'false');
+    field.value = range.value;
+  };
+  field.addEventListener('change', settle);
+  field.addEventListener('blur', settle);
+  field.addEventListener('focus', () => field.select());
+  field.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { settle(); field.blur(); return; }
+    if (e.key === 'Escape') { settle(); field.blur(); return; }
+    // Up and down step the value here rather than walking the blend modes: in a
+    // number field that is what those keys have always meant.
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      const step = (e.shiftKey ? 10 : 1) * (e.key === 'ArrowUp' ? 1 : -1);
+      commit(String(clamp(Number(range.value) + step, lo, hi)));
+      field.value = range.value;
+    }
+  });
+}
+
 /** Radians to the degrees the slider speaks: a whole number in (-180, 180], so
  *  a layer spun several times around still reads as the angle it looks like. */
 function degrees(rad) {
@@ -875,13 +931,13 @@ function syncTransformControls() {
   const l = selected();
   if (!l) return;
   rotRange.value = String(degrees(l.rot));
-  el('rot-val').textContent = rotRange.value + '°';
+  showNum('rot-val', rotRange.value);
   if (l.type === 'text') {
     sizeRange.value = String(l.size);
-    el('size-val').textContent = String(l.size);
+    showNum('size-val', l.size);
   } else {
     scaleRange.value = String(Math.round(l.scale * 100));
-    el('scale-val').textContent = Math.round(l.scale * 100) + '%';
+    showNum('scale-val', Math.round(l.scale * 100));
   }
 }
 
@@ -900,7 +956,7 @@ function syncInspector() {
     if (document.activeElement !== textInput) textInput.value = l.text;
     fontSelect.value = l.font;
     wrapRange.value = String(Math.round(l.wrap * 100));
-    el('wrap-val').textContent = Math.round(l.wrap * 100) + '%';
+    showNum('wrap-val', Math.round(l.wrap * 100));
     fillColor.value = l.color;
     strokeColor.value = l.stroke;
     strokeRange.value = String(Math.round(l.strokeW * 100));
@@ -912,7 +968,7 @@ function syncInspector() {
   }
   blendSelect.value = blendById(l.blend).id;
   opacityRange.value = String(Math.round(l.opacity * 100));
-  el('opacity-val').textContent = Math.round(l.opacity * 100) + '%';
+  showNum('opacity-val', Math.round(l.opacity * 100));
   syncTransformControls();
 }
 
@@ -939,28 +995,35 @@ onControl(textInput, 'input', (l) => { l.text = textInput.value; }, { relist: tr
 onControl(fontSelect, 'change', (l) => { l.font = fontSelect.value; });
 onControl(sizeRange, 'input', (l) => {
   l.size = Number(sizeRange.value);
-  el('size-val').textContent = sizeRange.value;
+  showNum('size-val', sizeRange.value);
 });
 onControl(wrapRange, 'input', (l) => {
   l.wrap = Number(wrapRange.value) / 100;
-  el('wrap-val').textContent = wrapRange.value + '%';
+  showNum('wrap-val', wrapRange.value);
 });
 onControl(strokeRange, 'input', (l) => { l.strokeW = Number(strokeRange.value) / 100; });
 onControl(fillColor, 'input', (l) => { l.color = fillColor.value; });
 onControl(strokeColor, 'input', (l) => { l.stroke = strokeColor.value; });
 onControl(scaleRange, 'input', (l) => {
   l.scale = Number(scaleRange.value) / 100;
-  el('scale-val').textContent = scaleRange.value + '%';
+  showNum('scale-val', scaleRange.value);
 });
 onControl(rotRange, 'input', (l) => {
   l.rot = (Number(rotRange.value) * Math.PI) / 180;
-  el('rot-val').textContent = rotRange.value + '°';
+  showNum('rot-val', rotRange.value);
 });
 onControl(blendSelect, 'change', (l) => { l.blend = blendById(blendSelect.value).id; });
 onControl(opacityRange, 'input', (l) => {
   l.opacity = Number(opacityRange.value) / 100;
-  el('opacity-val').textContent = opacityRange.value + '%';
+  showNum('opacity-val', opacityRange.value);
 });
+
+// Each readout, wired to the slider standing next to it.
+bindNumberField('size-val', sizeRange);
+bindNumberField('wrap-val', wrapRange);
+bindNumberField('scale-val', scaleRange);
+bindNumberField('rot-val', rotRange);
+bindNumberField('opacity-val', opacityRange);
 
 alignSeg.addEventListener('click', (e) => {
   const b = e.target.closest('button');
