@@ -60,6 +60,53 @@ function versionJson() {
   };
 }
 
+/**
+ * Refuse to build a sub-app that would land on an iPhone home screen as a
+ * letter tile.
+ *
+ * Safari's Add to Home Screen reads <link rel="apple-touch-icon"> and nothing
+ * else — not rel="icon", and never an SVG. Every app shipped without one until
+ * this was noticed by hand, months in, which is exactly the kind of omission a
+ * checklist does not catch. So it is checked here instead: presence only, no
+ * rasterizing, so it costs nothing and runs anywhere CI does.
+ *
+ * `npm run icons` is what fixes a failure — it builds the PNGs from the
+ * favicons. That needs Chrome, so it stays a local step and never runs in CI.
+ */
+function touchIcons() {
+  return {
+    name: 'touch-icons',
+    buildStart() {
+      const problems = [];
+      for (const dir of ['public/apps', 'apps']) {
+        const base = resolve(__dirname, dir);
+        if (!existsSync(base)) continue;
+        for (const slug of readdirSync(base)) {
+          const html = resolve(base, slug, 'index.html');
+          if (!existsSync(html)) continue;
+          if (!existsSync(resolve(base, slug, 'favicon.svg'))) continue;
+          if (!existsSync(resolve(base, slug, 'apple-touch-icon.png'))) {
+            problems.push(`${dir}/${slug}: no apple-touch-icon.png — run: npm run icons`);
+          }
+          if (!/rel="apple-touch-icon"/.test(readFileSync(html, 'utf-8'))) {
+            problems.push(
+              `${dir}/${slug}/index.html: add, next to <link rel="icon">\n` +
+              `      <link rel="apple-touch-icon" href="./apple-touch-icon.png" />\n` +
+              `      <meta name="apple-mobile-web-app-title" content="Short Name" />`
+            );
+          }
+        }
+      }
+      if (problems.length) {
+        this.error(
+          `home-screen icon missing:\n  ${problems.join('\n  ')}\n\n` +
+          `Without it, "Add to Home Screen" on iOS shows a letter tile.`
+        );
+      }
+    },
+  };
+}
+
 // Multi-page build: the main gallery plus every self-contained app folder.
 const input = { main: resolve(__dirname, 'index.html') };
 const appsDir = resolve(__dirname, 'apps');
@@ -76,7 +123,7 @@ export default defineConfig({
   // live under a different repo/subpath, so BASE_PATH overrides it when set
   // (the preview workflow passes e.g. /creative-coding-portfolio-preview/<branch>/).
   base: process.env.BASE_PATH || '/creative-coding-portfolio/',
-  plugins: [versionJson()],
+  plugins: [versionJson(), touchIcons()],
   // This is a true multi-page site: the gallery links to real sub-app pages.
   // 'mpa' disables Vite's SPA index.html fallback so a directory request like
   // /apps/<slug>/ resolves to that folder's index.html (including the static

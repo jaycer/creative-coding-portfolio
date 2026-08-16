@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "shoot": "node tools/shoot.mjs"
+    "shoot": "node tools/shoot.mjs",
+    "icons": "node tools/make-touch-icons.mjs"
   },
   "devDependencies": {
     "playwright-core": "^1.61.1",
