@@ -2,17 +2,38 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- The favicon, home-screen icon and manifest live in public/apps/brick-layer/
+         rather than beside this file. Vite fingerprints an asset referenced with
+         "./" into /assets/, which is fine for a stylesheet but not for these:
+         the manifest needs a stable URL that its own relative start_url and icon
+         paths resolve against. A "/"-prefixed href is rewritten with the site
+         base and served straight out of public/, so all three keep their names. -->
+    <link rel="icon" type="image/svg+xml" href="/apps/brick-layer/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apps/brick-layer/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Brick Layer" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="theme-color" content="#0a0a0c" />
-    <link rel="manifest" href="/manifest.json" />
-    <title>Bent Mace Brick Layer</title>
+    <link rel="manifest" href="/apps/brick-layer/manifest.json" />
+    <title>Brick Layer — Jayce Renner</title>
+    <meta name="description" content="A React shader compositor — stack, rotate, and blend generative visual layers." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="Brick Layer" />
+    <meta property="og:description" content="A React shader compositor — stack, rotate, and blend generative visual layers." />
+    <meta property="og:url" content="https://jaycer.github.io/creative-coding-portfolio/apps/brick-layer/" />
+    <meta property="og:image" content="https://jaycer.github.io/creative-coding-portfolio/og/brick-layer.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Brick Layer" />
+    <meta name="twitter:description" content="A React shader compositor — stack, rotate, and blend generative visual layers." />
+    <meta name="twitter:image" content="https://jaycer.github.io/creative-coding-portfolio/og/brick-layer.jpg" />
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <script type="module" src="./src/main.jsx"></script>
   </body>
 </html>
