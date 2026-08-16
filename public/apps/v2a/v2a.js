@@ -278,7 +278,8 @@ function toast(msg) {
 }
 
 els.saveState.addEventListener('click', () => {
-  const out = { app: 'v2a', version: 1 };
+  // `version` is the shape of the file; `build` is the codebase that wrote it.
+  const out = { app: 'v2a', version: 1, build: window.buildVersion?.() ?? 'unknown' };
   for (const k of SAVED) out[k] = cfg[k];
   const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);

@@ -1675,7 +1675,10 @@ function fileStamp() {
 
 function saveState() {
   try {
-    const blob = new Blob([JSON.stringify(currentSettings(), null, 2)], { type: 'application/json' });
+    // Stamped here rather than in currentSettings(), which also feeds
+    // localStorage — `build` belongs to the file, not to the settings.
+    const doc = { ...currentSettings(), build: window.buildVersion?.() ?? 'unknown' };
+    const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
