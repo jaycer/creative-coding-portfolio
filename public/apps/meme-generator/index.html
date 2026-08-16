@@ -248,14 +248,50 @@
         font-size: 0.82rem;
         color: var(--dim);
       }
+      /* The readout is a field you can type in, and it has to go on reading as a
+         number until you do. No border, no background, no spinner: it looks like
+         the label it used to be, and grows a box under the pointer and a real
+         one when the caret is in it. */
+      /* The box belongs to the pair, not to the field: a unit sitting outside the
+         focus ring reads as a separate thing, and "90 %" with a gap in it is not
+         how a number is written. */
       .row .val {
         flex: none;
-        width: 46px;
-        text-align: right;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        width: 52px;
+        padding: 2px 4px;
         font-size: 0.78rem;
         font-variant-numeric: tabular-nums;
         color: var(--dim);
+        border: 1px solid transparent;
+        border-radius: 5px;
+        cursor: text;
       }
+      .row .val:hover { border-color: var(--line); }
+      .row .val:focus-within {
+        color: #fff;
+        background: rgba(255,255,255,0.1);
+        border-color: rgba(255,255,255,0.55);
+      }
+      .row .val .num {
+        width: 100%;
+        min-width: 0;
+        padding: 0;
+        font: inherit;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+        color: inherit;
+        background: none;
+        border: none;
+        cursor: text;
+      }
+      .row .val .num:focus, .row .val .num:focus-visible { outline: none; }
+      /* A typed value out of range is said quietly rather than refused: the
+         keystroke still lands, the number just is not one the slider can hold. */
+      .row .val .num[aria-invalid="true"] { color: #ffb4a8; }
+      .row .val .unit { flex: none; }
       input[type="range"] {
         flex: 1;
         min-width: 0;
@@ -273,7 +309,24 @@
         border-radius: 10px;
         padding: 8px 10px;
       }
-      select { flex: 1; min-width: 0; appearance: none; -webkit-appearance: none; }
+      /* The native arrow goes with `appearance: none` — which is taken off so the
+         control matches the rest of the panel — so one is drawn back on. Without
+         it a select reads as a text field that mysteriously will not take a
+         caret. Applies to Font and Format as much as to Blend. */
+      select {
+        flex: 1;
+        min-width: 0;
+        appearance: none;
+        -webkit-appearance: none;
+        padding-right: 30px;
+        background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'><path d='M1 1.6 6 6.4 11 1.6' fill='none' stroke='rgba(255,255,255,0.62)' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+        background-repeat: no-repeat;
+        background-position: right 11px center;
+        background-size: 11px 7px;
+      }
+      /* The menu itself is the platform's, and on a dark panel it needs telling
+         that it is dark too, or a white popup opens out of a black control. */
+      select option, select optgroup { color: #fff; background: #1c1f27; }
       textarea {
         width: 100%;
         min-height: 66px;
@@ -377,6 +430,10 @@
         cursor: pointer;
       }
       .layer-btn:hover { color: #fff; background: rgba(255,255,255,0.14); }
+      .layer-btn svg { display: block; width: 13px; height: 13px; }
+      /* A closed padlock is a state, not an action, so it stays lit rather than
+         waiting to be hovered. */
+      .layer-btn.on { color: var(--accent); }
       .layer-btn:disabled { opacity: 0.22; cursor: default; }
       .layer-btn:disabled:hover { background: none; color: var(--dim); }
       .layer-btn.danger:hover { color: #ffb4a8; }
@@ -450,6 +507,16 @@
       }
       .sheet .close:hover { background: rgba(255,255,255,0.14); opacity: 1; }
       .sheet .intro { margin: 0 0 14px; font-size: 0.82rem; line-height: 1.45; color: var(--dim); }
+      /* What the chosen format actually measures, on its own line under the
+         menu that sets it. Indented past the label column so it sits under the
+         control it belongs to, rather than reading as part of the next row. */
+      .sheet .px {
+        margin: 5px 0 0;
+        padding-left: 84px;
+        font-size: 0.76rem;
+        font-variant-numeric: tabular-nums;
+        color: rgba(255,255,255,0.45);
+      }
       .sheet .action {
         display: block;
         width: 100%;
@@ -551,13 +618,13 @@
             </div>
             <div class="row">
               <label for="size-range">Size</label>
-              <input type="range" id="size-range" min="16" max="320" step="1" />
-              <span class="val" id="size-val">–</span>
+              <input type="range" id="size-range" min="12" max="500" step="1" />
+              <span class="val"><input class="num" id="size-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Size in pixels" value="–" /></span>
             </div>
             <div class="row">
               <label for="wrap-range">Width</label>
               <input type="range" id="wrap-range" min="20" max="100" step="1" />
-              <span class="val" id="wrap-val">–</span>
+              <span class="val"><input class="num" id="wrap-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Width as a percentage" value="–" /><span class="unit">%</span></span>
             </div>
             <div class="row">
               <span class="name">Align</span>
@@ -593,19 +660,23 @@
             <div class="row">
               <label for="scale-range">Scale</label>
               <input type="range" id="scale-range" min="5" max="400" step="1" />
-              <span class="val" id="scale-val">–</span>
+              <span class="val"><input class="num" id="scale-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Scale as a percentage" value="–" /><span class="unit">%</span></span>
             </div>
           </div>
 
           <div class="row">
             <label for="rot-range">Rotate</label>
             <input type="range" id="rot-range" min="-180" max="180" step="1" />
-            <span class="val" id="rot-val">–</span>
+            <span class="val"><input class="num" id="rot-val" type="text" inputmode="text" autocomplete="off" spellcheck="false" aria-label="Rotation in degrees" value="–" /><span class="unit">°</span></span>
+          </div>
+          <div class="row">
+            <label for="blend-select">Blend</label>
+            <select id="blend-select" title="Up and down arrows step through the modes"></select>
           </div>
           <div class="row">
             <label for="opacity-range">Opacity</label>
             <input type="range" id="opacity-range" min="0" max="100" step="1" />
-            <span class="val" id="opacity-val">–</span>
+            <span class="val"><input class="num" id="opacity-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Opacity as a percentage" value="–" /><span class="unit">%</span></span>
           </div>
           <div class="row">
             <span class="name"></span>
@@ -628,10 +699,10 @@
           <label for="format-select">Format</label>
           <select id="format-select"></select>
         </div>
+        <p class="px" id="px-val">–</p>
         <div class="row">
           <label for="bg-color">Backdrop</label>
           <input type="color" id="bg-color" aria-label="Background color" />
-          <span class="val" id="px-val">–</span>
         </div>
         <p class="hint">The backdrop is what shows wherever no picture reaches, and a JPG has no transparency, so it is always in the export.</p>
 

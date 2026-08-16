@@ -5,7 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="Jayce Renner — Creative Coding portfolio. Generative art, simulations, and interactive sketches." />
     <title>Jayce Renner — Creative Coding</title>
-    <link rel="icon" type="image/svg+xml" href="/creative-coding-portfolio/favicon.svg" />
+    <!-- Root-relative, with no base path written into it. Vite puts the base on
+         the front of an absolute href like this one — in dev as well as in the
+         build — so spelling the base out here gets it twice, and the dev server
+         spends every page load 404ing on
+         /creative-coding-portfolio/creative-coding-portfolio/favicon.svg. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
     <meta property="og:title" content="Jayce Renner — Creative Coding" />

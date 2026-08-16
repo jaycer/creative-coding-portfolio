@@ -52,9 +52,87 @@ const FONTS = [
 ];
 const fontById = (id) => FONTS.find((f) => f.id === id) || FONTS[0];
 
+// How a layer meets the ones under it. These are the canvas compositing modes
+// under plain names: the id is what goes on the wire and into the save file, the
+// op is what the context is set to.
+//
+// Eight of the twelve the browser has, because the rest are for photographic
+// retouching and this is an app for putting words on a picture. Overlay, Soft
+// light and Hard light are the contrast family — they push the layer below away
+// from mid gray rather than simply darkening or lightening it.
+// Vivid light is the punchy one, and the only one here the browser cannot do:
+// below mid gray it burns the picture down, above it it dodges it up, and mid
+// gray leaves it exactly alone. That is the mode an editor means when it puts a
+// button marked "Contrast" on the screen — the standard name for it is Vivid
+// light, and it is the strongest member of the contrast family that Overlay and
+// the two Lights belong to. Written out per pixel below, since canvas has no
+// composite operation for it.
+function vividLight(cb, cs) {
+  if (cs <= 0.5) {
+    const d = 2 * cs;                                   // color burn
+    return d <= 0 ? 0 : 1 - Math.min(1, (1 - cb) / d);
+  }
+  const d = 2 * (cs - 0.5);                             // color dodge
+  return d >= 1 ? 1 : Math.min(1, cb / (1 - d));
+}
+
+// In the order the darkroom thinks about them, and grouped the way Photoshop
+// groups them, because seventeen entries in a flat list is a wall. `group` is
+// the heading the menu draws above the run of modes that share it.
+const BLENDS = [
+  { id: 'normal', label: 'Normal', op: 'source-over' },
+
+  { id: 'darken', label: 'Darken', op: 'darken', group: 'Darker' },
+  { id: 'multiply', label: 'Multiply', op: 'multiply', group: 'Darker' },
+  { id: 'color-burn', label: 'Color burn', op: 'color-burn', group: 'Darker' },
+
+  { id: 'lighten', label: 'Lighten', op: 'lighten', group: 'Lighter' },
+  { id: 'screen', label: 'Screen', op: 'screen', group: 'Lighter' },
+  { id: 'color-dodge', label: 'Color dodge', op: 'color-dodge', group: 'Lighter' },
+
+  { id: 'overlay', label: 'Overlay', op: 'overlay', group: 'Contrast' },
+  { id: 'soft-light', label: 'Soft light', op: 'soft-light', group: 'Contrast' },
+  { id: 'hard-light', label: 'Hard light', op: 'hard-light', group: 'Contrast' },
+  { id: 'vivid-light', label: 'Vivid light', op: null, fn: vividLight, group: 'Contrast' },
+
+  { id: 'difference', label: 'Difference', op: 'difference', group: 'Compare' },
+  { id: 'exclusion', label: 'Exclusion', op: 'exclusion', group: 'Compare' },
+
+  { id: 'hue', label: 'Hue', op: 'hue', group: 'Color' },
+  { id: 'saturation', label: 'Saturation', op: 'saturation', group: 'Color' },
+  { id: 'color', label: 'Color', op: 'color', group: 'Color' },
+  { id: 'luminosity', label: 'Luminosity', op: 'luminosity', group: 'Color' },
+];
+const blendById = (id) => BLENDS.find((b) => b.id === id) || BLENDS[0];
+const blendOf = (layer) => blendById(layer.blend).op || 'source-over';
+/** The ones done by hand rather than by the compositor. */
+const manualBlend = (layer) => blendById(layer.blend).fn || null;
+
+// A blend done by hand is a function of two bytes, so it is really a 256×256
+// table. Built once on first use; after that a pixel costs a lookup rather than
+// two divides and a branch, which is the difference between a slider that moves
+// and one that lurches.
+const lutCache = new Map();
+function blendLut(blend) {
+  let lut = lutCache.get(blend.id);
+  if (lut) return lut;
+  lut = new Uint8Array(256 * 256);
+  for (let cs = 0; cs < 256; cs++) {
+    for (let cb = 0; cb < 256; cb++) {
+      lut[cs * 256 + cb] = Math.round(255 * blend.fn(cb / 255, cs / 255));
+    }
+  }
+  lutCache.set(blend.id, lut);
+  return lut;
+}
+
 const LINE_H = 1.16;      // multiples of the font size, tight enough for caps
+// The same pair of numbers the size slider carries in the markup. Three routes
+// set a text size — the slider, the number typed beside it, and a corner
+// handle dragged on the canvas — and they have to agree on where the ends are,
+// or a size you can drag to is one you cannot type.
 const MIN_TEXT = 12;
-const MAX_TEXT = 400;
+const MAX_TEXT = 500;
 const MIN_SCALE = 0.02;
 const MAX_SCALE = 8;
 const JPEG_QUALITY = 0.92;
@@ -163,8 +241,13 @@ function paint(c, overlay) {
 
   for (const layer of state.layers) {
     if (!layer.visible) continue;
+    if (needsBuffer(layer)) { paintThroughBuffer(c, layer); continue; }
     c.save();
     c.globalAlpha = layer.opacity;
+    // How this layer meets what is already down. save/restore puts it back to
+    // source-over for the next one, so a blend never leaks past its own layer
+    // and the selection handles are never drawn through one.
+    c.globalCompositeOperation = blendOf(layer);
     c.translate(layer.x, layer.y);
     c.rotate(layer.rot);
     if (layer.type === 'image') {
@@ -183,6 +266,117 @@ function paint(c, overlay) {
     const sel = selected();
     if (sel && sel.visible) paintSelection(c, sel);
   }
+}
+
+/**
+ * Does this layer have to be composed on its own before it meets the picture?
+ *
+ * Outlined text is drawn twice, stroke then fill, and both of those are real
+ * draws: with a blend mode set, the fill blends against its OWN outline instead
+ * of against the picture, and a white glyph on a black outline under Multiply
+ * comes out black. Partial opacity has the same flaw for a subtler reason — the
+ * outline shows through the middle of every letter.
+ *
+ * A picture is one drawImage with nothing under it to blend against, so it takes
+ * the direct path and costs nothing extra.
+ */
+function needsBuffer(layer) {
+  // A blend done by hand always needs it: the arithmetic reads the layer and
+  // the picture as two separate images, so the layer has to exist as one.
+  if (manualBlend(layer)) return true;
+  if (layer.type !== 'text' || layer.strokeW <= 0) return false;
+  return blendOf(layer) !== 'source-over' || layer.opacity < 1;
+}
+
+// One buffer, reused. A second full-frame canvas is 5MB at 1080×1350 and there
+// is never a need for two at once: a layer is composed, drawn, and done with.
+let bufferCanvas = null;
+function layerBuffer() {
+  if (!bufferCanvas) bufferCanvas = document.createElement('canvas');
+  const bc = bufferCanvas.getContext('2d');
+  if (bufferCanvas.width !== W() || bufferCanvas.height !== H()) {
+    // Sizing a canvas clears it, so this is the clear as well.
+    bufferCanvas.width = W();
+    bufferCanvas.height = H();
+  } else {
+    bc.clearRect(0, 0, W(), H());
+  }
+  return bc;
+}
+
+function paintThroughBuffer(c, layer) {
+  const bc = layerBuffer();
+  bc.save();
+  bc.translate(layer.x, layer.y);
+  bc.rotate(layer.rot);
+  // Composed at full strength and with no blend: what lands in here is the
+  // layer as a thing in itself, outline and letters already resolved.
+  if (layer.type === 'image') {
+    const w = layer.natW * layer.scale;
+    const h = layer.natH * layer.scale;
+    bc.imageSmoothingEnabled = true;
+    bc.imageSmoothingQuality = 'high';
+    bc.drawImage(layer.bitmap, -w / 2, -h / 2, w, h);
+  } else {
+    paintText(bc, layer);
+  }
+  bc.restore();
+
+  const manual = manualBlend(layer);
+  if (manual) { compositeByHand(c, layer); return; }
+
+  c.save();
+  c.globalAlpha = layer.opacity;
+  c.globalCompositeOperation = blendOf(layer);
+  c.drawImage(bc.canvas, 0, 0);
+  c.restore();
+}
+
+/** The screen-space box a layer covers, rounded out and clipped to the frame. */
+function layerBox(layer) {
+  const b = bounds(layer);
+  const cos = Math.abs(Math.cos(layer.rot));
+  const sin = Math.abs(Math.sin(layer.rot));
+  const w = b.w * cos + b.h * sin;
+  const h = b.w * sin + b.h * cos;
+  const x0 = clamp(Math.floor(layer.x - w / 2) - 2, 0, W());
+  const y0 = clamp(Math.floor(layer.y - h / 2) - 2, 0, H());
+  const x1 = clamp(Math.ceil(layer.x + w / 2) + 2, 0, W());
+  const y1 = clamp(Math.ceil(layer.y + h / 2) + 2, 0, H());
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/**
+ * Blend a composed layer onto the picture with arithmetic the compositor does
+ * not offer. Only over the layer's own box, so a line of text costs a band of
+ * pixels rather than the whole frame.
+ *
+ * The picture underneath is always opaque — the frame starts life filled with
+ * the backdrop color — so this is the simple case of the compositing formula:
+ * the result is the blend of the two colors, faded in by the layer's own alpha.
+ */
+function compositeByHand(c, layer) {
+  const blend = blendById(layer.blend);
+  const box = layerBox(layer);
+  if (box.w <= 0 || box.h <= 0) return;
+
+  const lut = blendLut(blend);
+  const under = c.getImageData(box.x, box.y, box.w, box.h);
+  const over = bufferCanvas.getContext('2d').getImageData(box.x, box.y, box.w, box.h);
+  const u = under.data;
+  const o = over.data;
+  for (let i = 0; i < u.length; i += 4) {
+    const a = (o[i + 3] / 255) * layer.opacity;
+    if (a === 0) continue;
+    for (let k = 0; k < 3; k++) {
+      const cb = u[i + k];
+      const mixed = lut[o[i + k] * 256 + cb];
+      u[i + k] = cb + (mixed - cb) * a;
+    }
+  }
+  // putImageData ignores globalAlpha and the composite mode, which is right
+  // here: both of them have already been paid, above, by hand.
+  c.putImageData(under, box.x, box.y);
 }
 
 function paintText(c, layer) {
@@ -255,6 +449,19 @@ function handlePoints(layer) {
 function paintSelection(c, layer) {
   const hp = handlePoints(layer);
   const k = hp.k;
+  if (layer.locked) {
+    // Selected, and saying so, but with nothing on it to take hold of.
+    c.save();
+    c.strokeStyle = 'rgba(255,255,255,0.45)';
+    c.lineWidth = 1.5 * k;
+    c.setLineDash([4 * k, 6 * k]);
+    c.beginPath();
+    hp.corners.forEach((pt, i) => (i ? c.lineTo(pt.x, pt.y) : c.moveTo(pt.x, pt.y)));
+    c.closePath();
+    c.stroke();
+    c.restore();
+    return;
+  }
   c.save();
   c.strokeStyle = '#7fe8c0';
   c.fillStyle = '#7fe8c0';
@@ -303,7 +510,13 @@ function baseLayer(type) {
     y: H() / 2,
     rot: 0,
     opacity: 1,
+    blend: 'normal',
     visible: true,
+    // A locked layer is ignored by the pointer: it cannot be picked up, sized
+    // or spun on the canvas. It still draws, still selects from the list, and
+    // its controls in the panel still work — the lock is there to stop the
+    // accidents, not to make the layer read-only.
+    locked: false,
   };
 }
 
@@ -443,17 +656,24 @@ function hitLayer(layer, p) {
 }
 
 function pickLayer(p) {
-  // Front to back, so the thing you can see is the thing you grab.
+  // Whatever is selected answers first, however much is stacked on top of it.
+  // Otherwise one full-bleed photo at the front of a pile swallows every click
+  // in the frame and the layers underneath cannot be moved at all. The handles
+  // have always worked this way — they are tested against the selected layer
+  // and nothing else — and this is the same rule for the layer's own body.
+  const sel = selected();
+  if (sel && sel.visible && !sel.locked && hitLayer(sel, p)) return sel;
+  // Failing that, front to back: the thing you can see is the thing you grab.
   for (let i = state.layers.length - 1; i >= 0; i--) {
     const l = state.layers[i];
-    if (l.visible && hitLayer(l, p)) return l;
+    if (l.visible && !l.locked && hitLayer(l, p)) return l;
   }
   return null;
 }
 
 function pickHandle(p) {
   const sel = selected();
-  if (!sel || !sel.visible) return null;
+  if (!sel || !sel.visible || sel.locked) return null;
   const hp = handlePoints(sel);
   const near = 20 * hp.k;
   if (dist(p, hp.rotate) <= near) return 'rotate';
@@ -563,6 +783,20 @@ function movePinch() {
 const layerList = document.getElementById('layer-list');
 const layersEmpty = document.getElementById('layers-empty');
 
+// Drawn, not typed: the padlock characters are emoji on most platforms and
+// would arrive in full color in a row of monochrome glyphs. Shackle closed on
+// the body when locked, lifted off it when not.
+const LOCK_CLOSED =
+  '<svg viewBox="0 0 14 14" aria-hidden="true" focusable="false">' +
+    '<path d="M4.6 6.6V4.7a2.4 2.4 0 0 1 4.8 0v1.9" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+    '<rect x="2.9" y="6.4" width="8.2" height="5.8" rx="1.3" fill="currentColor"/>' +
+  '</svg>';
+const LOCK_OPEN =
+  '<svg viewBox="0 0 14 14" aria-hidden="true" focusable="false">' +
+    '<path d="M4.6 6.6V4.7a2.4 2.4 0 0 1 4.8 0" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+    '<rect x="2.9" y="6.4" width="8.2" height="5.8" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.3"/>' +
+  '</svg>';
+
 function layerName(l) {
   if (l.type === 'image') return l.name;
   const first = (l.text || '').split('\n')[0].trim();
@@ -602,6 +836,9 @@ function syncLayerList() {
     };
     btn('↑', 'Move up', 'up', i === state.layers.length - 1);
     btn('↓', 'Move down', 'down', i === 0);
+    const lock = btn('', l.locked ? 'Unlock' : 'Lock so the pointer ignores it', 'lock');
+    lock.innerHTML = l.locked ? LOCK_CLOSED : LOCK_OPEN;
+    if (l.locked) lock.classList.add('on');
     btn(l.visible ? '◉' : '○', l.visible ? 'Hide' : 'Show', 'vis');
     btn('✕', 'Delete layer', 'remove');
     layerList.appendChild(li);
@@ -616,6 +853,12 @@ layerList.addEventListener('click', (e) => {
   if (act === 'up') moveLayer(id, 1);
   else if (act === 'down') moveLayer(id, -1);
   else if (act === 'remove') removeLayer(id);
+  else if (act === 'lock') {
+    const l = byId(id);
+    if (l) l.locked = !l.locked;
+    touch();
+    syncAll();
+  }
   else if (act === 'vis') {
     const l = byId(id);
     if (l) l.visible = !l.visible;
@@ -642,7 +885,27 @@ const strokeColor = el('stroke-color');
 const strokeRange = el('stroke-range');
 const scaleRange = el('scale-range');
 const rotRange = el('rot-range');
+const blendSelect = el('blend-select');
 const opacityRange = el('opacity-range');
+
+let blendGroup = null;
+for (const b of BLENDS) {
+  const o = document.createElement('option');
+  o.value = b.id;
+  o.textContent = b.label;
+  if (b.group) {
+    // A new heading each time the run changes; the ungrouped first entry
+    // (Normal) hangs above all of them, which is where it belongs.
+    if (!blendGroup || blendGroup.label !== b.group) {
+      blendGroup = document.createElement('optgroup');
+      blendGroup.label = b.group;
+      blendSelect.appendChild(blendGroup);
+    }
+    blendGroup.appendChild(o);
+  } else {
+    blendSelect.appendChild(o);
+  }
+}
 
 for (const f of FONTS) {
   const o = document.createElement('option');
@@ -650,6 +913,62 @@ for (const f of FONTS) {
   o.textContent = f.label;
   o.style.fontFamily = f.stack;
   fontSelect.appendChild(o);
+}
+
+// ------------------------------------------------------- the numbers, typed
+// Every readout beside a slider is the slider's own value, which is what makes
+// them editable for almost nothing: a typed number is written into the range
+// and dispatched as an `input` event, so it arrives at the very same handler a
+// drag arrives at. One path, one place that can be wrong.
+
+/** Put a number in a readout — unless that is the one being typed into, where
+ *  rewriting it under the caret would eat the next keystroke. */
+function showNum(id, value) {
+  const node = el(id);
+  if (node === document.activeElement) return;
+  node.value = String(value);
+  node.setAttribute('aria-invalid', 'false');
+}
+
+function bindNumberField(id, range) {
+  const field = el(id);
+  const lo = Number(range.min);
+  const hi = Number(range.max);
+
+  const commit = (raw) => {
+    const v = parseFloat(raw);
+    if (!isFinite(v)) return false;
+    // Clamped rather than refused, and the field is left saying what was typed
+    // while it has the caret: half of "-120" is "-1", and a field that argues
+    // with you halfway through a number is unusable.
+    range.value = String(clamp(v, lo, hi));
+    range.dispatchEvent(new Event('input', { bubbles: true }));
+    field.setAttribute('aria-invalid', String(v < lo || v > hi));
+    return true;
+  };
+
+  field.addEventListener('input', () => { commit(field.value); });
+  // Leaving it settles it: whatever is in there becomes the number the slider
+  // actually holds, or goes back to it if it never became a number at all.
+  const settle = () => {
+    field.setAttribute('aria-invalid', 'false');
+    field.value = range.value;
+  };
+  field.addEventListener('change', settle);
+  field.addEventListener('blur', settle);
+  field.addEventListener('focus', () => field.select());
+  field.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { settle(); field.blur(); return; }
+    if (e.key === 'Escape') { settle(); field.blur(); return; }
+    // Up and down step the value here rather than walking the blend modes: in a
+    // number field that is what those keys have always meant.
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      const step = (e.shiftKey ? 10 : 1) * (e.key === 'ArrowUp' ? 1 : -1);
+      commit(String(clamp(Number(range.value) + step, lo, hi)));
+      field.value = range.value;
+    }
+  });
 }
 
 /** Radians to the degrees the slider speaks: a whole number in (-180, 180], so
@@ -664,13 +983,13 @@ function syncTransformControls() {
   const l = selected();
   if (!l) return;
   rotRange.value = String(degrees(l.rot));
-  el('rot-val').textContent = rotRange.value + '°';
+  showNum('rot-val', rotRange.value);
   if (l.type === 'text') {
     sizeRange.value = String(l.size);
-    el('size-val').textContent = String(l.size);
+    showNum('size-val', l.size);
   } else {
     scaleRange.value = String(Math.round(l.scale * 100));
-    el('scale-val').textContent = Math.round(l.scale * 100) + '%';
+    showNum('scale-val', Math.round(l.scale * 100));
   }
 }
 
@@ -689,7 +1008,7 @@ function syncInspector() {
     if (document.activeElement !== textInput) textInput.value = l.text;
     fontSelect.value = l.font;
     wrapRange.value = String(Math.round(l.wrap * 100));
-    el('wrap-val').textContent = Math.round(l.wrap * 100) + '%';
+    showNum('wrap-val', Math.round(l.wrap * 100));
     fillColor.value = l.color;
     strokeColor.value = l.stroke;
     strokeRange.value = String(Math.round(l.strokeW * 100));
@@ -699,8 +1018,9 @@ function syncInspector() {
     capsOn.setAttribute('aria-pressed', String(l.caps));
     capsOff.setAttribute('aria-pressed', String(!l.caps));
   }
+  blendSelect.value = blendById(l.blend).id;
   opacityRange.value = String(Math.round(l.opacity * 100));
-  el('opacity-val').textContent = Math.round(l.opacity * 100) + '%';
+  showNum('opacity-val', Math.round(l.opacity * 100));
   syncTransformControls();
 }
 
@@ -727,27 +1047,35 @@ onControl(textInput, 'input', (l) => { l.text = textInput.value; }, { relist: tr
 onControl(fontSelect, 'change', (l) => { l.font = fontSelect.value; });
 onControl(sizeRange, 'input', (l) => {
   l.size = Number(sizeRange.value);
-  el('size-val').textContent = sizeRange.value;
+  showNum('size-val', sizeRange.value);
 });
 onControl(wrapRange, 'input', (l) => {
   l.wrap = Number(wrapRange.value) / 100;
-  el('wrap-val').textContent = wrapRange.value + '%';
+  showNum('wrap-val', wrapRange.value);
 });
 onControl(strokeRange, 'input', (l) => { l.strokeW = Number(strokeRange.value) / 100; });
 onControl(fillColor, 'input', (l) => { l.color = fillColor.value; });
 onControl(strokeColor, 'input', (l) => { l.stroke = strokeColor.value; });
 onControl(scaleRange, 'input', (l) => {
   l.scale = Number(scaleRange.value) / 100;
-  el('scale-val').textContent = scaleRange.value + '%';
+  showNum('scale-val', scaleRange.value);
 });
 onControl(rotRange, 'input', (l) => {
   l.rot = (Number(rotRange.value) * Math.PI) / 180;
-  el('rot-val').textContent = rotRange.value + '°';
+  showNum('rot-val', rotRange.value);
 });
+onControl(blendSelect, 'change', (l) => { l.blend = blendById(blendSelect.value).id; });
 onControl(opacityRange, 'input', (l) => {
   l.opacity = Number(opacityRange.value) / 100;
-  el('opacity-val').textContent = opacityRange.value + '%';
+  showNum('opacity-val', opacityRange.value);
 });
+
+// Each readout, wired to the slider standing next to it.
+bindNumberField('size-val', sizeRange);
+bindNumberField('wrap-val', wrapRange);
+bindNumberField('scale-val', scaleRange);
+bindNumberField('rot-val', rotRange);
+bindNumberField('opacity-val', opacityRange);
 
 alignSeg.addEventListener('click', (e) => {
   const b = e.target.closest('button');
@@ -878,7 +1206,11 @@ exportBtn.addEventListener('click', () => {
   off.width = W();
   off.height = H();
   paint(off.getContext('2d'), false);
-  const name = `meme-${W()}x${H()}.jpg`;
+  // Stamped with the moment rather than the size: a folder full of exports
+  // wants to sort by when you made them, and every export at a given format
+  // has the same dimensions anyway. Same stamp the save files carry, so a JPG
+  // and the document it came from sit next to each other.
+  const name = `meme-${stamp()}.jpg`;
   off.toBlob((blob) => {
     if (!blob) { window.alert('The export failed.'); return; }
     const url = URL.createObjectURL(blob);
@@ -971,7 +1303,9 @@ async function saveProject() {
       // open, and "-12" says what "-0.20943951" does.
       rot: toDeg(l.rot),
       opacity: round(l.opacity, 3),
+      blend: l.blend,
       visible: l.visible,
+      locked: l.locked,
     };
     if (l.type === 'image') {
       let id = ids.get(l.blob);
@@ -1060,7 +1394,9 @@ async function loadProject(file) {
     l.y = numOr(raw.y, H() / 2);
     l.rot = (numOr(raw.rot, 0) * Math.PI) / 180;
     l.opacity = clamp(numOr(raw.opacity, 1), 0, 1);
+    l.blend = blendById(raw.blend).id;
     l.visible = raw.visible !== false;
+    l.locked = raw.locked === true;
     if (l.type === 'image') {
       const a = assets[raw.asset];
       if (!a) continue;   // a picture that did not survive; its layer goes too
@@ -1151,7 +1487,7 @@ function applyFormat(id) {
   canvas.width = next.w;
   canvas.height = next.h;
   formatSelect.value = next.id;
-  pxVal.textContent = `${next.w}×${next.h}`;
+  pxVal.textContent = `${next.w} × ${next.h} pixels`;
   draw();
 }
 
@@ -1200,17 +1536,38 @@ window.addEventListener('keydown', (e) => {
     removeLayer(l.id);
     return;
   }
-  if (l && e.key.startsWith('Arrow')) {
-    e.preventDefault();
-    const step = e.shiftKey ? 20 : 2;
+  if (!l || !e.key.startsWith('Arrow')) return;
+  e.preventDefault();
+
+  // Held down, the arrows place the layer. Bare, they walk the blend modes:
+  // seventeen of them is more than anybody will find by opening a menu
+  // seventeen times, and the point of a blend is what it does to THIS picture,
+  // which you can only see by watching the picture while you step through them.
+  if (e.shiftKey) {
+    const step = 2;
     if (e.key === 'ArrowLeft') l.x -= step;
     if (e.key === 'ArrowRight') l.x += step;
     if (e.key === 'ArrowUp') l.y -= step;
     if (e.key === 'ArrowDown') l.y += step;
     touch();
     draw();
+    return;
   }
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') cycleBlend(l, e.key === 'ArrowDown' ? 1 : -1);
 });
+
+/** Step to the next blend mode, wrapping at both ends. */
+function cycleBlend(layer, dir) {
+  const i = BLENDS.indexOf(blendById(layer.blend));
+  const next = BLENDS[(i + dir + BLENDS.length) % BLENDS.length];
+  layer.blend = next.id;
+  touch();
+  syncInspector();
+  draw();
+  // Named out loud, because the whole reason to do this from the keyboard is
+  // that you are looking at the picture rather than at the panel.
+  toast(next.label);
+}
 
 // The canvas is scaled by CSS, so a window resize changes how many canvas units
 // a screen pixel is worth — and with it the size the handles have to be drawn.
@@ -1219,7 +1576,7 @@ window.addEventListener('resize', draw);
 // --------------------------------------------------------------------- start
 formatSelect.value = state.format.id;
 bgColor.value = state.bg;
-pxVal.textContent = `${W()}×${H()}`;
+pxVal.textContent = `${W()} × ${H()} pixels`;
 syncAll();
 
 // Anton is a file, and a file takes a moment. Text measured before it arrives is
