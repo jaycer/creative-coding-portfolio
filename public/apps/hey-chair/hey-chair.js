@@ -1696,7 +1696,11 @@ saveBtn.addEventListener('click', () => {
   const data = loadedData
     ? { ...loadedData, camera: { r: num(cam.r, 3), aspectPull: num(aspectPull, 4) } }
     : sceneSnapshot();
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  // The codebase that wrote the file, stamped last so a loaded-then-resaved
+  // still reports the build that wrote it and not the one it came in with.
+  // Kept out of sceneSnapshot(), which the harnesses compare against fixtures.
+  const doc = { ...data, build: window.buildVersion?.() ?? 'unknown' };
+  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
   const href = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = href;

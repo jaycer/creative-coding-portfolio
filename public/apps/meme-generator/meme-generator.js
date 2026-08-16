@@ -1242,15 +1242,10 @@ exportBtn.addEventListener('click', () => {
 //
 // Two different versions are stamped on every save. `version` is the shape of
 // the file, which is what this loader reads; `build` is the codebase that wrote
-// it, published by vite.config at /version.json. If the shape ever has to
-// change in a way this loader cannot read, `build` is what says which version
-// of the app to hand an old file back to.
+// it, which shared/build-version.js reads off /version.json. If the shape ever
+// has to change in a way this loader cannot read, `build` is what says which
+// version of the app to hand an old file back to.
 const FILE_VERSION = 1;
-let build = 'unknown';
-fetch('../../version.json')
-  .then((r) => (r.ok ? r.json() : null))
-  .then((v) => { if (v && v.version) build = String(v.version); })
-  .catch(() => { /* opened from a file:// copy, or offline. Stays 'unknown'. */ });
 
 const toastEl = el('toast');
 let toastTimer = 0;
@@ -1334,7 +1329,7 @@ async function saveProject() {
   const doc = {
     app: 'meme-generator',
     version: FILE_VERSION,
-    build,
+    build: window.buildVersion?.() ?? 'unknown',
     savedAt: new Date().toISOString(),
     format: state.format.id,
     bg: state.bg,
@@ -1461,6 +1456,7 @@ projectFile.addEventListener('change', async (e) => {
     const doc = await loadProject(file);
     const n = state.layers.length;
     toast(`Loaded ${n} layer${n === 1 ? '' : 's'}`);
+    const build = window.buildVersion?.() ?? 'unknown';
     if (doc.build && doc.build !== build) console.info(`[meme] file was saved by build ${doc.build}, this is ${build}`);
   } catch (err) {
     console.error('[meme] load failed', err);

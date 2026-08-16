@@ -1324,7 +1324,11 @@ async function runExport() {
 // ----------------------------------------------- 9. save / load / keyboard
 
 function saveSettings() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  // `build` is the codebase that wrote the file, so a settings file made before
+  // a breaking change can still be traced back to the app that can read it.
+  // normalizeState() picks the keys it knows, so the extra one is harmless.
+  const doc = { ...state, build: window.buildVersion?.() ?? 'unknown' };
+  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   downloadBlob(blob, `gain-stage-${stamp}.json`);
   toast('Settings saved');

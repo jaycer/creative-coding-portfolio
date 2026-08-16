@@ -1395,7 +1395,11 @@ function fileStamp() {
 }
 
 document.getElementById('save-scene').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(sceneSnapshot())], { type: 'application/json' });
+  // `v` is the shape of the file; `build` is the codebase that wrote it. Added
+  // here rather than inside sceneSnapshot(), which the harnesses compare
+  // against fixtures and which should not move when the version does.
+  const doc = { ...sceneSnapshot(), build: window.buildVersion?.() ?? 'unknown' };
+  const blob = new Blob([JSON.stringify(doc)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `chair-pile-scene-${chairs.length}-${fileStamp()}.json`;

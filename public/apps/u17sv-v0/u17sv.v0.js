@@ -130,7 +130,11 @@ let fileInput; // hidden <input type="file"> driving the Load button
 // Serialize the live factor set the same way the Ctrl+L logger does — drop the
 // shaderFactors array (it just duplicates the named factors as references).
 function serializeFactors(e) {
-  return JSON.stringify(e, function (key, value) {
+  // `build` is the codebase that wrote the file. Spread onto a copy, and last,
+  // so loading a file and saving it again reports the build that wrote THIS
+  // file rather than carrying the older one along on the restored object.
+  const doc = Object.assign({}, e, { build: window.buildVersion?.() ?? 'unknown' });
+  return JSON.stringify(doc, function (key, value) {
     return key === 'shaderFactors' ? undefined : value;
   }, 2);
 }
