@@ -21,11 +21,40 @@ npm run preview  # preview the production build
 
 ## Add a new entry
 
-1. Create `apps/<slug>/` with an `index.html` (copy an existing app as a template).
-2. Add a `public/thumbs/NN.svg` thumbnail.
-3. Add a row to [`src/apps.js`](./src/apps.js).
+Most sub-apps are **static**: a self-contained folder under `public/apps/<slug>/`
+that ships verbatim, loading any libraries from a CDN. (`apps/<slug>/` is for the
+few that need bundling; Vite auto-discovers every `apps/*/index.html` as a build
+entry point.)
 
-The Vite config auto-discovers every `apps/*/index.html` as a build entry point.
+1. Create `public/apps/<slug>/index.html` — copy the head/meta block from an
+   existing app. Top bar gets `<a class="back" href="../../">← Gallery</a>`.
+2. Add a row to [`src/apps.js`](./src/apps.js): `{ slug, title, blurb, entry: 'index.html' }`.
+   `entry` is required for static apps.
+3. Add a thumbnail at `public/thumbs/<slug>.svg` (600×400). **Bake the title into
+   it as a `<text>` element** — the gallery card shows only the blurb, so the SVG
+   is the only place the name appears.
+4. Add an OG image at `public/og/<slug>.jpg` (1200×630).
+5. Add a `favicon.svg`, then run **`npm run icons`** — see below.
+
+### Home-screen icons
+
+`npm run icons` rasterizes every `favicon.svg` into the `apple-touch-icon.png`
+beside it. The SVG stays the one definition of the mark; the PNG is derived, so
+re-run it after editing a favicon (`npm run icons -- --check` fails if any is out
+of date).
+
+This is not optional and the build enforces it: Safari's Add to Home Screen reads
+`<link rel="apple-touch-icon">` and nothing else — it ignores `rel="icon"`, and it
+ignores SVG — so an app without one lands on the iPhone home screen as a plain
+letter tile. Each page needs two lines beside its `<link rel="icon">`:
+
+```html
+<link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-title" content="Short Name" />
+```
+
+Keep the name short; iOS truncates the home-screen label around 12 characters.
+`npm run build` fails with instructions if either piece is missing.
 
 ## Notes
 
