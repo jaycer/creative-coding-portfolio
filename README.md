@@ -56,6 +56,16 @@ letter tile. Each page needs two lines beside its `<link rel="icon">`:
 Keep the name short; iOS truncates the home-screen label around 12 characters.
 `npm run build` fails with instructions if either piece is missing.
 
+## License
+
+Code is [MIT](./LICENSE) — use it, commercially included, as long as the
+copyright notice comes along.
+
+Four things are carved out and spelled out at the top of the LICENSE file: the
+**photographs are all rights reserved**, the Anton font is SIL OFL, the 3D
+models are CC0, and the food location data belongs to the Greater Cleveland Food
+Bank.
+
 ## Notes
 
 - The **Hard refresh** button unregisters service workers, clears Cache Storage, and reloads with a cache-busting param — handy when a deploy looks stale.
