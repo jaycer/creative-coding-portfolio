@@ -849,7 +849,13 @@ layerList.addEventListener('click', (e) => {
   const li = e.target.closest('li');
   if (!li) return;
   const id = Number(li.dataset.id);
-  const act = e.target.dataset && e.target.dataset.act;
+  // Asked of the nearest ancestor carrying an action, not of whatever the press
+  // happened to land on. The padlock is drawn rather than typed, so a press in
+  // the middle of it lands on a <rect> inside the SVG — which has no action on
+  // it, and the row would quietly select instead of locking. The other glyphs
+  // in the row are text and hid this: with them, the button IS the target.
+  const hit = e.target.closest('[data-act]');
+  const act = hit && layerList.contains(hit) ? hit.dataset.act : null;
   if (act === 'up') moveLayer(id, 1);
   else if (act === 'down') moveLayer(id, -1);
   else if (act === 'remove') removeLayer(id);
