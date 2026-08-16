@@ -52,6 +52,27 @@ const FONTS = [
 ];
 const fontById = (id) => FONTS.find((f) => f.id === id) || FONTS[0];
 
+// How a layer meets the ones under it. These are the canvas compositing modes
+// under plain names: the id is what goes on the wire and into the save file, the
+// op is what the context is set to.
+//
+// Eight of the twelve the browser has, because the rest are for photographic
+// retouching and this is an app for putting words on a picture. Overlay, Soft
+// light and Hard light are the contrast family — they push the layer below away
+// from mid gray rather than simply darkening or lightening it.
+const BLENDS = [
+  { id: 'normal', label: 'Normal', op: 'source-over' },
+  { id: 'multiply', label: 'Multiply', op: 'multiply' },
+  { id: 'screen', label: 'Screen', op: 'screen' },
+  { id: 'overlay', label: 'Overlay', op: 'overlay' },
+  { id: 'soft-light', label: 'Soft light', op: 'soft-light' },
+  { id: 'hard-light', label: 'Hard light', op: 'hard-light' },
+  { id: 'difference', label: 'Difference', op: 'difference' },
+  { id: 'luminosity', label: 'Luminosity', op: 'luminosity' },
+];
+const blendById = (id) => BLENDS.find((b) => b.id === id) || BLENDS[0];
+const blendOf = (layer) => blendById(layer.blend).op;
+
 const LINE_H = 1.16;      // multiples of the font size, tight enough for caps
 const MIN_TEXT = 12;
 const MAX_TEXT = 400;
@@ -163,8 +184,13 @@ function paint(c, overlay) {
 
   for (const layer of state.layers) {
     if (!layer.visible) continue;
+    if (needsBuffer(layer)) { paintThroughBuffer(c, layer); continue; }
     c.save();
     c.globalAlpha = layer.opacity;
+    // How this layer meets what is already down. save/restore puts it back to
+    // source-over for the next one, so a blend never leaks past its own layer
+    // and the selection handles are never drawn through one.
+    c.globalCompositeOperation = blendOf(layer);
     c.translate(layer.x, layer.y);
     c.rotate(layer.rot);
     if (layer.type === 'image') {
@@ -183,6 +209,56 @@ function paint(c, overlay) {
     const sel = selected();
     if (sel && sel.visible) paintSelection(c, sel);
   }
+}
+
+/**
+ * Does this layer have to be composed on its own before it meets the picture?
+ *
+ * Outlined text is drawn twice, stroke then fill, and both of those are real
+ * draws: with a blend mode set, the fill blends against its OWN outline instead
+ * of against the picture, and a white glyph on a black outline under Multiply
+ * comes out black. Partial opacity has the same flaw for a subtler reason — the
+ * outline shows through the middle of every letter.
+ *
+ * A picture is one drawImage with nothing under it to blend against, so it takes
+ * the direct path and costs nothing extra.
+ */
+function needsBuffer(layer) {
+  if (layer.type !== 'text' || layer.strokeW <= 0) return false;
+  return blendOf(layer) !== 'source-over' || layer.opacity < 1;
+}
+
+// One buffer, reused. A second full-frame canvas is 5MB at 1080×1350 and there
+// is never a need for two at once: a layer is composed, drawn, and done with.
+let bufferCanvas = null;
+function layerBuffer() {
+  if (!bufferCanvas) bufferCanvas = document.createElement('canvas');
+  const bc = bufferCanvas.getContext('2d');
+  if (bufferCanvas.width !== W() || bufferCanvas.height !== H()) {
+    // Sizing a canvas clears it, so this is the clear as well.
+    bufferCanvas.width = W();
+    bufferCanvas.height = H();
+  } else {
+    bc.clearRect(0, 0, W(), H());
+  }
+  return bc;
+}
+
+function paintThroughBuffer(c, layer) {
+  const bc = layerBuffer();
+  bc.save();
+  bc.translate(layer.x, layer.y);
+  bc.rotate(layer.rot);
+  // Composed at full strength and with no blend: what lands in here is the
+  // layer as a thing in itself, outline and letters already resolved.
+  paintText(bc, layer);
+  bc.restore();
+
+  c.save();
+  c.globalAlpha = layer.opacity;
+  c.globalCompositeOperation = blendOf(layer);
+  c.drawImage(bc.canvas, 0, 0);
+  c.restore();
 }
 
 function paintText(c, layer) {
@@ -303,6 +379,7 @@ function baseLayer(type) {
     y: H() / 2,
     rot: 0,
     opacity: 1,
+    blend: 'normal',
     visible: true,
   };
 }
@@ -642,7 +719,15 @@ const strokeColor = el('stroke-color');
 const strokeRange = el('stroke-range');
 const scaleRange = el('scale-range');
 const rotRange = el('rot-range');
+const blendSelect = el('blend-select');
 const opacityRange = el('opacity-range');
+
+for (const b of BLENDS) {
+  const o = document.createElement('option');
+  o.value = b.id;
+  o.textContent = b.label;
+  blendSelect.appendChild(o);
+}
 
 for (const f of FONTS) {
   const o = document.createElement('option');
@@ -699,6 +784,7 @@ function syncInspector() {
     capsOn.setAttribute('aria-pressed', String(l.caps));
     capsOff.setAttribute('aria-pressed', String(!l.caps));
   }
+  blendSelect.value = blendById(l.blend).id;
   opacityRange.value = String(Math.round(l.opacity * 100));
   el('opacity-val').textContent = Math.round(l.opacity * 100) + '%';
   syncTransformControls();
@@ -744,6 +830,7 @@ onControl(rotRange, 'input', (l) => {
   l.rot = (Number(rotRange.value) * Math.PI) / 180;
   el('rot-val').textContent = rotRange.value + '°';
 });
+onControl(blendSelect, 'change', (l) => { l.blend = blendById(blendSelect.value).id; });
 onControl(opacityRange, 'input', (l) => {
   l.opacity = Number(opacityRange.value) / 100;
   el('opacity-val').textContent = opacityRange.value + '%';
@@ -971,6 +1058,7 @@ async function saveProject() {
       // open, and "-12" says what "-0.20943951" does.
       rot: toDeg(l.rot),
       opacity: round(l.opacity, 3),
+      blend: l.blend,
       visible: l.visible,
     };
     if (l.type === 'image') {
@@ -1060,6 +1148,7 @@ async function loadProject(file) {
     l.y = numOr(raw.y, H() / 2);
     l.rot = (numOr(raw.rot, 0) * Math.PI) / 180;
     l.opacity = clamp(numOr(raw.opacity, 1), 0, 1);
+    l.blend = blendById(raw.blend).id;
     l.visible = raw.visible !== false;
     if (l.type === 'image') {
       const a = assets[raw.asset];
