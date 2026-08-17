@@ -106,12 +106,19 @@ land somewhere unexpected. It has to be stood up before it can go in the deck:
 
 ```
 node tools/orient-glb.mjs --in ~/Downloads/bertRebuilt.glb \
-  --out public/apps/object-tile-scroll/models/rubberPig.glb --up -x
+  --out public/apps/object-tile-scroll/models/rubberPig.glb --up +x
 node tools/gzip-models.mjs --dir public/apps/object-tile-scroll/models
 ```
 
 That also re-emits it in the deck's own format — positions only, unindexed, no
 normals — which is both smaller and the thing every other model here is.
+
+Check the axis by looking, not by reasoning about the bounding box. This scan
+was converted with `--up -x` for most of its life on the strength of its box
+coming out 20.0 x 12.2 x 11.2 cm, which is the right SHAPE for a standing pig
+and says nothing whatever about which end is up — a pig on its back measures the
+same. It was on its back the whole time. Six renders on a floor grid, one per
+candidate axis, settles it in about a minute and cannot be argued with.
 
 The best settings measured so far, for a scan of a real object:
 
