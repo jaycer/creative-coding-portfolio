@@ -8,6 +8,7 @@
 // entries, not for static folders under /public. To add work: drop a folder in
 // either place and add a row here.
 export const apps = [
+  { slug: 'splat-editor', title: 'Splat Editor', blurb: 'Open a Gaussian splat scan from a phone and brush the haze off it with a resizable eraser, then build a low poly model from what is left. The build draws round the object from hundreds of directions and keeps only what falls inside every outline, and a preview shows it lit the way the gallery would light it. Scans stay local.', entry: 'index.html' },
   { slug: 'meme-generator', title: 'Meme Generator', blurb: 'Make a meme in the tab. Drop in a photo, stack pictures and text as layers you can reorder, turn any line of text to the angle you want, and export a JPG at Instagram\'s 4:5 size. Images and text stay local.', entry: 'index.html' },
   { slug: 'static-color-display', title: 'Static Color Display', blurb: 'One color, the whole screen, and nothing else. Pick it in the overlay or type a hex. It opens on pure red.', entry: 'index.html' },
   { slug: 'object-tile-scroll', title: 'Object Tile Scroll', blurb: 'Watch objects scroll by while forming an ambient chorus. Set how many of them breathe and whether they breathe together, or let it listen and breathe to whatever is playing in the room. Includes 3D models by Kenney and Quaternius.', entry: 'index.html' },

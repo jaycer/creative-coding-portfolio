@@ -60,14 +60,29 @@
 //   --grid   N      longest axis of the density grid, in cells        (default 64)
 //   --colors N      flat color groups to cluster into                 (default 1)
 //   --min-opacity F drop splats fainter than this                     (default 0.3)
-//   --isolation N   drop splats with fewer than N neighbors within 2 cells (default 6)
+//   --isolation N   drop splats with fewer than N neighbors nearby           (default 6)
+//   --isolation-mm F  what 'nearby' means. Default: 3x the scan's own spacing
 //   --min-lum F     drop splats darker than this, for a pale subject in a dark room
 //   --iso    F      surface level, as a fraction of the density where a splat sits (default 0.5)
 //   --bite   F      density a ray passes before it counts as inside, in isos (default 1.5)
-//   --agree  N      how many of the three axes must bracket a cell, 1-3 (default 2)
+//   --agree  N      how many of the three axes must bracket a cell, 0-3 (default 2)
+//   --hull   N      trace the outline from N directions and keep what is inside all of them
+//   --outline N     the MOST closing a view may use; each picks its own (default 10)
+//   --handed -1     wind the direction spiral the other way (same spread, other set)
+//   --both          also trace from the opposite of every direction
+//   --consensus F   share of views a cell must be inside, 0.5-1 (default 1, strict)
+//   --sweep  DEG    trace by turning the model DEG at a time about x, then y, then z,
+//                   instead of spreading --hull directions over a hemisphere
+//   --trace-out F   write every traced outline to F as JSON, to look at
+//   --trace-glb F   write ONE file holding the cloud and every outline together
+//   --rings  0|1    walk the outline as real edge points, not pixels (default 1)
+//   --carve  N      then bracket again from N directions spread over a hemisphere
+//   --agreement F   the share of those directions a cell must survive (default 0.94)
 //   --despeckle N   majority-vote passes over the solid                (default 2)
 //   --close  N      fill hollows up to 2N cells wide, where the scan saw nothing (default 2)
 //   --smooth N      Taubin smoothing passes                           (default 12)
+//   --surface S     'fit' (default) fits a function through the points; 'hull' brackets a volume
+//   --fit    MM     the fit's averaging radius, in mm. Defaults to 1.5x the fuzz band
 //   --vertex-color  keep the scan's own color, one per vertex, smooth-shaded
 //   --report        print the density distribution and the elapsed time
 //   --check         grade the capture and stop: sampling, precision, fuzz band,
@@ -75,6 +90,14 @@
 //                   scans of the same object can be compared before either is built.
 
 import { readFileSync, writeFileSync } from 'node:fs';
+// The pipeline itself lives with the editor, because the editor runs it too and
+// a second copy would drift. See that file's header.
+import {
+  cull as cullCloud, spacingOf, density, neighbors6, despeckle,
+  outlineOf, traceRing, fillPolygon, pointRing, spiralDirections,
+  withAntipodes, axisSweep, distinctDirections, silhouetteHull as hullOf,
+  surfaceNets, smooth, decimate, makeColorSampler, colorize, orient,
+} from '../public/apps/splat-editor/build.js';
 import { gunzipSync } from 'node:zlib';
 
 const argv = process.argv.slice(2);
@@ -114,6 +137,8 @@ if (CROP && (CROP.length !== 6 || CROP.some((v) => !Number.isFinite(v)))) {
   process.exit(1);
 }
 const ISOLATION = Math.round(num('isolation', 6));
+// The radius that counts as 'near', in mm. 0 measures it from the scan itself.
+const ISO_RADIUS = Math.max(0, num('isolation-mm', 0)) / 1000;
 // Drop splats darker than this. Off by default, and deliberately not clever: it
 // is here because background haze in a splat scan is usually the unlit room and
 // the subject usually is not, which is a fact about a particular capture and not
@@ -122,7 +147,7 @@ const ISOLATION = Math.round(num('isolation', 6));
 const MIN_LUM = num('min-lum', 0);
 const ISO = num('iso', 0.5);
 const BITE = num('bite', 1.5);
-const AGREE = Math.min(3, Math.max(1, Math.round(num('agree', 2))));
+const AGREE = Math.min(3, Math.max(0, Math.round(num('agree', 2))));
 const DESPECKLE = Math.max(0, Math.round(num('despeckle', 2)));
 const CLOSE = Math.max(0, Math.round(num('close', 2)));
 const SMOOTH = Math.max(0, Math.round(num('smooth', 12)));
@@ -131,6 +156,50 @@ const SMOOTH = Math.max(0, Math.round(num('smooth', 12)));
 // decides what an object is made of — so this is for a viewer that wants to show
 // the thing as it was captured rather than as the piece dresses it.
 const VCOLOR = argv.includes('--vertex-color');
+// 'fit' fits a smooth function through the splats and takes its zero level set;
+// 'hull' brackets a volume around them. The fit resolves detail the hull cannot,
+// because its smoothing radius is independent of the grid.
+const SURFACE = opt('surface', 'hull');
+// How far the fit averages over, in millimetres. Below the scan's fuzz band it
+// starts following noise; far above it, it rounds off what the capture resolved.
+const FIT = num('fit', 0);
+// How wide the density kernel is, in millimetres. This is the other half of
+// "smooth at one scale, sample at another": raise it and the shell stays
+// continuous on a grid fine enough to resolve an ear, where the default ties it
+// to the cell and a fine grid tears the shell into holes.
+const BLUR = num('blur', 0);
+// Divide the density by a heavily smoothed copy of itself before taking a level
+// set. The point is measured: coverage across this pig runs from 2 to 30 splats
+// per square centimetre, a factor of fifteen, so a single global threshold is
+// wrong nearly everywhere at once — it cuts holes through the thinly-covered
+// parts and fattens the well-covered ones. Dividing by the local average asks
+// "is this cell dense FOR HERE", which is the same question everywhere.
+const NORMALIZE = argv.includes('--normalize');
+// How many directions the carve brackets from. 0 leaves the three axes alone.
+const CARVE = Math.max(0, Math.round(num('carve', 0)));
+// How many outlines to trace. 0 uses the bracket instead.
+const HULL = Math.max(0, Math.round(num('hull', 0)));
+// How far to close the outline before filling it, in pixels. The points are a
+// scatter and not a stroke, so some closing is always needed or the fill leaks.
+const OUTLINE = Math.max(1, Math.round(num('outline', 10)));
+// Turn-the-model-by-DEG sampling, instead of the spiral. 0 leaves the spiral on.
+const SWEEP = Math.max(0, num('sweep', 0));
+// Which way the spiral winds, and whether each direction's opposite is added.
+const HANDED = num('handed', 1) < 0 ? -1 : 1;
+const BOTH = argv.includes('--both');
+// The share of views a cell must be inside. 1 is the strict intersection.
+const CONSENSUS = Math.min(1, Math.max(0.5, num('consensus', 1)));
+// Where to write the traced outlines, for looking at.
+const TRACE_OUT = opt('trace-out');
+// And where to write the cloud and the outlines as one file.
+const TRACE_GLB = opt('trace-glb');
+// Whether the outline is a ring of real edge points or a ring of pixels. See
+// the long note over pointRing().
+const RINGS = num('rings', 1) !== 0;
+// A cell has to survive this share of them. Not all of them: one direction that
+// happens to look down a thinly covered patch would otherwise punch a hole
+// straight through the model.
+const AGREEMENT = num('agreement', 0.94);
 const report = argv.includes('--report');
 const say = (...a) => console.log(...a);
 // How far a single splat is allowed to reach, in cells. It bounds the cost of
@@ -354,129 +423,8 @@ function readScan(path) {
 // comes next, because a single floater near the object welds a spur onto the
 // hull, and one anywhere at all pushes the bounding box out and coarsens the
 // grid for everything else.
-function cull(pts) {
-  const keep = new Uint8Array(pts.count);
-  let n = 0;
-  for (let i = 0; i < pts.count; i++) {
-    if (pts.opacity[i] < MIN_OPACITY) continue;
-    if (MIN_LUM > 0 && (pts.rgb[i * 3] + pts.rgb[i * 3 + 1] + pts.rgb[i * 3 + 2]) / 3 < MIN_LUM) continue;
-    if (CROP && (
-      pts.x[i] < CROP[0] || pts.y[i] < CROP[1] || pts.z[i] < CROP[2]
-      || pts.x[i] > CROP[3] || pts.y[i] > CROP[4] || pts.z[i] > CROP[5]
-    )) continue;
-    keep[i] = 1; n++;
-  }
-  if (!n) throw new Error(`--min-opacity ${MIN_OPACITY}${MIN_LUM ? ' and --min-lum' : ''}${CROP ? ' and --crop' : ''} kept nothing`);
 
-  // Bounds of what survived, which is also what sets the grid.
-  let lo = [Infinity, Infinity, Infinity];
-  let hi = [-Infinity, -Infinity, -Infinity];
-  for (let i = 0; i < pts.count; i++) {
-    if (!keep[i]) continue;
-    const v = [pts.x[i], pts.y[i], pts.z[i]];
-    for (let k = 0; k < 3; k++) { if (v[k] < lo[k]) lo[k] = v[k]; if (v[k] > hi[k]) hi[k] = v[k]; }
-  }
-  const cell = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / GRID;
 
-  if (ISOLATION > 0) {
-    // Neighbor counting through a hash grid at twice the cell size, so "near"
-    // is one bucket and its 26 neighbors and nothing has to be sorted.
-    const h = cell * 2;
-    const key = (i) => `${Math.floor(pts.x[i] / h)},${Math.floor(pts.y[i] / h)},${Math.floor(pts.z[i] / h)}`;
-    const bins = new Map();
-    for (let i = 0; i < pts.count; i++) {
-      if (!keep[i]) continue;
-      const k = key(i);
-      if (!bins.has(k)) bins.set(k, []);
-      bins.get(k).push(i);
-    }
-    const r2 = (cell * 2) ** 2;
-    for (let i = 0; i < pts.count; i++) {
-      if (!keep[i]) continue;
-      const cx = Math.floor(pts.x[i] / h); const cy = Math.floor(pts.y[i] / h); const cz = Math.floor(pts.z[i] / h);
-      let near = 0;
-      for (let a = -1; a <= 1 && near < ISOLATION; a++) {
-        for (let b = -1; b <= 1 && near < ISOLATION; b++) {
-          for (let c = -1; c <= 1 && near < ISOLATION; c++) {
-            const bin = bins.get(`${cx + a},${cy + b},${cz + c}`);
-            if (!bin) continue;
-            for (const j of bin) {
-              if (j === i) continue;
-              const dx = pts.x[j] - pts.x[i]; const dy = pts.y[j] - pts.y[i]; const dz = pts.z[j] - pts.z[i];
-              if (dx * dx + dy * dy + dz * dz <= r2 && ++near >= ISOLATION) break;
-            }
-          }
-        }
-      }
-      if (near < ISOLATION) { keep[i] = 0; n--; }
-    }
-  }
-  if (!n) throw new Error(`--isolation ${ISOLATION} kept nothing`);
-
-  // Re-measure: dropping the floaters is what makes these bounds tight, and
-  // they are the ones the grid is built on.
-  lo = [Infinity, Infinity, Infinity];
-  hi = [-Infinity, -Infinity, -Infinity];
-  const out = { n, x: new Float64Array(n), y: new Float64Array(n), z: new Float64Array(n), w: new Float64Array(n), r: new Float64Array(n), rgb: new Float64Array(n * 3) };
-  let j = 0;
-  for (let i = 0; i < pts.count; i++) {
-    if (!keep[i]) continue;
-    out.x[j] = pts.x[i]; out.y[j] = pts.y[i]; out.z[j] = pts.z[i];
-    out.w[j] = pts.opacity[i];
-    out.r[j] = pts.radius[i];
-    out.rgb[j * 3] = pts.rgb[i * 3]; out.rgb[j * 3 + 1] = pts.rgb[i * 3 + 1]; out.rgb[j * 3 + 2] = pts.rgb[i * 3 + 2];
-    for (const [k, v] of [[0, out.x[j]], [1, out.y[j]], [2, out.z[j]]]) {
-      if (v < lo[k]) lo[k] = v; if (v > hi[k]) hi[k] = v;
-    }
-    j++;
-  }
-  out.lo = lo; out.hi = hi;
-  return out;
-}
-
-/**
- * Median distance to a splat's nearest neighbor — how finely the scan actually
- * sampled the surface.
- *
- * This is the number that decides everything downstream and it is not the same
- * as the splat scale: a trainer will happily fit a 1mm ellipsoid to a patch it
- * only sampled every 3mm, because a splat is sized to look right from the
- * camera, not to tile the surface. Reconstruct at the scale it was drawn at and
- * you get a shell full of pinholes, the fill leaks straight through it, and what
- * comes back is a crumpled bag rather than a pig.
- */
-function spacingOf(p, hint) {
-  const h = hint;
-  const bins = new Map();
-  const key = (x, y, z) => `${Math.floor(x / h)},${Math.floor(y / h)},${Math.floor(z / h)}`;
-  for (let i = 0; i < p.n; i++) {
-    const k = key(p.x[i], p.y[i], p.z[i]);
-    if (!bins.has(k)) bins.set(k, []);
-    bins.get(k).push(i);
-  }
-  const step = Math.max(1, Math.floor(p.n / 4000));
-  const dists = [];
-  for (let i = 0; i < p.n; i += step) {
-    const bx = Math.floor(p.x[i] / h); const by = Math.floor(p.y[i] / h); const bz = Math.floor(p.z[i] / h);
-    let best = Infinity;
-    for (let a = -1; a <= 1; a++) {
-      for (let b = -1; b <= 1; b++) {
-        for (let c = -1; c <= 1; c++) {
-          const bin = bins.get(`${bx + a},${by + b},${bz + c}`);
-          if (!bin) continue;
-          for (const j of bin) {
-            if (j === i) continue;
-            const d2 = (p.x[j] - p.x[i]) ** 2 + (p.y[j] - p.y[i]) ** 2 + (p.z[j] - p.z[i]) ** 2;
-            if (d2 < best) best = d2;
-          }
-        }
-      }
-    }
-    if (best < Infinity) dists.push(Math.sqrt(best));
-  }
-  dists.sort((a, b) => a - b);
-  return dists.length ? dists[Math.floor(dists.length / 2)] : hint;
-}
 
 // ------------------------------------------------------------------- the check
 // Grade the CAPTURE rather than the conversion, so two scans of the same object
@@ -731,61 +679,67 @@ function quantisation(pts) {
   };
 }
 
-// ----------------------------------------------------------------- the density
-// Every splat is stamped into the grid as an isotropic Gaussian weighted by its
-// opacity. Its width is the largest of three things: the splat's own scale, what
-// it takes to reach the next splat along, and three quarters of a cell. The
-// middle one is what makes the shell watertight, and it is the difference
-// between this working and this producing a crumpled bag.
-function density(p, dim, lo, cell, floor) {
+
+/**
+ * How far the reconstructed surface departs from a smooth body.
+ *
+ * The top of the solid, with a quadratic fitted out so the object's own taper
+ * and whatever angle it was lying at do not count as defects, leaving only what
+ * is locally proud or sunken. A hollow several times the fuzz band is geometry
+ * the capture never saw.
+ *
+ * Measured on the SOLID rather than on the input, because that is the thing
+ * anybody will look at, and because every input-side proxy for it turned out to
+ * be fragile in a way this is not.
+ */
+function surfaceRelief(solidVol, dim, cell) {
   const [nx, ny, nz] = dim;
-  const f = new Float32Array(nx * ny * nz);
-  // Which cells actually hold a splat, as opposed to merely catching the tail of
-  // one. This is what the surface level gets calibrated against below.
-  const support = new Uint8Array(nx * ny * nz);
-  for (let i = 0; i < p.n; i++) {
-    const sa = Math.floor((p.x[i] - lo[0]) / cell);
-    const sb = Math.floor((p.y[i] - lo[1]) / cell);
-    const sc = Math.floor((p.z[i] - lo[2]) / cell);
-    if (sa >= 0 && sa < nx && sb >= 0 && sb < ny && sc >= 0 && sc < nz) support[(sc * ny + sb) * nx + sa] = 1;
-  }
-  for (let i = 0; i < p.n; i++) {
-    const sigma = Math.max(p.r[i], floor, cell * 0.75);
-    const reach = Math.min(REACH, Math.ceil((sigma * 2.2) / cell));
-    const gx = (p.x[i] - lo[0]) / cell;
-    const gy = (p.y[i] - lo[1]) / cell;
-    const gz = (p.z[i] - lo[2]) / cell;
-    const cx = Math.round(gx); const cy = Math.round(gy); const cz = Math.round(gz);
-    const k = -0.5 / ((sigma / cell) ** 2);
-    for (let a = cx - reach; a <= cx + reach; a++) {
-      if (a < 0 || a >= nx) continue;
-      const dx = a - gx;
-      for (let b = cy - reach; b <= cy + reach; b++) {
-        if (b < 0 || b >= ny) continue;
-        const dy = b - gy;
-        for (let c = cz - reach; c <= cz + reach; c++) {
-          if (c < 0 || c >= nz) continue;
-          const dz = c - gz;
-          f[(c * ny + b) * nx + a] += p.w[i] * Math.exp(k * (dx * dx + dy * dy + dz * dz));
-        }
+  const h = [];
+  const at = [];
+  for (let c = 0; c < nz; c++) {
+    for (let b = 0; b < ny; b++) {
+      let top = -1;
+      for (let a = 0; a < nx; a++) {
+        if (solidVol[(c * ny + b) * nx + a]) { top = a; break; }
       }
+      if (top >= 0) { h.push(top); at.push([b, c]); }
     }
   }
-  return { f, support };
+  if (h.length < 40) return { p95: 0, p99: 0 };
+  // Least squares on 1, b, c, b^2, c^2, bc — six unknowns, normal equations.
+  const M = Array.from({ length: 6 }, () => new Float64Array(6));
+  const rhs = new Float64Array(6);
+  for (let i = 0; i < h.length; i++) {
+    const [b, c] = at[i];
+    const row = [1, b, c, b * b, c * c, b * c];
+    for (let j = 0; j < 6; j++) {
+      rhs[j] += row[j] * h[i];
+      for (let k = 0; k < 6; k++) M[j][k] += row[j] * row[k];
+    }
+  }
+  for (let col = 0; col < 6; col++) {
+    let piv = col;
+    for (let r = col + 1; r < 6; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+    if (Math.abs(M[piv][col]) < 1e-12) return { p95: 0, p99: 0 };
+    [M[col], M[piv]] = [M[piv], M[col]];
+    const t = rhs[col]; rhs[col] = rhs[piv]; rhs[piv] = t;
+    for (let r = 0; r < 6; r++) {
+      if (r === col) continue;
+      const f2 = M[r][col] / M[col][col];
+      for (let k = col; k < 6; k++) M[r][k] -= f2 * M[col][k];
+      rhs[r] -= f2 * rhs[col];
+    }
+  }
+  const co = Array.from({ length: 6 }, (_, i) => rhs[i] / M[i][i]);
+  const res = h.map((v, i) => {
+    const [b, c] = at[i];
+    return v - (co[0] + co[1] * b + co[2] * c + co[3] * b * b + co[4] * c * c + co[5] * b * c);
+  }).sort((a, b2) => a - b2);
+  const q = (t) => res[Math.floor(res.length * t)] * cell;
+  return { p95: q(0.95), p99: q(0.99) };
 }
 
-/** Grid neighbors, 6-connected, as flat indices. */
-function* neighbors6(idx, nx, ny, nz) {
-  const a = idx % nx;
-  const b = Math.floor(idx / nx) % ny;
-  const c = Math.floor(idx / (nx * ny));
-  if (a > 0) yield idx - 1;
-  if (a < nx - 1) yield idx + 1;
-  if (b > 0) yield idx - nx;
-  if (b < ny - 1) yield idx + nx;
-  if (c > 0) yield idx - nx * ny;
-  if (c < nz - 1) yield idx + nx * ny;
-}
+
 
 /**
  * Fill every cell a ray crosses between entering the object and leaving it,
@@ -957,458 +911,317 @@ function close(v, dim, r) {
   return cur;
 }
 
-/**
- * Majority vote over each cell's 26 neighbors, a few times.
- *
- * A threshold on a real scan does not give a clean body: it gives a body with
- * grit stuck to it and pinpricks taken out of it, and the isosurface of THAT is
- * a crumpled bag whatever the triangle budget. Nothing downstream can recover
- * from it — the decimator will happily spend its budget describing the grit.
- * This is the cheapest thing that removes a speck and fills a prick while
- * leaving anything the width of a leg completely alone.
- */
-function despeckle(solid, dim, rounds) {
+
+
+
+
+
+
+
+
+
+
+// ------------------------------------------------------------------ the carve
+// The same bracket as above, but from a hundred directions instead of three.
+//
+// This is here because of where the information in a splat scan actually lives.
+// Locally the cloud is not a surface at all — its neighbourhoods measure 0.13 to
+// 0.16 on the planarity scale where 0 is a plane and 0.33 is a shapeless ball,
+// at every radius, never improving as you zoom in. So every method that asks a
+// neighbourhood which way the surface faces gets noise back, and normals,
+// ball-pivoting and moving least squares all fail for that one reason.
+//
+// In PROJECTION the same data is well behaved. Thousands of points overlap along
+// each ray, so a silhouette is sharp even where no local neighbourhood is. That
+// is why the eye can see an ear the reconstruction cannot: it is looking at an
+// integral, not at a surface. The three-axis bracket already exploits this and
+// is the reason it beat everything else; it was simply only asking three
+// questions.
+//
+// Each direction brackets its own entry and exit depth per pixel, which is more
+// than a silhouette carve: a dent that faces the ray is kept, where a silhouette
+// would fill it in. A cell has to survive nearly all the directions, with a
+// small allowance so that one bad angle cannot punch a hole through the model.
+//
+// It only ever removes, so it cannot invent anything the bracket did not already
+// support, and it starts from the bracket's own result rather than from the
+// whole grid — a few tens of thousands of live cells instead of a million, which
+// is what makes a hundred directions affordable.
+function carveFromDirections(solidVol, dim, lo, cell, p, count, tol, keepFrac) {
   const [nx, ny, nz] = dim;
-  let cur = solid;
-  for (let pass = 0; pass < rounds; pass++) {
-    const next = new Uint8Array(cur.length);
-    for (let c = 0; c < nz; c++) {
-      for (let b = 0; b < ny; b++) {
-        for (let a = 0; a < nx; a++) {
-          let on = 0;
-          let seen = 0;
-          for (let k = -1; k <= 1; k++) {
-            const cz = c + k;
-            if (cz < 0 || cz >= nz) continue;
-            for (let j = -1; j <= 1; j++) {
-              const cy = b + j;
-              if (cy < 0 || cy >= ny) continue;
-              for (let i = -1; i <= 1; i++) {
-                const cx = a + i;
-                if (cx < 0 || cx >= nx) continue;
-                seen++;
-                on += cur[(cz * ny + cy) * nx + cx];
-              }
-            }
-          }
-          next[(c * ny + b) * nx + a] = on * 2 > seen ? 1 : 0;
+  const live = [];
+  for (let i = 0; i < solidVol.length; i++) if (solidVol[i]) live.push(i);
+  if (!live.length) return { solid: solidVol, killed: 0 };
+
+  // Centres of the live cells, once.
+  const cx = new Float64Array(live.length);
+  const cy = new Float64Array(live.length);
+  const cz = new Float64Array(live.length);
+  for (let k = 0; k < live.length; k++) {
+    const i = live[k];
+    const a = i % nx;
+    const b = Math.floor(i / nx) % ny;
+    const c = Math.floor(i / (nx * ny));
+    cx[k] = lo[0] + a * cell;
+    cy[k] = lo[1] + b * cell;
+    cz[k] = lo[2] + c * cell;
+  }
+  const against = new Uint16Array(live.length);
+
+  // Directions spread evenly over a hemisphere — a whole sphere would be waste,
+  // since a ray and its opposite bracket exactly the same interval.
+  const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+  for (let d = 0; d < count; d++) {
+    const z = (d + 0.5) / count;
+    const r = Math.sqrt(Math.max(0, 1 - z * z));
+    const th = d * GOLDEN;
+    const dir = [r * Math.cos(th), r * Math.sin(th), z];
+    // Any two vectors perpendicular to it will do for the image plane.
+    let u = Math.abs(dir[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+    const dot = u[0] * dir[0] + u[1] * dir[1] + u[2] * dir[2];
+    u = [u[0] - dir[0] * dot, u[1] - dir[1] * dot, u[2] - dir[2] * dot];
+    const ul = Math.hypot(u[0], u[1], u[2]);
+    u = [u[0] / ul, u[1] / ul, u[2] / ul];
+    const v = [
+      dir[1] * u[2] - dir[2] * u[1],
+      dir[2] * u[0] - dir[0] * u[2],
+      dir[0] * u[1] - dir[1] * u[0],
+    ];
+
+    // The depth range of the points behind every pixel of this view.
+    let au = Infinity; let bu = -Infinity; let av = Infinity; let bv = -Infinity;
+    for (let i = 0; i < p.n; i++) {
+      const su = p.x[i] * u[0] + p.y[i] * u[1] + p.z[i] * u[2];
+      const sv = p.x[i] * v[0] + p.y[i] * v[1] + p.z[i] * v[2];
+      if (su < au) au = su;
+      if (su > bu) bu = su;
+      if (sv < av) av = sv;
+      if (sv > bv) bv = sv;
+    }
+    const w = Math.ceil((bu - au) / cell) + 3;
+    const h = Math.ceil((bv - av) / cell) + 3;
+    const tmin = new Float32Array(w * h).fill(Infinity);
+    const tmax = new Float32Array(w * h).fill(-Infinity);
+    for (let i = 0; i < p.n; i++) {
+      const su = p.x[i] * u[0] + p.y[i] * u[1] + p.z[i] * u[2];
+      const sv = p.x[i] * v[0] + p.y[i] * v[1] + p.z[i] * v[2];
+      const st = p.x[i] * dir[0] + p.y[i] * dir[1] + p.z[i] * dir[2];
+      const px = Math.round((su - au) / cell) + 1;
+      const py = Math.round((sv - av) / cell) + 1;
+      // Into the neighbouring pixels too. A single-pixel stamp leaves gaps
+      // between samples that carve stripes through the model.
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const qx = px + dx; const qy = py + dy;
+          if (qx < 0 || qy < 0 || qx >= w || qy >= h) continue;
+          const at = qy * w + qx;
+          if (st < tmin[at]) tmin[at] = st;
+          if (st > tmax[at]) tmax[at] = st;
         }
       }
     }
-    cur = next;
+
+    for (let k = 0; k < live.length; k++) {
+      const su = cx[k] * u[0] + cy[k] * u[1] + cz[k] * u[2];
+      const sv = cx[k] * v[0] + cy[k] * v[1] + cz[k] * v[2];
+      const st = cx[k] * dir[0] + cy[k] * dir[1] + cz[k] * dir[2];
+      const px = Math.round((su - au) / cell) + 1;
+      const py = Math.round((sv - av) / cell) + 1;
+      if (px < 0 || py < 0 || px >= w || py >= h) { against[k]++; continue; }
+      const at = py * w + px;
+      if (tmin[at] === Infinity || st < tmin[at] - tol || st > tmax[at] + tol) against[k]++;
+    }
   }
-  return cur;
+
+  const allow = Math.floor(count * (1 - keepFrac));
+  const out = new Uint8Array(solidVol.length);
+  let killed = 0;
+  for (let k = 0; k < live.length; k++) {
+    if (against[k] <= allow) out[live[k]] = 1;
+    else killed++;
+  }
+  return { solid: out, killed };
 }
 
-// ------------------------------------------------------------- the isosurface
-// Naive surface nets. One vertex per cell that straddles the surface, placed at
-// the average of the crossings on that cell's twelve edges, and one quad per
-// grid edge that changes sign, joining the four cells around it. Closed and
-// manifold by construction, and near-uniform, which is exactly what the
-// decimator below wants — marching cubes would hand it slivers instead.
-const CELL_CORNERS = [
-  [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
-  [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1],
-];
-const CELL_EDGES = [
-  [0, 1], [1, 2], [2, 3], [3, 0],
-  [4, 5], [5, 6], [6, 7], [7, 4],
-  [0, 4], [1, 5], [2, 6], [3, 7],
-];
+// -------------------------------------------------------------------- the fit
+// Fitting a surface THROUGH the points rather than carving a volume around them.
+//
+// The bracket above answers "which cells are inside", and its accuracy is capped
+// by the cell size — which cannot be reduced, because a fine grid on a porous
+// shell tears the reconstruction into disconnected lumps. Measured: grid 52
+// holds together, grid 128 falls apart. So detail the capture genuinely resolved
+// — the curl of an ear, about 6mm across — is lost to a 3.9mm cell, and no
+// amount of triangles gets it back.
+//
+// This lifts that cap. Instead of thresholding a density, fit a smooth function
+// whose zero level set IS the surface, and take the isosurface of that. The
+// smoothing then comes from the RADIUS OF THE FIT rather than from the size of a
+// cell, and those two are suddenly independent: average over 3mm of noise while
+// sampling on a 1.5mm grid. That is the whole trick, and it is why this can
+// follow a curve the bracket has to flatten.
+//
+// The function is implicit moving least squares: at any point in space, the
+// weighted average of the signed distances to the tangent planes of the splats
+// nearby. Near a well-sampled surface those planes agree and the average is a
+// clean signed distance; in the fuzz they disagree and the average lands in the
+// middle of the band, which is exactly the right answer.
 
-function surfaceNets(field, dim, lo, cell, iso) {
+/** Unit eigenvector for the smallest eigenvalue of a symmetric 3x3. */
+function smallestAxis(a11, a12, a13, a22, a23, a33) {
+  const lam = eigen3(a11, a12, a13, a22, a23, a33)[0];
+  // Rows of (A - lambda I). The null space is the eigenvector, and the cross
+  // product of any two independent rows lies in it.
+  const r = [
+    [a11 - lam, a12, a13],
+    [a12, a22 - lam, a23],
+    [a13, a23, a33 - lam],
+  ];
+  let best = [0, 0, 1];
+  let bestLen = 0;
+  for (const [p, q] of [[0, 1], [1, 2], [2, 0]]) {
+    const c = [
+      r[p][1] * r[q][2] - r[p][2] * r[q][1],
+      r[p][2] * r[q][0] - r[p][0] * r[q][2],
+      r[p][0] * r[q][1] - r[p][1] * r[q][0],
+    ];
+    const l = Math.hypot(c[0], c[1], c[2]);
+    if (l > bestLen) { bestLen = l; best = c; }
+  }
+  if (bestLen < 1e-20) return [0, 0, 1];
+  return best.map((v) => v / bestLen);
+}
+
+/**
+ * A normal for every splat, pointing out.
+ *
+ * The direction comes from a plane fitted to each splat's neighbourhood, which
+ * gives an axis but no sign — a plane has two sides and PCA has no opinion about
+ * which is out. Orienting a whole cloud consistently is the classical hard part
+ * of this, usually done by propagating agreement across a spanning tree.
+ *
+ * There is no need for any of that here, because the bracket has already worked
+ * out which cells are inside. So the sign is simply read off the solid: step a
+ * little each way and take the direction that leaves it. An answer that is free
+ * because of a step that had to happen anyway.
+ */
+function pointNormals(p, solidVol, dim, lo, cell, radius) {
   const [nx, ny, nz] = dim;
-  const at = (a, b, c) => field[(c * ny + b) * nx + a];
-  const cellVert = new Int32Array((nx - 1) * (ny - 1) * (nz - 1)).fill(-1);
-  const verts = [];
-  const cidx = (a, b, c) => (c * (ny - 1) + b) * (nx - 1) + a;
-
-  for (let c = 0; c < nz - 1; c++) {
-    for (let b = 0; b < ny - 1; b++) {
-      for (let a = 0; a < nx - 1; a++) {
-        const v = new Array(8);
-        let mask = 0;
-        for (let k = 0; k < 8; k++) {
-          const o = CELL_CORNERS[k];
-          v[k] = at(a + o[0], b + o[1], c + o[2]);
-          if (v[k] > iso) mask |= 1 << k;
-        }
-        if (mask === 0 || mask === 255) continue;
-        let px = 0; let py = 0; let pz = 0; let hits = 0;
-        for (const [i0, i1] of CELL_EDGES) {
-          const inside0 = (mask >> i0) & 1;
-          const inside1 = (mask >> i1) & 1;
-          if (inside0 === inside1) continue;
-          const t = (iso - v[i0]) / (v[i1] - v[i0]);
-          const o0 = CELL_CORNERS[i0]; const o1 = CELL_CORNERS[i1];
-          px += o0[0] + (o1[0] - o0[0]) * t;
-          py += o0[1] + (o1[1] - o0[1]) * t;
-          pz += o0[2] + (o1[2] - o0[2]) * t;
-          hits++;
-        }
-        cellVert[cidx(a, b, c)] = verts.length / 3;
-        verts.push(
-          lo[0] + (a + px / hits) * cell,
-          lo[1] + (b + py / hits) * cell,
-          lo[2] + (c + pz / hits) * cell,
-        );
-      }
-    }
-  }
-
-  // One quad per sign-changing grid edge, joining the four cells around it. The
-  // winding follows the direction of the sign change so that every face ends up
-  // pointing OUT of the solid — get this backwards and the model is inside out,
-  // which does not look like an error in a wireframe and looks like a black
-  // object in the app. There is a check for it at the end.
-  const faces = [];
-  const quad = (p, q, r, s, flip) => {
-    if (p < 0 || q < 0 || r < 0 || s < 0) return;
-    if (flip) faces.push(p, r, q, p, s, r);
-    else faces.push(p, q, r, p, r, s);
-  };
-  for (let c = 0; c < nz - 1; c++) {
-    for (let b = 0; b < ny - 1; b++) {
-      for (let a = 0; a < nx - 1; a++) {
-        const here = at(a, b, c) > iso;
-        if (a > 0 && b > 0 && (at(a, b, c + 1) > iso) !== here) {
-          quad(cellVert[cidx(a, b, c)], cellVert[cidx(a - 1, b, c)], cellVert[cidx(a - 1, b - 1, c)], cellVert[cidx(a, b - 1, c)], here);
-        }
-        if (a > 0 && c > 0 && (at(a, b + 1, c) > iso) !== here) {
-          quad(cellVert[cidx(a, b, c)], cellVert[cidx(a, b, c - 1)], cellVert[cidx(a - 1, b, c - 1)], cellVert[cidx(a - 1, b, c)], here);
-        }
-        if (b > 0 && c > 0 && (at(a + 1, b, c) > iso) !== here) {
-          quad(cellVert[cidx(a, b, c)], cellVert[cidx(a, b - 1, c)], cellVert[cidx(a, b - 1, c - 1)], cellVert[cidx(a, b, c - 1)], here);
-        }
-      }
-    }
-  }
-  // The divergence theorem, used as an assertion. A closed surface wound
-  // consistently outward encloses a positive volume; wound inward it encloses
-  // exactly minus the same number. Anything near zero would mean the winding is
-  // not consistent at all, which surface nets cannot produce and which nothing
-  // downstream could survive.
-  let vol = 0;
-  for (let i = 0; i < faces.length; i += 3) {
-    const a = faces[i] * 3; const b = faces[i + 1] * 3; const c = faces[i + 2] * 3;
-    vol += (
-      verts[a] * (verts[b + 1] * verts[c + 2] - verts[b + 2] * verts[c + 1])
-      - verts[a + 1] * (verts[b] * verts[c + 2] - verts[b + 2] * verts[c])
-      + verts[a + 2] * (verts[b] * verts[c + 1] - verts[b + 1] * verts[c])
-    ) / 6;
-  }
-  if (vol < 0) for (let i = 0; i < faces.length; i += 3) { const t = faces[i + 1]; faces[i + 1] = faces[i + 2]; faces[i + 2] = t; }
-
-  return { verts: Float64Array.from(verts), faces: Int32Array.from(faces) };
-}
-
-/**
- * Taubin smoothing: a Laplacian pass that shrinks, then a slightly larger
- * negative one that pushes back out. Plain Laplacian smoothing on a closed
- * surface deflates it — run it long enough on a pig and you get an egg — and
- * the whole point of the alternating pass is that it does not.
- */
-function smooth(mesh, passes, lambda = 0.55, mu = -0.58) {
-  const { verts, faces } = mesh;
-  const n = verts.length / 3;
-  const adj = Array.from({ length: n }, () => new Set());
-  for (let i = 0; i < faces.length; i += 3) {
-    const [a, b, c] = [faces[i], faces[i + 1], faces[i + 2]];
-    adj[a].add(b); adj[a].add(c);
-    adj[b].add(a); adj[b].add(c);
-    adj[c].add(a); adj[c].add(b);
-  }
-  let cur = verts;
-  for (let pass = 0; pass < passes * 2; pass++) {
-    const k = pass % 2 ? mu : lambda;
-    const next = new Float64Array(cur.length);
-    for (let i = 0; i < n; i++) {
-      const near = adj[i];
-      if (!near.size) { next[i * 3] = cur[i * 3]; next[i * 3 + 1] = cur[i * 3 + 1]; next[i * 3 + 2] = cur[i * 3 + 2]; continue; }
-      let sx = 0; let sy = 0; let sz = 0;
-      for (const j of near) { sx += cur[j * 3]; sy += cur[j * 3 + 1]; sz += cur[j * 3 + 2]; }
-      const m = near.size;
-      next[i * 3] = cur[i * 3] + k * (sx / m - cur[i * 3]);
-      next[i * 3 + 1] = cur[i * 3 + 1] + k * (sy / m - cur[i * 3 + 1]);
-      next[i * 3 + 2] = cur[i * 3 + 2] + k * (sz / m - cur[i * 3 + 2]);
-    }
-    cur = next;
-  }
-  return { verts: cur, faces };
-}
-
-// -------------------------------------------------------------- the decimation
-// Garland–Heckbert quadric error metrics. Each vertex carries the sum of the
-// squared-distance forms of its incident planes; collapsing an edge costs
-// whatever that sum says the new point is away from all of them, and the
-// cheapest collapse always goes next. On a barrel with four legs this spends
-// almost nothing on the flank and keeps its faces where the curvature is, which
-// is the entire argument for triangles over voxels at this budget.
-class Heap {
-  constructor() { this.a = []; }
-  get size() { return this.a.length; }
-  push(item) {
-    const a = this.a;
-    a.push(item);
-    let i = a.length - 1;
-    while (i > 0) {
-      const p = (i - 1) >> 1;
-      if (a[p].cost <= a[i].cost) break;
-      [a[p], a[i]] = [a[i], a[p]];
-      i = p;
-    }
-  }
-  pop() {
-    const a = this.a;
-    const top = a[0];
-    const last = a.pop();
-    if (a.length) {
-      a[0] = last;
-      let i = 0;
-      for (;;) {
-        const l = i * 2 + 1; const r = l + 1;
-        let m = i;
-        if (l < a.length && a[l].cost < a[m].cost) m = l;
-        if (r < a.length && a[r].cost < a[m].cost) m = r;
-        if (m === i) break;
-        [a[m], a[i]] = [a[i], a[m]];
-        i = m;
-      }
-    }
-    return top;
-  }
-}
-
-function decimate(mesh, target) {
-  const pos = Array.from({ length: mesh.verts.length / 3 }, (_, i) => [mesh.verts[i * 3], mesh.verts[i * 3 + 1], mesh.verts[i * 3 + 2]]);
-  const faces = [];
-  for (let i = 0; i < mesh.faces.length; i += 3) faces.push([mesh.faces[i], mesh.faces[i + 1], mesh.faces[i + 2]]);
-
-  const nv = pos.length;
-  const facesOf = Array.from({ length: nv }, () => new Set());
-  const alive = new Uint8Array(faces.length).fill(1);
-  faces.forEach((f, i) => { for (const v of f) facesOf[v].add(i); });
-  const dead = new Uint8Array(nv);
-  const version = new Int32Array(nv);
-
-  const planeOf = (f) => {
-    const [a, b, c] = f.map((i) => pos[i]);
-    const ux = b[0] - a[0]; const uy = b[1] - a[1]; const uz = b[2] - a[2];
-    const vx = c[0] - a[0]; const vy = c[1] - a[1]; const vz = c[2] - a[2];
-    let nx = uy * vz - uz * vy;
-    let ny = uz * vx - ux * vz;
-    let nz = ux * vy - uy * vx;
-    const len = Math.hypot(nx, ny, nz);
-    if (len < 1e-18) return null;
-    nx /= len; ny /= len; nz /= len;
-    return [nx, ny, nz, -(nx * a[0] + ny * a[1] + nz * a[2])];
-  };
-  const addPlane = (q, p) => {
-    const [a, b, c, d] = p;
-    q[0] += a * a; q[1] += a * b; q[2] += a * c; q[3] += a * d;
-    q[4] += b * b; q[5] += b * c; q[6] += b * d;
-    q[7] += c * c; q[8] += c * d;
-    q[9] += d * d;
-  };
-  const quadrics = Array.from({ length: nv }, () => new Float64Array(10));
-  for (const f of faces) {
-    const p = planeOf(f);
-    if (!p) continue;
-    for (const v of f) addPlane(quadrics[v], p);
-  }
-  const errorAt = (q, v) => {
-    const [x, y, z] = v;
-    return q[0] * x * x + 2 * q[1] * x * y + 2 * q[2] * x * z + 2 * q[3] * x
-      + q[4] * y * y + 2 * q[5] * y * z + 2 * q[6] * y
-      + q[7] * z * z + 2 * q[8] * z
-      + q[9];
-  };
-
-  /** Best position for a collapse: solve the quadric, or fall back if it is flat. */
-  function bestPlace(q, a, b) {
-    const m = [q[0], q[1], q[2], q[1], q[4], q[5], q[2], q[5], q[7]];
-    const det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
-    if (Math.abs(det) > 1e-14) {
-      const r = [-q[3], -q[6], -q[8]];
-      const inv = [
-        (m[4] * m[8] - m[5] * m[7]) / det, (m[2] * m[7] - m[1] * m[8]) / det, (m[1] * m[5] - m[2] * m[4]) / det,
-        (m[5] * m[6] - m[3] * m[8]) / det, (m[0] * m[8] - m[2] * m[6]) / det, (m[2] * m[3] - m[0] * m[5]) / det,
-        (m[3] * m[7] - m[4] * m[6]) / det, (m[1] * m[6] - m[0] * m[7]) / det, (m[0] * m[4] - m[1] * m[3]) / det,
-      ];
-      const v = [
-        inv[0] * r[0] + inv[1] * r[1] + inv[2] * r[2],
-        inv[3] * r[0] + inv[4] * r[1] + inv[5] * r[2],
-        inv[6] * r[0] + inv[7] * r[1] + inv[8] * r[2],
-      ];
-      // A near-singular solve can throw the point across the model. Keep it only
-      // if it landed near the edge it came from.
-      const span = Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) * 4 + 1e-9;
-      const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
-      if (Math.hypot(v[0] - mid[0], v[1] - mid[1], v[2] - mid[2]) < span) return v;
-    }
-    const options = [a, b, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]];
-    let bestV = options[2];
-    let bestE = Infinity;
-    for (const o of options) {
-      const e = errorAt(q, o);
-      if (e < bestE) { bestE = e; bestV = o; }
-    }
-    return bestV;
-  }
-
-  const neighborsOf = (v) => {
-    const out = new Set();
-    for (const fi of facesOf[v]) for (const w of faces[fi]) if (w !== v) out.add(w);
-    return out;
-  };
-
-  const heap = new Heap();
-  const consider = (a, b) => {
-    if (a === b || dead[a] || dead[b]) return;
-    const q = new Float64Array(10);
-    for (let k = 0; k < 10; k++) q[k] = quadrics[a][k] + quadrics[b][k];
-    const at = bestPlace(q, pos[a], pos[b]);
-    heap.push({ a, b, at, cost: Math.max(0, errorAt(q, at)), va: version[a], vb: version[b] });
-  };
-  const seen = new Set();
-  for (const f of faces) {
-    for (let k = 0; k < 3; k++) {
-      const a = f[k]; const b = f[(k + 1) % 3];
-      const key = a < b ? `${a},${b}` : `${b},${a}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      consider(a, b);
-    }
-  }
-
-  let liveFaces = faces.length;
-  let collapses = 0;
-  while (liveFaces > target && heap.size) {
-    const e = heap.pop();
-    if (dead[e.a] || dead[e.b] || version[e.a] !== e.va || version[e.b] !== e.vb) continue;
-
-    // The link condition. On a closed manifold an edge is safe to collapse only
-    // if its endpoints share exactly the two vertices opposite it; anything else
-    // pinches the surface into something that is no longer a surface.
-    const na = neighborsOf(e.a);
-    const nb = neighborsOf(e.b);
-    let shared = 0;
-    for (const v of na) if (nb.has(v)) shared++;
-    if (shared !== 2) continue;
-
-    // And it must not turn a triangle inside out, which quadrics do not notice
-    // and an eye notices immediately.
-    const touched = new Set([...facesOf[e.a], ...facesOf[e.b]]);
-    const doomed = [...facesOf[e.a]].filter((fi) => facesOf[e.b].has(fi));
-    let flips = false;
-    for (const fi of touched) {
-      if (doomed.includes(fi)) continue;
-      const before = planeOf(faces[fi]);
-      if (!before) continue;
-      const moved = faces[fi].map((v) => ((v === e.a || v === e.b) ? e.at : pos[v]));
-      const ux = moved[1][0] - moved[0][0]; const uy = moved[1][1] - moved[0][1]; const uz = moved[1][2] - moved[0][2];
-      const vx = moved[2][0] - moved[0][0]; const vy = moved[2][1] - moved[0][1]; const vz = moved[2][2] - moved[0][2];
-      const nx2 = uy * vz - uz * vy; const ny2 = uz * vx - ux * vz; const nz2 = ux * vy - uy * vx;
-      const len = Math.hypot(nx2, ny2, nz2);
-      if (len < 1e-18) { flips = true; break; }
-      if ((before[0] * nx2 + before[1] * ny2 + before[2] * nz2) / len < 0.1) { flips = true; break; }
-    }
-    if (flips) continue;
-
-    // Do it: b folds into a, a moves to the chosen point.
-    pos[e.a] = e.at;
-    for (let k = 0; k < 10; k++) quadrics[e.a][k] += quadrics[e.b][k];
-    for (const fi of [...facesOf[e.b]]) {
-      const f = faces[fi];
-      for (let k = 0; k < 3; k++) if (f[k] === e.b) f[k] = e.a;
-      if (f[0] === f[1] || f[1] === f[2] || f[0] === f[2]) {
-        if (alive[fi]) { alive[fi] = 0; liveFaces--; }
-        for (const v of new Set(f)) facesOf[v].delete(fi);
-      } else {
-        facesOf[e.a].add(fi);
-      }
-      facesOf[e.b].delete(fi);
-    }
-    dead[e.b] = 1;
-    version[e.a]++;
-    collapses++;
-    for (const v of neighborsOf(e.a)) consider(e.a, v);
-  }
-
-  // Repack.
-  const remap = new Int32Array(nv).fill(-1);
-  const outVerts = [];
-  const outFaces = [];
-  faces.forEach((f, i) => {
-    if (!alive[i]) return;
-    const tri = f.map((v) => {
-      if (remap[v] < 0) { remap[v] = outVerts.length / 3; outVerts.push(pos[v][0], pos[v][1], pos[v][2]); }
-      return remap[v];
-    });
-    outFaces.push(tri[0], tri[1], tri[2]);
-  });
-  return { verts: Float64Array.from(outVerts), faces: Int32Array.from(outFaces), collapses };
-}
-
-/**
- * Sample the splat cloud's color at a point.
- *
- * Opacity- and distance-weighted, and the weighting matters more than it looks:
- * an unweighted average over a radius smears a dark eye across half a face, and
- * a nearest-splat lookup picks up whatever single blob happened to land there.
- *
- * The width ADAPTS to what is actually nearby. Where the scan is dense the
- * kernel stays at `radius` and resolves what the capture resolved; where it is
- * thin the kernel opens out to reach the nearest splats there are. Without that
- * the tight kernel finds nothing over the parts a capture missed and the surface
- * comes back in flat grey patches with ragged edges — which look far more like a
- * bug than the honest answer, which is that the color there is a guess made from
- * further away.
- */
-function makeColorSampler(p, radius) {
-  const h = Math.max(radius * 3, 0.004);
+  const h = radius;
   const bins = new Map();
+  const key = (a, b, c) => `${a},${b},${c}`;
   for (let i = 0; i < p.n; i++) {
-    const kk = `${Math.floor(p.x[i] / h)},${Math.floor(p.y[i] / h)},${Math.floor(p.z[i] / h)}`;
-    if (!bins.has(kk)) bins.set(kk, []);
-    bins.get(kk).push(i);
+    const k = key(Math.floor(p.x[i] / h), Math.floor(p.y[i] / h), Math.floor(p.z[i] / h));
+    let bin = bins.get(k);
+    if (!bin) { bin = []; bins.set(k, bin); }
+    bin.push(i);
   }
-  const near = [];
-  return (cx, cy, cz, out) => {
-    const bx = Math.floor(cx / h); const by = Math.floor(cy / h); const bz = Math.floor(cz / h);
-    near.length = 0;
-    let closest = Infinity;
-    for (let ring = 1; ring <= 3 && !near.length; ring++) {
-      for (let a = -ring; a <= ring; a++) {
-        for (let bb = -ring; bb <= ring; bb++) {
-          for (let c = -ring; c <= ring; c++) {
-            const bin = bins.get(`${bx + a},${by + bb},${bz + c}`);
-            if (!bin) continue;
-            for (const i of bin) {
-              const d2 = (p.x[i] - cx) ** 2 + (p.y[i] - cy) ** 2 + (p.z[i] - cz) ** 2;
-              near.push(i, d2);
-              if (d2 < closest) closest = d2;
-            }
+  const inside = (x, y, z) => {
+    const a = Math.round((x - lo[0]) / cell);
+    const b = Math.round((y - lo[1]) / cell);
+    const c = Math.round((z - lo[2]) / cell);
+    if (a < 0 || b < 0 || c < 0 || a >= nx || b >= ny || c >= nz) return 0;
+    return solidVol[(c * ny + b) * nx + a];
+  };
+
+  const nrm = new Float64Array(p.n * 3);
+  const r2 = radius * radius;
+  let flat = 0;
+  for (let i = 0; i < p.n; i++) {
+    const bx = Math.floor(p.x[i] / h); const by = Math.floor(p.y[i] / h); const bz = Math.floor(p.z[i] / h);
+    let n = 0; let sx = 0; let sy = 0; let sz = 0;
+    const near = [];
+    for (let a = -1; a <= 1; a++) {
+      for (let b = -1; b <= 1; b++) {
+        for (let c = -1; c <= 1; c++) {
+          const bin = bins.get(key(bx + a, by + b, bz + c));
+          if (!bin) continue;
+          for (const j of bin) {
+            const d2 = (p.x[j] - p.x[i]) ** 2 + (p.y[j] - p.y[i]) ** 2 + (p.z[j] - p.z[i]) ** 2;
+            if (d2 > r2) continue;
+            near.push(j); sx += p.x[j]; sy += p.y[j]; sz += p.z[j]; n++;
           }
         }
       }
     }
-    if (!near.length) { out[0] = 0.7; out[1] = 0.7; out[2] = 0.7; return out; }
-    // Wide enough to reach the nearest splat there is, never tighter than asked.
-    const sigma = Math.max(radius, Math.sqrt(closest) * 0.9);
-    const sigma2 = 2 * sigma * sigma;
-    let r = 0; let g = 0; let b = 0; let wsum = 0;
-    for (let k = 0; k < near.length; k += 2) {
-      const i = near[k];
-      const w = p.w[i] * Math.exp(-near[k + 1] / sigma2);
-      r += p.rgb[i * 3] * w; g += p.rgb[i * 3 + 1] * w; b += p.rgb[i * 3 + 2] * w;
-      wsum += w;
+    let v = [0, 0, 1];
+    if (n >= 6) {
+      sx /= n; sy /= n; sz /= n;
+      let c11 = 0; let c12 = 0; let c13 = 0; let c22 = 0; let c23 = 0; let c33 = 0;
+      for (const j of near) {
+        const dx = p.x[j] - sx; const dy = p.y[j] - sy; const dz = p.z[j] - sz;
+        c11 += dx * dx; c12 += dx * dy; c13 += dx * dz;
+        c22 += dy * dy; c23 += dy * dz; c33 += dz * dz;
+      }
+      v = smallestAxis(c11 / n, c12 / n, c13 / n, c22 / n, c23 / n, c33 / n);
+    } else {
+      flat++;
     }
-    if (wsum > 1e-9) { out[0] = r / wsum; out[1] = g / wsum; out[2] = b / wsum; }
-    else { out[0] = 0.7; out[1] = 0.7; out[2] = 0.7; }
-    return out;
-  };
+    // Which way is out, asked of the solid rather than propagated.
+    const step = cell * 1.5;
+    const outAt = inside(p.x[i] + v[0] * step, p.y[i] + v[1] * step, p.z[i] + v[2] * step);
+    const inAt = inside(p.x[i] - v[0] * step, p.y[i] - v[1] * step, p.z[i] - v[2] * step);
+    const sign = outAt === inAt ? 1 : (outAt ? -1 : 1);
+    nrm[i * 3] = v[0] * sign; nrm[i * 3 + 1] = v[1] * sign; nrm[i * 3 + 2] = v[2] * sign;
+  }
+  return { nrm, flat };
 }
+
+/**
+ * The IMLS field, evaluated only where it can matter.
+ *
+ * Away from the points the answer is never in doubt, so those nodes are seeded
+ * from the bracket's own solid and never touched. Only the band around the data
+ * gets the weighted sum, which is what keeps this affordable on a grid fine
+ * enough to be worth having.
+ */
+function imlsField(p, nrm, solidVol, dim, lo, cell, radius) {
+  const [nx, ny, nz] = dim;
+  const f = new Float32Array(nx * ny * nz);
+  // Far from anything, the sign is all that matters and the bracket knows it.
+  for (let i = 0; i < f.length; i++) f[i] = solidVol[i] ? -radius : radius;
+
+  const reach = Math.ceil((radius * 2.5) / cell);
+  const inv = -1 / (radius * radius);
+  const num = new Float64Array(f.length);
+  const den = new Float64Array(f.length);
+  for (let i = 0; i < p.n; i++) {
+    const gx = (p.x[i] - lo[0]) / cell;
+    const gy = (p.y[i] - lo[1]) / cell;
+    const gz = (p.z[i] - lo[2]) / cell;
+    const cx = Math.round(gx); const cy = Math.round(gy); const cz = Math.round(gz);
+    const nxi = nrm[i * 3]; const nyi = nrm[i * 3 + 1]; const nzi = nrm[i * 3 + 2];
+    for (let a = cx - reach; a <= cx + reach; a++) {
+      if (a < 0 || a >= nx) continue;
+      const dx = (a - gx) * cell;
+      for (let b = cy - reach; b <= cy + reach; b++) {
+        if (b < 0 || b >= ny) continue;
+        const dy = (b - gy) * cell;
+        for (let c = cz - reach; c <= cz + reach; c++) {
+          if (c < 0 || c >= nz) continue;
+          const dz = (c - gz) * cell;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          const w = p.w[i] * Math.exp(d2 * inv);
+          if (w < 1e-4) continue;
+          const at = (c * ny + b) * nx + a;
+          // Signed distance to this splat's tangent plane.
+          num[at] += w * (dx * nxi + dy * nyi + dz * nzi);
+          den[at] += w;
+        }
+      }
+    }
+  }
+  let touched = 0;
+  for (let i = 0; i < f.length; i++) {
+    if (den[i] > 1e-6) { f[i] = num[i] / den[i]; touched++; }
+  }
+  return { f, touched };
+}
+
+
+
+
+
+
 
 /**
  * A color per vertex, and smooth normals to go with them.
@@ -1454,145 +1267,6 @@ function vertexColors(mesh, sample) {
   return { colors, normals };
 }
 
-// ------------------------------------------------------------------ the color
-// Object Tile Scroll never uses a model's materials. It reads the RELATIONSHIPS
-// between their colors — biggest group is the body, everything else is stored as
-// an HSL delta from it — and then decides for itself what the object is made of.
-// So what this has to produce is not a faithful color, it is a small number of
-// groups whose colors sit in the right relation to each other: a dark snout has
-// to stay dark relative to the body under any finish the piece picks.
-//
-// Per-triangle color comes from the splats around its centroid. K-means over
-// those, then a majority vote across each triangle's neighbors, because a
-// speckled assignment costs nothing here in triangles (the app merges by
-// material) but produces a model whose "groups" are noise rather than parts.
-function colorize(mesh, p, k, cell) {
-  const nf = mesh.faces.length / 3;
-  const h = cell * 3;
-  const bins = new Map();
-  const key = (x, y, z) => `${Math.floor(x / h)},${Math.floor(y / h)},${Math.floor(z / h)}`;
-  for (let i = 0; i < p.n; i++) {
-    const kk = key(p.x[i], p.y[i], p.z[i]);
-    if (!bins.has(kk)) bins.set(kk, []);
-    bins.get(kk).push(i);
-  }
-
-  const faceColor = new Float64Array(nf * 3);
-  for (let f = 0; f < nf; f++) {
-    let cx = 0; let cy = 0; let cz = 0;
-    for (let j = 0; j < 3; j++) {
-      const v = mesh.faces[f * 3 + j];
-      cx += mesh.verts[v * 3] / 3; cy += mesh.verts[v * 3 + 1] / 3; cz += mesh.verts[v * 3 + 2] / 3;
-    }
-    const bx = Math.floor(cx / h); const by = Math.floor(cy / h); const bz = Math.floor(cz / h);
-    let r = 0; let g = 0; let b = 0; let wsum = 0;
-    for (let a = -1; a <= 1; a++) {
-      for (let bb = -1; bb <= 1; bb++) {
-        for (let c = -1; c <= 1; c++) {
-          const bin = bins.get(`${bx + a},${by + bb},${bz + c}`);
-          if (!bin) continue;
-          for (const i of bin) {
-            const d2 = (p.x[i] - cx) ** 2 + (p.y[i] - cy) ** 2 + (p.z[i] - cz) ** 2;
-            const w = p.w[i] * Math.exp(-d2 / (2 * (cell * 1.5) ** 2));
-            r += p.rgb[i * 3] * w; g += p.rgb[i * 3 + 1] * w; b += p.rgb[i * 3 + 2] * w;
-            wsum += w;
-          }
-        }
-      }
-    }
-    if (wsum > 1e-9) { faceColor[f * 3] = r / wsum; faceColor[f * 3 + 1] = g / wsum; faceColor[f * 3 + 2] = b / wsum; }
-    else { faceColor[f * 3] = 0.7; faceColor[f * 3 + 1] = 0.7; faceColor[f * 3 + 2] = 0.7; }
-  }
-
-  if (k === 1) {
-    const mean = [0, 0, 0];
-    for (let f = 0; f < nf; f++) for (let c = 0; c < 3; c++) mean[c] += faceColor[f * 3 + c] / nf;
-    return { group: new Int32Array(nf), colors: [mean] };
-  }
-
-  // K-means, seeded by spreading the starts as far apart as the data allows
-  // (k-means++ without the randomness, so a rerun gives the same model).
-  const centers = [];
-  let seed = [0, 0, 0];
-  for (let f = 0; f < nf; f++) for (let c = 0; c < 3; c++) seed[c] += faceColor[f * 3 + c] / nf;
-  centers.push(seed);
-  while (centers.length < k) {
-    let far = 0; let farD = -1;
-    for (let f = 0; f < nf; f++) {
-      let d = Infinity;
-      for (const c of centers) {
-        d = Math.min(d, (faceColor[f * 3] - c[0]) ** 2 + (faceColor[f * 3 + 1] - c[1]) ** 2 + (faceColor[f * 3 + 2] - c[2]) ** 2);
-      }
-      if (d > farD) { farD = d; far = f; }
-    }
-    centers.push([faceColor[far * 3], faceColor[far * 3 + 1], faceColor[far * 3 + 2]]);
-  }
-  const group = new Int32Array(nf);
-  for (let iter = 0; iter < 40; iter++) {
-    let moved = 0;
-    for (let f = 0; f < nf; f++) {
-      let best = 0; let bestD = Infinity;
-      for (let c = 0; c < centers.length; c++) {
-        const d = (faceColor[f * 3] - centers[c][0]) ** 2 + (faceColor[f * 3 + 1] - centers[c][1]) ** 2 + (faceColor[f * 3 + 2] - centers[c][2]) ** 2;
-        if (d < bestD) { bestD = d; best = c; }
-      }
-      if (group[f] !== best) { group[f] = best; moved++; }
-    }
-    const sums = centers.map(() => [0, 0, 0, 0]);
-    for (let f = 0; f < nf; f++) {
-      const s = sums[group[f]];
-      s[0] += faceColor[f * 3]; s[1] += faceColor[f * 3 + 1]; s[2] += faceColor[f * 3 + 2]; s[3]++;
-    }
-    for (let c = 0; c < centers.length; c++) if (sums[c][3]) centers[c] = [sums[c][0] / sums[c][3], sums[c][1] / sums[c][3], sums[c][2] / sums[c][3]];
-    if (!moved) break;
-  }
-
-  // Despeckle: a triangle outvoted by its edge-neighbors joins them. Three
-  // rounds is enough to clear grain without eating a real patch.
-  const edgeMap = new Map();
-  for (let f = 0; f < nf; f++) {
-    for (let j = 0; j < 3; j++) {
-      const a = mesh.faces[f * 3 + j]; const b = mesh.faces[f * 3 + ((j + 1) % 3)];
-      const kk = a < b ? `${a},${b}` : `${b},${a}`;
-      if (!edgeMap.has(kk)) edgeMap.set(kk, []);
-      edgeMap.get(kk).push(f);
-    }
-  }
-  const nbr = Array.from({ length: nf }, () => []);
-  for (const fs of edgeMap.values()) {
-    if (fs.length !== 2) continue;
-    nbr[fs[0]].push(fs[1]);
-    nbr[fs[1]].push(fs[0]);
-  }
-  for (let round = 0; round < 3; round++) {
-    const next = group.slice();
-    for (let f = 0; f < nf; f++) {
-      const tally = new Map();
-      for (const g of nbr[f]) tally.set(group[g], (tally.get(group[g]) || 0) + 1);
-      let win = group[f]; let winN = (tally.get(group[f]) || 0) + 0.5;
-      for (const [g, c] of tally) if (c > winN) { winN = c; win = g; }
-      next[f] = win;
-    }
-    group.set(next);
-  }
-
-  // Recolor from the final grouping and drop any cluster that lost all its
-  // triangles, so `colors` and the primitives stay in step.
-  const used = [];
-  const sums = centers.map(() => [0, 0, 0, 0]);
-  for (let f = 0; f < nf; f++) {
-    const s = sums[group[f]];
-    s[0] += faceColor[f * 3]; s[1] += faceColor[f * 3 + 1]; s[2] += faceColor[f * 3 + 2]; s[3]++;
-  }
-  const remap = new Int32Array(centers.length).fill(-1);
-  for (let c = 0; c < centers.length; c++) {
-    if (!sums[c][3]) continue;
-    remap[c] = used.length;
-    used.push([sums[c][0] / sums[c][3], sums[c][1] / sums[c][3], sums[c][2] / sums[c][3]]);
-  }
-  for (let f = 0; f < nf; f++) group[f] = remap[group[f]];
-  return { group, colors: used };
-}
 
 // ------------------------------------------------------------------- the write
 // Same shape as obj2glb.mjs --flat: positions only, three per triangle, no index
@@ -1655,6 +1329,118 @@ function buildGlb(mesh, group, colors, name) {
     scenes: [{ nodes: [0] }],
     nodes: [{ mesh: 0, name }],
     meshes: [{ primitives }],
+    materials,
+    accessors,
+    bufferViews,
+    buffers: [{ byteLength: binBuf.length }],
+  };
+  const jsonBuf = Buffer.from(JSON.stringify(json), 'utf8');
+  const jsonChunk = Buffer.concat([jsonBuf, Buffer.alloc(pad4(jsonBuf.length) - jsonBuf.length, 0x20)]);
+  const header = Buffer.alloc(12);
+  header.writeUInt32LE(0x46546c67, 0);
+  header.writeUInt32LE(2, 4);
+  header.writeUInt32LE(12 + 8 + jsonChunk.length + 8 + binBuf.length, 8);
+  const jh = Buffer.alloc(8);
+  jh.writeUInt32LE(jsonChunk.length, 0);
+  jh.writeUInt32LE(0x4e4f534a, 4);
+  const bh = Buffer.alloc(8);
+  bh.writeUInt32LE(binBuf.length, 0);
+  bh.writeUInt32LE(0x004e4942, 4);
+  return Buffer.concat([header, jh, jsonChunk, bh, binBuf]);
+}
+
+/**
+ * One file holding the cloud and every outline drawn on it.
+ *
+ * A POINTS primitive for the scan, in its own colors, and a LINE_STRIP per
+ * traced ring, closed by repeating its first vertex. Both are real glTF
+ * primitive modes, so this opens in any viewer that reads a GLB rather than
+ * needing the editor — the point of it is being able to check the outlines
+ * against the points they were drawn from anywhere, in one drag.
+ *
+ * The cloud is thinned to keep the file openable. Outlines never are: they are
+ * the thing being looked at, and a decimated one would be a different outline.
+ */
+function buildTraceGlb(p, ringsByView, meta = [], budget = 150000) {
+  const bin = [];
+  const bufferViews = [];
+  const accessors = [];
+  const meshes = [];
+  const nodes = [];
+  const materials = [];
+  let offset = 0;
+  const addView = (buf) => {
+    bufferViews.push({ buffer: 0, byteOffset: offset, byteLength: buf.length });
+    const chunk = Buffer.alloc(pad4(buf.length));
+    buf.copy(chunk);
+    bin.push(chunk);
+    offset += chunk.length;
+    return bufferViews.length - 1;
+  };
+  const addVec3 = (list) => {
+    const buf = Buffer.alloc(list.length * 12);
+    const min = [Infinity, Infinity, Infinity];
+    const max = [-Infinity, -Infinity, -Infinity];
+    let at = 0;
+    for (const v of list) {
+      for (let c = 0; c < 3; c++) {
+        buf.writeFloatLE(v[c], at); at += 4;
+        if (v[c] < min[c]) min[c] = v[c];
+        if (v[c] > max[c]) max[c] = v[c];
+      }
+    }
+    accessors.push({ bufferView: addView(buf), componentType: 5126, count: list.length, type: 'VEC3', min, max });
+    return accessors.length - 1;
+  };
+
+  const step = Math.max(1, Math.ceil(p.n / budget));
+  const pos = [];
+  const col = [];
+  for (let i = 0; i < p.n; i += step) {
+    pos.push([p.x[i], p.y[i], p.z[i]]);
+    col.push(p.rgb[i * 3], p.rgb[i * 3 + 1], p.rgb[i * 3 + 2], 1);
+  }
+  const posAcc = addVec3(pos);
+  const colBuf = Buffer.alloc(col.length * 4);
+  for (let i = 0; i < col.length; i++) colBuf.writeFloatLE(col[i], i * 4);
+  accessors.push({ bufferView: addView(colBuf), componentType: 5126, count: pos.length, type: 'VEC4' });
+  materials.push({ name: 'cloud', pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1], metallicFactor: 0, roughnessFactor: 1 } });
+  meshes.push({
+    name: 'cloud',
+    primitives: [{ mode: 0, attributes: { POSITION: posAcc, COLOR_0: accessors.length - 1 }, material: 0 }],
+  });
+  nodes.push({ mesh: 0, name: `cloud (${pos.length} of ${p.n} points)` });
+
+  materials.push({
+    name: 'outline',
+    pbrMetallicRoughness: { baseColorFactor: [0.35, 0.95, 0.7, 1], metallicFactor: 0, roughnessFactor: 1 },
+    emissiveFactor: [0.35, 0.95, 0.7],
+  });
+  ringsByView.forEach((view, d) => {
+    const prims = [];
+    for (const ring of view) {
+      if (ring.length < 3) continue;
+      const verts = ring.map((i) => [p.x[i], p.y[i], p.z[i]]);
+      verts.push(verts[0]); // LINE_STRIP, closed by hand
+      prims.push({ mode: 3, attributes: { POSITION: addVec3(verts) }, material: 1 });
+    }
+    if (!prims.length) return;
+    const label = `outline_${String(d).padStart(2, '0')}`;
+    meshes.push({ name: label, primitives: prims });
+    // glTF extras: how this outline was drawn, carried with it. A viewer that
+    // does not care ignores them; the editor uses them to aim the camera down
+    // the direction this one was traced from, which is the only angle at which
+    // an outline looks like an outline.
+    nodes.push({ mesh: meshes.length - 1, name: label, extras: meta[d] || {} });
+  });
+
+  const binBuf = Buffer.concat(bin);
+  const json = {
+    asset: { version: '2.0', generator: 'splat2glb.mjs --trace-glb' },
+    scene: 0,
+    scenes: [{ nodes: nodes.map((_, i) => i) }],
+    nodes,
+    meshes,
     materials,
     accessors,
     bufferViews,
@@ -1771,34 +1557,6 @@ function buildVertexColorGlb(mesh, colors, normals, name) {
   return Buffer.concat([header, jh, jsonChunk, bh, binBuf]);
 }
 
-/**
- * Stand the model up.
- *
- * `normalize()` in the app centers every build and scales it to a unit sphere,
- * so absolute size genuinely does not matter and is not corrected here.
- * Orientation is the opposite: a scan arrives in whatever frame the phone was
- * holding and a pig on its side is a pig on its side forever.
- */
-function orient(verts, up, yawDeg) {
-  const m = {
-    '+y': (x, y, z) => [x, y, z],
-    '-y': (x, y, z) => [x, -y, -z],
-    '+z': (x, y, z) => [x, z, -y],
-    '-z': (x, y, z) => [x, -z, y],
-    '+x': (x, y, z) => [-y, x, z],
-    '-x': (x, y, z) => [y, -x, z],
-  }[up];
-  if (!m) throw new Error(`--up must be one of ±x ±y ±z, got "${up}"`);
-  const a = (yawDeg * Math.PI) / 180;
-  const ca = Math.cos(a); const sa = Math.sin(a);
-  for (let i = 0; i < verts.length; i += 3) {
-    const [x, y, z] = m(verts[i], verts[i + 1], verts[i + 2]);
-    verts[i] = x * ca + z * sa;
-    verts[i + 1] = y;
-    verts[i + 2] = -x * sa + z * ca;
-  }
-  return verts;
-}
 
 // --------------------------------------------------------------------- the run
 const t0 = Date.now();
@@ -1818,14 +1576,180 @@ say(`read      ${pts.count} ${pts.splat ? 'splats' : 'points'} from ${inPath}`);
   say(`extent    ${fmt(lo)} .. ${fmt(hi)}${CROP ? `  cropped to ${fmt(CROP.slice(0, 3))} .. ${fmt(CROP.slice(3))}` : ''}`);
 }
 
-const p = cull(pts);
-say(`cull      ${p.n} kept (opacity >= ${MIN_OPACITY}${MIN_LUM ? `, brightness >= ${MIN_LUM}` : ''}, >= ${ISOLATION} neighbors)`);
+const p = cullCloud(pts, {
+  grid: GRID, minOpacity: MIN_OPACITY, minLum: MIN_LUM, crop: CROP,
+  isolation: ISOLATION, isolationRadius: ISO_RADIUS,
+});
+const isoRadius = p.isolationRadius;
+say(`cull      ${p.n} kept (opacity >= ${MIN_OPACITY}${MIN_LUM ? `, brightness >= ${MIN_LUM}` : ''}, >= ${ISOLATION} neighbors within ${(isoRadius * 1000).toFixed(2)}mm)`);
 
 const span = [p.hi[0] - p.lo[0], p.hi[1] - p.lo[1], p.hi[2] - p.lo[2]];
 const cell = Math.max(...span) / GRID;
 const spacing = spacingOf(p, cell * 2);
 say(`sample    splats sit ${(spacing * 1000).toFixed(2)}mm apart, median`);
 
+
+// Air all round, so the flood fill always has an outside to start from and the
+// surface never runs into the wall of the grid. Wide enough to hold the widest
+// splat footprint plus the closing radius, or the object welds itself to the
+// grid wall and the fill has nowhere to begin.
+const PAD = REACH + 1;
+const lo = p.lo.map((v) => v - PAD * cell);
+const dim = span.map((s) => Math.ceil(s / cell) + 2 * PAD + 1);
+say(`grid      ${dim.join('x')} cells at ${(cell * 1000).toFixed(2)}mm`);
+
+const { f, support } = density(p, dim, lo, cell, BLUR > 0 ? BLUR / 1000 : spacing * 0.7);
+
+// Where to cut.
+//
+// The level is calibrated against the cells that actually HOLD a splat, and the
+// reason is that the alternatives are both traps. Against the maximum: that is
+// wherever the trainer happened to pile splats up, an order of magnitude above
+// everything else and different in every capture. Against the median of every
+// cell carrying weight: most of those cells hold no splat at all, they are the
+// tail of the Gaussians around them, and cutting there gives an object several
+// cells fatter than the one that was scanned — the fur-coat failure, which
+// looks plausible in a render and is wrong by a centimetre.
+//
+// Half of the median reading in a cell that holds a splat is the surface: a
+// Gaussian sum falls to half its value at the edge of the sampled region.
+const held = [];
+for (let i = 0; i < f.length; i++) if (support[i]) held.push(f[i]);
+held.sort((a, b) => a - b);
+const interior = held[Math.floor(held.length / 2)];
+const iso = interior * ISO;
+if (report) {
+  const all = Array.from(f).filter((v) => v > 1e-4).sort((a, b) => a - b);
+  const q = (arr) => (t) => arr[Math.floor(arr.length * t)].toFixed(3);
+  say(`density   ${all.length} cells carry weight, ${held.length} hold a splat`);
+  say(`          carrying deciles ${[0.1, 0.5, 0.9].map(q(all)).join(' ')}, holding deciles ${[0.1, 0.5, 0.9].map(q(held)).join(' ')}`);
+}
+let shellCells = 0;
+for (let i = 0; i < f.length; i++) if (f[i] > iso) shellCells++;
+say(`cut       ${shellCells} cells above ${iso.toFixed(2)} (${ISO} of ${interior.toFixed(2)}, the median where a splat sits)`);
+
+// The bite is set in units of the surface level, so it is one number that means
+// the same thing on any scan: 1.5 is "a cell and a half of real surface".
+//
+// Union with the cut, not just the bracket. Where a flank was sampled thinly the
+// ray has to travel further before it has eaten a whole bite, and the entry
+// point lands under the surface — which puts a dimple in the model exactly where
+// the scan was weakest. Every cell above the surface level is measured surface
+// by definition, so no bracket is allowed to carve one away.
+// --agree 0 skips the bracket entirely and lets the flood fill do the work on
+// the level set alone. That is only possible when the kernel is wide enough to
+// close the shell's pinholes by itself — raise --blur and it becomes the better
+// route, because every threshold the bracket needs was tuned against a coarse
+// grid and none of them survive a fine one.
+let crossed;
+if (AGREE === 0) {
+  crossed = new Uint8Array(f.length);
+  for (let i = 0; i < f.length; i++) if (f[i] > iso) crossed[i] = 1;
+} else {
+  crossed = bracket(f, dim, iso * BITE, AGREE);
+  for (let i = 0; i < f.length; i++) if (f[i] > iso) crossed[i] = 1;
+}
+let bracketCells = 0;
+for (let i = 0; i < crossed.length; i++) bracketCells += crossed[i];
+const bracketed = solidify(crossed, dim);
+let solid = despeckle(CLOSE ? close(bracketed.solid, dim, CLOSE) : bracketed.solid, dim, DESPECKLE);
+if (HULL > 0) {
+  const traces = TRACE_OUT ? [] : null;
+  const hull = await hullOf(p, dim, lo, cell, HULL, OUTLINE, traces, RINGS, SWEEP, CONSENSUS, HANDED, BOTH);
+  if (TRACE_OUT) {
+    writeFileSync(TRACE_OUT, JSON.stringify({
+      object: inPath.split('/').pop(),
+      cell, views: traces.length, radii: hull.radii,
+      traces,
+    }));
+    say(`traces    ${traces.length} outlines written to ${TRACE_OUT}`);
+  }
+  if (TRACE_GLB) {
+    writeFileSync(TRACE_GLB, buildTraceGlb(p, hull.rings, hull.meta));
+    let verts = 0;
+    for (const view of hull.rings) for (const r of view) verts += r.length;
+    say(`combined  ${TRACE_GLB}: the cloud and ${verts} outline vertices in one file`);
+  }
+  // Undo the closing the outlines were given — nothing at all on the ring path,
+  // where the outline was never fattened in the first place. On the raster path,
+  // the median: each view chose its own and the intersection is not owed any
+  // single one of them, which is exactly why that path came out too thin.
+  let cut = hull.solid;
+  for (let r = 0; r < hull.erode; r++) {
+    const next = cut.slice();
+    for (let i = 0; i < cut.length; i++) {
+      if (cut[i]) continue;
+      for (const j of neighbors6(i, dim[0], dim[1], dim[2])) next[j] = 0;
+    }
+    cut = next;
+  }
+  cut = despeckle(cut, dim, 1);
+  // Largest piece. An outlier the eraser missed defines its own little silhouette
+  // in every view and leaves a satellite floating beside the pig.
+  const label = new Int32Array(cut.length).fill(-1);
+  let best = -1; let bestSize = 0; let pieces = 0;
+  for (let s0 = 0; s0 < cut.length; s0++) {
+    if (!cut[s0] || label[s0] >= 0) continue;
+    const id = pieces++;
+    let size = 0;
+    const q = [s0];
+    label[s0] = id;
+    while (q.length) {
+      const i = q.pop();
+      size++;
+      for (const j of neighbors6(i, dim[0], dim[1], dim[2])) {
+        if (cut[j] && label[j] < 0) { label[j] = id; q.push(j); }
+      }
+    }
+    if (size > bestSize) { bestSize = size; best = id; }
+  }
+  for (let i = 0; i < cut.length; i++) if (label[i] !== best) cut[i] = 0;
+  solid = cut;
+  say(`hull      ${hull.views} outlines (${hull.distinct} distinct directions), ${hull.kept} cells inside `
+    + (hull.budget ? `all but ${hull.budget} of them` : 'all of them'));
+  say(`          closing needed: ${hull.radii[0]} to ${hull.radii[hull.radii.length - 1]} px, median ${hull.median}`
+    + (RINGS ? ' (scaffolding only, eroded 0)' : `, eroded ${hull.erode}`));
+  say(`          ${bestSize} in the largest piece, of ${pieces}`);
+}
+let filled = 0;
+for (let i = 0; i < solid.length; i++) filled += solid[i];
+say(`solid     ${filled} cells, bracketed up from a ${shellCells}-cell shell to ${bracketCells}, largest blob ${bracketed.filled} of ${bracketed.blobs}`);
+
+if (CARVE > 0) {
+  const tol = Math.max(cell, spacing * 1.5);
+  const before = filled;
+  const carved = carveFromDirections(solid, dim, lo, cell, p, CARVE, tol, AGREEMENT);
+  let cut = carved.solid;
+  // Despeckle again: the carve leaves a rind of single cells wherever two
+  // directions disagreed by one, and those become spikes on the isosurface.
+  cut = despeckle(cut, dim, 1);
+  // Largest piece only. A carve this aggressive can shave a leg into an island.
+  {
+    const label = new Int32Array(cut.length).fill(-1);
+    let best = -1; let bestSize = 0; let next = 0;
+    for (let s0 = 0; s0 < cut.length; s0++) {
+      if (!cut[s0] || label[s0] >= 0) continue;
+      const id = next++;
+      let size = 0;
+      const q = [s0];
+      label[s0] = id;
+      while (q.length) {
+        const i = q.pop();
+        size++;
+        for (const j of neighbors6(i, dim[0], dim[1], dim[2])) {
+          if (cut[j] && label[j] < 0) { label[j] = id; q.push(j); }
+        }
+      }
+      if (size > bestSize) { bestSize = size; best = id; }
+    }
+    for (let i = 0; i < cut.length; i++) if (label[i] !== best) cut[i] = 0;
+    solid.set(cut);
+    filled = bestSize;
+  }
+  say(`carve     ${CARVE} directions took ${before - filled} cells off, ${filled} left`);
+}
+
+const relief = surfaceRelief(solid, dim, cell);
 if (CHECK) {
   const size = Math.max(...span);
   const mm = (v) => `${(v * 1000).toFixed(2)}mm`;
@@ -1872,93 +1796,57 @@ if (CHECK) {
   say(`coverage  ${typical.toFixed(0)}/cm² typical around the long axis, over ${cov.bins.length} sectors`);
   if (thin.length) {
     const worst = thin.reduce((a, b) => (a.perCm2 <= b.perCm2 ? a : b));
-    const deficit = medRadius(fat) - medRadius(thin);
     const dir = cov.dirOf(cov.bins.indexOf(worst)).map((v) => v.toFixed(2)).join(',');
-    say(`          ${thin.length} of ${cov.bins.length} sectors under a third of that — the capture missed an arc`);
     say(`          thinnest ${worst.perCm2.toFixed(0)}/cm², toward ${dir} in the scan's own axes`);
-    if (deficit > fuzz) {
-      say(`          and the surface there sits ${mm(deficit)} further in than the covered`);
-      say(`          sectors agree on. That is a dent you did not scan, not a dent it has.`);
-    }
-    say(`          FIX: reshoot that arc. No setting recovers what was never seen.`);
+  }
+  // Deliberately no verdict from this number. The sectors are cut about an axis
+  // fitted to the cloud, and that axis MOVES when the cloud is edited: erasing
+  // haze off this scan rotated it enough to smear a real gap across neighbouring
+  // sectors and the coverage test went quiet, while the reconstruction it was
+  // supposed to be predicting had not changed by a tenth of a millimetre. So the
+  // verdict comes from the surface that actually gets built, below.
+  say(`relief    ${mm(relief.p95)} at the 95th percentile, ${mm(relief.p99)} at the 99th`);
+  say(`          how far the reconstructed surface departs from a smooth body, once`);
+  say(`          the object's own taper is fitted out. This is the measurement that`);
+  say(`          matters: it is what the model will actually look like.`);
+  if (relief.p95 > fuzz * 3) {
+    say(`          THAT IS A DENT, and ${(relief.p95 / fuzz).toFixed(1)}x the fuzz band, so it is not noise.`);
+    say(`          A hollow this size is geometry the capture never saw. Erasing cannot`);
+    say(`          add it and no setting recovers it — reshoot that part of the orbit.`);
   } else {
-    say(`          no sector under a third of typical — the orbit went all the way round`);
+    say(`          within a few times the fuzz band, so no unscanned hollow stands out.`);
   }
   process.exit(0);
 }
 
-// Air all round, so the flood fill always has an outside to start from and the
-// surface never runs into the wall of the grid. Wide enough to hold the widest
-// splat footprint plus the closing radius, or the object welds itself to the
-// grid wall and the fill has nowhere to begin.
-const PAD = REACH + 1;
-const lo = p.lo.map((v) => v - PAD * cell);
-const dim = span.map((s) => Math.ceil(s / cell) + 2 * PAD + 1);
-say(`grid      ${dim.join('x')} cells at ${(cell * 1000).toFixed(2)}mm`);
-
-const { f, support } = density(p, dim, lo, cell, spacing * 0.7);
-
-// Where to cut.
-//
-// The level is calibrated against the cells that actually HOLD a splat, and the
-// reason is that the alternatives are both traps. Against the maximum: that is
-// wherever the trainer happened to pile splats up, an order of magnitude above
-// everything else and different in every capture. Against the median of every
-// cell carrying weight: most of those cells hold no splat at all, they are the
-// tail of the Gaussians around them, and cutting there gives an object several
-// cells fatter than the one that was scanned — the fur-coat failure, which
-// looks plausible in a render and is wrong by a centimetre.
-//
-// Half of the median reading in a cell that holds a splat is the surface: a
-// Gaussian sum falls to half its value at the edge of the sampled region.
-const held = [];
-for (let i = 0; i < f.length; i++) if (support[i]) held.push(f[i]);
-held.sort((a, b) => a - b);
-const interior = held[Math.floor(held.length / 2)];
-const iso = interior * ISO;
-if (report) {
-  const all = Array.from(f).filter((v) => v > 1e-4).sort((a, b) => a - b);
-  const q = (arr) => (t) => arr[Math.floor(arr.length * t)].toFixed(3);
-  say(`density   ${all.length} cells carry weight, ${held.length} hold a splat`);
-  say(`          carrying deciles ${[0.1, 0.5, 0.9].map(q(all)).join(' ')}, holding deciles ${[0.1, 0.5, 0.9].map(q(held)).join(' ')}`);
-}
-let shellCells = 0;
-for (let i = 0; i < f.length; i++) if (f[i] > iso) shellCells++;
-say(`cut       ${shellCells} cells above ${iso.toFixed(2)} (${ISO} of ${interior.toFixed(2)}, the median where a splat sits)`);
-
-// The bite is set in units of the surface level, so it is one number that means
-// the same thing on any scan: 1.5 is "a cell and a half of real surface".
-//
-// Union with the cut, not just the bracket. Where a flank was sampled thinly the
-// ray has to travel further before it has eaten a whole bite, and the entry
-// point lands under the surface — which puts a dimple in the model exactly where
-// the scan was weakest. Every cell above the surface level is measured surface
-// by definition, so no bracket is allowed to carve one away.
-const crossed = bracket(f, dim, iso * BITE, AGREE);
-for (let i = 0; i < f.length; i++) if (f[i] > iso) crossed[i] = 1;
-let bracketCells = 0;
-for (let i = 0; i < crossed.length; i++) bracketCells += crossed[i];
-const bracketed = solidify(crossed, dim);
-const solid = despeckle(CLOSE ? close(bracketed.solid, dim, CLOSE) : bracketed.solid, dim, DESPECKLE);
-let filled = 0;
-for (let i = 0; i < solid.length; i++) filled += solid[i];
-say(`solid     ${filled} cells, bracketed up from a ${shellCells}-cell shell to ${bracketCells}, largest blob ${bracketed.filled} of ${bracketed.blobs}`);
-
-// Blur the 0/1 solid before contouring. Surface nets interpolates along each
-// edge, so a hard 0/1 field gives it nothing to interpolate and the result is
-// stair-stepped; two box passes are enough to hand it a real gradient.
-let field = Float32Array.from(solid);
-for (let pass = 0; pass < 2; pass++) {
-  const next = new Float32Array(field.length);
-  for (let i = 0; i < field.length; i++) {
-    let s = field[i]; let n = 1;
-    for (const j of neighbors6(i, dim[0], dim[1], dim[2])) { s += field[j]; n++; }
-    next[i] = s / n;
+let mesh;
+if (SURFACE === 'fit') {
+  // The fit averages over its own radius, so the grid no longer has to be coarse
+  // to survive a porous shell — that job has moved into the weighting.
+  const radius = (FIT > 0 ? FIT / 1000 : Math.max(spacing * 1.6, cell * 0.9));
+  const { nrm, flat } = pointNormals(p, solid, dim, lo, cell, radius * 1.6);
+  const { f: field, touched } = imlsField(p, nrm, solid, dim, lo, cell, radius);
+  say(`fit       ${(radius * 1000).toFixed(2)}mm radius, ${touched} cells fitted${flat ? `, ${flat} splats too lonely to fit a plane to` : ''}`);
+  // Zero, not a half: the field is a signed distance and the surface is where it
+  // changes sign. Negative is inside, which is the opposite sense to the solid
+  // above, so the winding is flipped back by surfaceNets' own volume check.
+  mesh = surfaceNets(field, dim, lo, cell, 0);
+} else {
+  // Blur the 0/1 solid before contouring. Surface nets interpolates along each
+  // edge, so a hard 0/1 field gives it nothing to interpolate and the result is
+  // stair-stepped; two box passes are enough to hand it a real gradient.
+  let field = Float32Array.from(solid);
+  for (let pass = 0; pass < 2; pass++) {
+    const next = new Float32Array(field.length);
+    for (let i = 0; i < field.length; i++) {
+      let s = field[i]; let n = 1;
+      for (const j of neighbors6(i, dim[0], dim[1], dim[2])) { s += field[j]; n++; }
+      next[i] = s / n;
+    }
+    field = next;
   }
-  field = next;
+  mesh = surfaceNets(field, dim, lo, cell, 0.5);
 }
-
-let mesh = surfaceNets(field, dim, lo, cell, 0.5);
 say(`contour   ${mesh.verts.length / 3} vertices, ${mesh.faces.length / 3} triangles`);
 if (!mesh.faces.length) throw new Error('the isosurface came back empty');
 

@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Splat Editor — Jayce Renner</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Splat Editor" />
+    <meta name="description" content="Open a Gaussian-splat scan, brush the noise off it, and trace a polygon over what is left." />
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #08090c; }
+      canvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+      .bar {
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        padding: 12px 18px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: linear-gradient(180deg, rgba(0,0,0,0.65), rgba(0,0,0,0));
+        pointer-events: none;
+      }
+      .bar > * { pointer-events: auto; }
+      .bar h1 { margin: 0 auto 0 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+      .bar .back {
+        color: #fff; text-decoration: none; font-size: 0.9rem; font-weight: 500;
+        padding: 6px 12px; border: 1px solid rgba(255,255,255,0.35); border-radius: 999px;
+        white-space: nowrap; transition: background 0.15s ease;
+      }
+      .bar .back:hover { background: rgba(255,255,255,0.15); }
+      .btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        height: 30px; padding: 0 13px;
+        font: inherit; font-size: 0.85rem; font-weight: 500;
+        color: #fff; background: none;
+        border: 1px solid rgba(255,255,255,0.35); border-radius: 999px;
+        white-space: nowrap; cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .btn:hover { background: rgba(255,255,255,0.15); }
+      .btn:disabled { opacity: 0.35; cursor: default; }
+      .btn:disabled:hover { background: none; }
+      /* A mode is a mode, and it should read as one from across the room — the
+         cursor changes too, but the button is what you look at to be sure. */
+      .btn[aria-pressed="true"] { color: #10231d; background: #7fe8c0; border-color: transparent; }
+
+      .group { display: inline-flex; gap: 6px; padding: 0; }
+      .sep { width: 1px; height: 22px; background: rgba(255,255,255,0.25); }
+
+      .size {
+        display: inline-flex; align-items: center; gap: 8px;
+        font-size: 0.8rem; color: rgba(255,255,255,0.8);
+      }
+      .size input { width: 110px; accent-color: #7fe8c0; }
+
+      /* The brush. A ring rather than a filled disc: you are aiming at points
+         you need to keep seeing, and a wash over them defeats the purpose. */
+      .brush {
+        position: fixed; z-index: 5;
+        border: 1.5px solid rgba(127,232,192,0.9);
+        border-radius: 50%;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        display: none;
+        box-shadow: 0 0 0 1px rgba(0,0,0,0.5) inset, 0 0 0 1px rgba(0,0,0,0.5);
+      }
+
+      /* Sits on the point a click would take, which is not always the point
+         under the cursor — the pick snaps to real data, and that snap should be
+         visible before you commit to it rather than after. */
+      .snap {
+        position: fixed; z-index: 6;
+        width: 15px; height: 15px;
+        margin: 0;
+        border: 1.5px solid #7fe8c0;
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        display: none;
+        box-shadow: 0 0 0 1px rgba(0,0,0,0.7);
+      }
+
+      .readout {
+        position: fixed; left: 18px; bottom: 16px; z-index: 10;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.75rem; line-height: 1.6;
+        color: rgba(255,255,255,0.75);
+        text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+        pointer-events: none;
+        white-space: pre;
+      }
+      /* Bottom right, where every 3D tool puts it. The hint line moves up to
+         clear it rather than the cube moving somewhere unexpected. */
+      .cube {
+        position: fixed; right: 18px; bottom: 16px; z-index: 10;
+        display: flex; flex-direction: column; align-items: center; gap: 8px;
+      }
+      .cube[hidden] { display: none; }
+      /* The bare `canvas` rule above pins the main view to the whole viewport,
+         and it applies to every canvas on the page — so a widget canvas has to
+         take its position back or it lands full-screen in the top left corner. */
+      .cube canvas { position: static; width: 104px; height: 104px; display: block; }
+
+      .hint {
+        position: fixed; right: 18px; bottom: 174px; z-index: 10;
+        max-width: min(420px, calc(100vw - 36px));
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        font-size: 0.75rem; color: rgba(255,255,255,0.5);
+        text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+        pointer-events: none; text-align: right;
+      }
+
+      /* Full-bleed, because a thumbnail of a look is not a look. It sits over
+         the workshop rather than replacing it, so closing it puts you back
+         exactly where you were, at the same angle, mid-edit. */
+      .preview {
+        position: fixed; inset: 0; z-index: 30;
+        background: #05070b;
+      }
+      .preview[hidden] { display: none; }
+      .preview canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .preview-bar {
+        position: absolute; top: 0; left: 0; right: 0;
+        display: flex; align-items: center; flex-wrap: wrap; gap: 14px;
+        padding: 12px 18px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0));
+      }
+      .preview-bar #preview-name { margin-right: auto; font-size: 0.95rem; font-weight: 600; }
+      .preview-note {
+        position: absolute; left: 18px; bottom: 16px; margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.75rem; color: rgba(255,255,255,0.6);
+        text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+        pointer-events: none; white-space: pre;
+      }
+
+      .drop {
+        position: fixed; inset: 0; z-index: 20;
+        display: flex; align-items: center; justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff; background: rgba(8,9,12,0.92);
+        text-align: center; padding: 24px;
+      }
+      .drop[hidden] { display: none; }
+      .drop.over { background: rgba(16,35,29,0.95); }
+      .drop .inner { max-width: 460px; }
+      .drop h2 { margin: 0 0 10px; font-size: 1.2rem; font-weight: 650; }
+      .drop p { margin: 0 0 18px; font-size: 0.88rem; line-height: 1.5; opacity: 0.75; }
+      .drop .err { color: #ff9b9b; font-size: 0.82rem; min-height: 1.2em; margin-top: 12px; }
+      input[type="file"] { display: none; }
+
+      /* The vacuum's dials, out of the way until they are wanted. Its own row
+         rather than the header: the header is already full, and these three want
+         to be adjusted while looking at the result. */
+      /* One column on the right, stacked. Both panels used to be pinned
+         separately and would land on top of each other the moment the header
+         wrapped to two rows and the window was narrow enough for them to meet.
+         --bar is the header's real measured height, because it changes with the
+         wrap and no constant can be right for both. */
+      .panels {
+        position: fixed;
+        top: calc(var(--bar, 56px) + 8px); right: 18px;
+        z-index: 10;
+        display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+        max-width: min(340px, calc(100vw - 36px));
+        pointer-events: none;
+      }
+      .panels > * { pointer-events: auto; }
+      .vac {
+        width: 100%;
+        display: flex; flex-direction: column; gap: 8px;
+        padding: 12px 14px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: rgba(0,0,0,0.6);
+        border: 1px solid rgba(255,255,255,0.25);
+        border-radius: 12px;
+      }
+      .vac[hidden] { display: none; }
+      .vac .size { justify-content: space-between; }
+      .vac .size span:last-child { min-width: 46px; text-align: right; font-variant-numeric: tabular-nums; }
+    </style>
+  </head>
+  <body>
+    <header class="bar">
+      <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
+      <h1>Splat Editor</h1>
+
+      <span class="group">
+        <button class="btn" id="mode-orbit" type="button" aria-pressed="true" title="Look (L)">Look</button>
+        <button class="btn" id="mode-erase" type="button" aria-pressed="false" title="Erase (E)">Erase</button>
+        <button class="btn" id="mode-trace" type="button" aria-pressed="false" title="Trace (T)">Trace</button>
+      </span>
+      <span class="sep"></span>
+      <label class="size" id="size-row">Brush
+        <input type="range" id="brush" min="8" max="220" step="1" value="48" />
+      </label>
+      <button class="btn" id="plain-btn" type="button" aria-pressed="false" title="Flat colour (C)">Flat</button>
+      <span class="sep"></span>
+      <button class="btn" id="undo-btn" type="button" disabled>Undo</button>
+      <button class="btn" id="open-btn" type="button">Open</button>
+      <button class="btn" id="save-btn" type="button">Save cloud</button>
+      <button class="btn" id="poly-btn" type="button" title="The outline clicked in Trace mode">Save trace</button>
+      <span class="sep"></span>
+      <button class="btn" id="build-btn" type="button">Build</button>
+      <button class="btn" id="wrap-btn" type="button">Vacuum</button>
+      <button class="btn" id="mesh-btn" type="button" title="The mesh from Build or Vacuum">Save mesh</button>
+      <button class="btn" id="preview-btn" type="button">Preview</button>
+    </header>
+
+    <!-- The gallery's own look, over the top of the workshop's. Not a link to
+         the piece and not an approximation of it: the same material, the same
+         lights, the same normalization, so what shows here is what would show
+         there. -->
+    <div class="preview" id="preview" hidden>
+      <canvas id="preview-canvas"></canvas>
+      <div class="preview-bar">
+        <span id="preview-name">As Object Tile Scroll would show it</span>
+        <button class="btn" id="preview-where" type="button">Closer look</button>
+        <button class="btn" id="preview-finish" type="button">wood</button>
+        <button class="btn" id="preview-close" type="button">Close</button>
+      </div>
+      <p class="preview-note" id="preview-note"></p>
+    </div>
+
+    <div class="panels">
+    <div class="vac" id="build">
+      <label class="size">Triangles <input type="range" id="tris" min="200" max="20000" step="100" value="800" /><span id="tris-val">800</span></label>
+      <label class="size">Outlines <input type="range" id="dirs" min="60" max="480" step="60" value="480" /><span id="dirs-val">480</span></label>
+      <label class="size">Detail <input type="range" id="gridr" min="48" max="128" step="16" value="96" /><span id="gridr-val">96</span></label>
+      <label class="size">Keep <input type="range" id="isol" min="0" max="8" step="1" value="3" /><span id="isol-val">3</span></label>
+    </div>
+
+    <div class="vac" id="traces" hidden>
+      <label class="size">Outline <input type="range" id="trace-i" min="0" max="0" step="1" value="0" /><span id="trace-val">1 / 1</span></label>
+      <label class="size"><input type="checkbox" id="trace-all" /> all at once</label>
+      <button class="btn" id="trace-face" type="button">Look down this one</button>
+      <p class="size" id="trace-info" style="opacity:0.7"></p>
+    </div>
+
+    <div class="vac" id="vac">
+      <label class="size">Skin <input type="range" id="skin" min="1" max="12" step="0.5" value="3" /><span id="skin-val">3.0mm</span></label>
+      <label class="size">Tension <input type="range" id="tension" min="0" max="100" step="1" value="55" /><span id="tension-val">55%</span></label>
+      <label class="size">Detail <input type="range" id="levels" min="2" max="5" step="1" value="4" /><span id="levels-val">4</span></label>
+      <label class="size"><input type="checkbox" id="show-points" checked /> points</label>
+    </div>
+    </div>
+
+    <div class="cube" id="cube">
+      <canvas id="cube-canvas" width="104" height="104"></canvas>
+      <button class="btn" id="fit-btn" type="button" title="Fit (F)">Fit</button>
+    </div>
+
+    <div class="brush" id="brush-ring"></div>
+    <div class="snap" id="snap-ring"></div>
+    <div class="readout" id="readout"></div>
+    <div class="hint" id="hint"></div>
+
+    <div class="drop" id="drop">
+      <div class="inner">
+        <h2>Open a scan</h2>
+        <p>
+          A <code>.spz</code> or a <code>.ply</code> from Scaniverse, Polycam or any
+          other splat capture. Prefer the SPZ: it is the same points at a tenth the
+          size. Nothing is uploaded, it stays in the page.
+          <br /><br />
+          A <code>.glb</code> from <code>splat2glb --trace-glb</code> holds a cloud
+          and the outlines traced round it in one file, so it opens on its own.
+          A <code>traces.json</code> from <code>--trace-out</code> is the outlines
+          without the cloud, and goes on top of one already open.
+        </p>
+        <button class="btn" id="pick-btn" type="button">Choose a file</button>
+        <p class="err" id="drop-err"></p>
+      </div>
+    </div>
+
+    <input type="file" id="file" accept=".ply,.spz,.glb,.json" />
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="./splat-editor.js"></script>
+  </body>
+</html>
