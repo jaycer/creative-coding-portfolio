@@ -1,7 +1,8 @@
 # Models
 
-Everything in this folder is **[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/)**
-— public domain, no attribution required. Credited anyway, because they are good
+Everything in this folder except `rubberPig.glbz` is
+**[CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/)** —
+public domain, no attribution required. Credited anyway, because they are good
 and because both of these people give them away.
 
 - **Kenney** (<https://kenney.nl>) — *Furniture Kit* and *Food Kit*. Ship as GLB;
@@ -18,6 +19,11 @@ and because both of these people give them away.
   that arrives partly smooth-shaded, and faceting it is not a concession to file
   size — it is what puts those models in the same world as the flat-shaded rest.
   It happens to be about a quarter smaller too.
+
+- **`rubberPig.glbz`** is not from a pack. It is a rubber pig off a shelf here,
+  scanned with a phone as a Gaussian splat and converted by
+  `tools/splat2glb.mjs`. Original work, same license as the rest of this
+  repository.
 
 They are used here for their shape only. `object-tile-scroll.js` bakes each model
 down to one geometry with one group per material, keeps the *relationships*
@@ -36,8 +42,8 @@ dropped rather than kept alongside, because two donuts in a deck is a repeat.
 They are gzipped, and the page inflates them itself with `DecompressionStream`
 before parsing. GitHub Pages compresses text and JavaScript but not binary, so a
 plain `.glb` would ship at full size — and glTF is mostly float arrays, which
-gzip is very good at. These 62 models are **394KB compressed against 1,488KB
-raw**, a 74% saving, for exactly the same 70 objects.
+gzip is very good at. These 63 models are **402KB compressed against 1,517KB
+raw**, a 74% saving, for exactly the same 71 objects.
 
 The extension is `.glbz` and deliberately not `.glb.gz`: a server that sees `.gz`
 sets `Content-Encoding: gzip` (Vite's dev server does), the browser then inflates
@@ -57,6 +63,34 @@ node tools/gzip-models.mjs --dir public/apps/object-tile-scroll/models
 
 `gzip-models` is idempotent and takes whatever `.glb` it finds, so it works the
 same for a converted OBJ pack and for a Kenney GLB copied straight in.
+
+For a scan of a real object — a `.ply` out of Scaniverse, Polycam or any other
+Gaussian-splat capture:
+
+```
+node tools/splat2glb.mjs --in ~/Downloads/Thing.ply \
+  --out public/apps/object-tile-scroll/models/thing.glb --up -z --tris 800
+node tools/gzip-models.mjs --dir public/apps/object-tile-scroll/models
+```
+
+Read that tool's header before running it a second time. The one setting nothing
+can infer is `--up` — a phone has no idea which way up a pig is. After that, the
+job is getting rid of the low-confidence haze a splat trainer leaves in the air
+around its subject, because haze bracketed as geometry is a model wearing a fur
+coat. There are two ways to cut it and they fail differently. `--crop` is a box:
+exact, but it will slice through the object where the haze overlaps it.
+`--min-lum` drops dark splats: it cannot cut the shape, but it only works when
+the subject is paler than the room, and it eats the subject's own shadowed parts
+along with the haze. The pig took the crop — measured, the brightness cull came
+back a third smaller because it had thinned his belly and undersides away.
+
+`--vertex-color` exists and works, and was tried here and dropped. It keeps the
+color the capture measured, one per vertex, smooth-shaded — and smooth shading
+is exactly what makes a scan's holes visible. Faceting hides them: every hollow
+the capture missed reads as one more flat plane among hundreds. Smooth them out
+and the same object is full of dents. Worth remembering as a property of the
+representation rather than of the tool, and worth another try on a scan with no
+gaps in it.
 
 ## What gets left out, and why
 

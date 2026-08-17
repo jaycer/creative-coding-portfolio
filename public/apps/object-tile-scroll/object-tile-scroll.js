@@ -28,11 +28,12 @@
 // The mix is therefore a readout of the picture, and it is silent by default —
 // the header slider is what starts it.
 //
-// The set is seventy things. The chairs come from the other chair pieces in
+// The set is seventy-one things. The chairs come from the other chair pieces in
 // this gallery and the iron, dumbbell and desk lamp are built here out of boxes
 // and cylinders; the rest of the household is Kenney's CC0 models, loaded after
-// the field is already running. See models/CREDITS.md, and the bottom of this
-// file for how a model becomes a build.
+// the field is already running. One of them is a rubber pig off a shelf, scanned
+// with a phone. See models/CREDITS.md, and the bottom of this file for how a
+// model becomes a build.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -330,6 +331,19 @@ const KINDS = [];
 const KIND_BY_NAME = new Map();
 let totalWeight = 0;
 
+// `?only=rubber pig` fills the whole field with one build and deals nothing
+// else. It is for looking at a single object across the finishes and habits the
+// piece will actually give it, which is a different question from looking at it
+// alone in the panel at the bottom of this file — a field of seventy of one
+// thing shows you how it reads small, in motion, in a color you did not choose.
+//
+// Every other kind is still built and still in KINDS, it is simply never picked,
+// so nothing downstream has to cope with a deck of one.
+const ONLY = new URLSearchParams(location.search).get('only');
+// The hand-built kinds are added while this file is still being evaluated, long
+// before there is a field to re-deal. This says when there is one.
+let fieldReady = false;
+
 function normalize(g) {
   g.computeBoundingBox();
   const c = new THREE.Vector3();
@@ -373,9 +387,21 @@ function addKind({ name, weight, voice, geometry, srcColors }) {
       groups.push({ dh, ds: h.s - bh.s, dl: h.l - bh.l });
     }
   }
+  // With ONLY set, anything that is not the one being looked at is added at no
+  // weight, so pickKind can never reach it.
+  if (ONLY && name !== ONLY) weight = 0;
   KIND_BY_NAME.set(name, KINDS.length);
   KINDS.push({ name, weight, voice, geometry: normalize(geometry), groups });
   totalWeight += weight;
+  // And when the one being looked at arrives — the models load after the field
+  // is already running — throw the field away and deal it again, rather than
+  // waiting for sixty chairs to scroll off the top.
+  if (ONLY && name === ONLY && fieldReady) {
+    for (const c of field) for (const o of c.objs) disposeObject(o);
+    field.length = 0;
+    lastCols = 0;
+    resize();
+  }
 }
 
 // The five chairs carried over from the other chair pieces were weighted for a
@@ -734,6 +760,7 @@ function realignBreath(was) {
 }
 
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 const _base = new THREE.Color();
 const _bhsl = { h: 0, s: 0, l: 0 };
 
@@ -858,6 +885,11 @@ function deal(o, rand) {
   releaseVoice(o);
   o.voiceName = kind.voice;
   o.voiceSeed = rand();
+  // Objects are recycled rather than rebuilt — the same object leaves the top of
+  // a column and is dealt again at the bottom as something else entirely. So an
+  // identity is needed for anything holding on to one across time, which is why
+  // this counts deals rather than objects. See the closer look at the bottom.
+  o.dealSerial = (o.dealSerial || 0) + 1;
 }
 
 function makeObject(col, rand) {
@@ -885,13 +917,19 @@ function makeObject(col, rand) {
     // that slot: without it the columns are ruler-straight and the field looks
     // printed rather than placed.
     jx: 0, jz: 0,
+    dealSerial: 0,
   };
+  mesh.userData.obj = o;
   deal(o, rand);
   return o;
 }
 
 function disposeObject(o) {
   releaseVoice(o);
+  // The closer look borrows an object's materials rather than copying them, so
+  // it has to be told before they are thrown away — otherwise a respace or a
+  // loaded scene leaves the panel drawing with a disposed material.
+  onObjectGone(o);
   scene.remove(o.mesh, o.ghost);
   for (const m of o.mats) m.dispose();
   o.ghost.material.dispose();
@@ -2016,6 +2054,257 @@ micSelect.addEventListener('change', async () => {
   refreshStatus();
 });
 
+// ------------------------------------------------------------------ the closer look
+// Press an object and it comes out of the field: the same build, the same finish
+// it happens to be wearing, alone in a box you can turn it over in.
+//
+// It is a SECOND scene with a second renderer rather than a camera move in the
+// first one, and that is the whole design. The field is the piece and it must
+// keep going exactly as it was — flying the main camera at an object would stop
+// everything else dead, and the one rule this piece has is that the field is
+// never interrupted. So the object is borrowed, not removed: the inspector holds
+// a mesh that shares the kind's geometry and the object's own materials, so it
+// is not a copy that can drift out of step. An object drifting through hues goes
+// on drifting while you look at it.
+//
+// The lighting rig is rebuilt to the same numbers rather than shared, because a
+// three Light belongs to one scene at a time and moving the field's key light
+// into a modal would take it out of the field.
+const lookEl = document.getElementById('look');
+const lookCanvas = document.getElementById('look-canvas');
+const lookNameEl = document.getElementById('look-name');
+const lookCloseEl = document.getElementById('look-close');
+
+let lookRenderer = null;
+let lookScene = null;
+let lookCamera = null;
+let lookMesh = null;
+let lookObj = null;          // the object in the field this is standing in for
+let lookSerial = 0;          // which of that object's deals was picked
+let lookOwnMats = null;      // its own copy, once the field has moved on
+let lookOpen = false;
+let lookYaw = 0.6;
+let lookPitch = 0.25;
+let lookDist = 3.6;
+let lookSpin = true;         // until you take hold of it
+let lookRaf = 0;
+
+// A build is normalized to a unit sphere, so 3.6 frames anything in the deck
+// with a little air round it and 1.5 is as close as you can get before the
+// nearest face is through the camera.
+const MIN_DIST = 1.5;
+const MAX_DIST = 7;
+
+function buildLook() {
+  lookRenderer = new THREE.WebGLRenderer({ canvas: lookCanvas, antialias: true, alpha: true });
+  lookRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  // The same three settings as the field's renderer. A different tone curve here
+  // would show an object that is not the one on screen, which is the one thing an
+  // inspector must never do.
+  lookRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  lookRenderer.toneMappingExposure = 1.12;
+  lookRenderer.outputColorSpace = THREE.SRGBColorSpace;
+
+  lookScene = new THREE.Scene();
+  const k2 = new THREE.DirectionalLight(0xfff3e4, 2.7);
+  k2.position.set(0.5, 0.9, 0.85);
+  const f2 = new THREE.DirectionalLight(0xc2d8ff, 1.15);
+  f2.position.set(-0.85, 0.2, 0.5);
+  const r2 = new THREE.DirectionalLight(0xffffff, 1.0);
+  r2.position.set(-0.15, 0.45, -1);
+  const b2 = new THREE.DirectionalLight(0x9fb0cc, 0.55);
+  b2.position.set(0.15, -1, 0.4);
+  const a2 = new THREE.HemisphereLight(0x93a6c8, 0x1a1d26, 0.8);
+  lookScene.add(k2, f2, r2, b2, a2);
+
+  lookCamera = new THREE.PerspectiveCamera(38, 1, 0.05, 40);
+  lookMesh = new THREE.Mesh(KINDS[0].geometry, null);
+  lookScene.add(lookMesh);
+}
+
+/**
+ * Stop following the field and keep what is on screen.
+ *
+ * The field recycles objects: the thing you are looking at will, sooner or
+ * later, reach the top of its column and be dealt again as something else. The
+ * panel cannot follow that — you would be looking at a pig and find yourself
+ * looking at a fridge — so at the moment it happens the panel takes its own copy
+ * of the materials and holds the object as it was. Up to then it is genuinely
+ * live, and an object that drifts through colors goes on drifting while you
+ * watch it, which is the half of this worth keeping.
+ */
+/** Called by disposeObject before an object's materials go. */
+function onObjectGone(o) {
+  if (lookObj === o) detachLook();
+}
+
+function detachLook() {
+  if (!lookObj || lookOwnMats) return;
+  const mats = Array.isArray(lookMesh.material) ? lookMesh.material : [lookMesh.material];
+  lookOwnMats = mats.map((m) => m.clone());
+  lookMesh.material = lookOwnMats.length === 1 ? lookOwnMats[0] : lookOwnMats;
+  lookObj = null;
+}
+
+function drawLook() {
+  lookRaf = 0;
+  if (!lookOpen) return;
+  if (lookObj && lookObj.dealSerial !== lookSerial) detachLook();
+  const w = lookCanvas.clientWidth;
+  const h = lookCanvas.clientHeight;
+  if (w && h) {
+    // Compared against the drawing buffer, not against a remembered size: the
+    // panel is sized in CSS and a rotated phone changes it without any event
+    // this code would otherwise hear about.
+    if (lookCanvas.width !== Math.round(w * lookRenderer.getPixelRatio())
+      || lookCanvas.height !== Math.round(h * lookRenderer.getPixelRatio())) {
+      lookRenderer.setSize(w, h, false);
+      lookCamera.aspect = w / h;
+      lookCamera.updateProjectionMatrix();
+    }
+  }
+  // While it is still the object you picked, follow it, so a color that drifts
+  // in the field drifts here too.
+  if (lookObj) {
+    lookMesh.geometry = KINDS[lookObj.kindIdx].geometry;
+    lookMesh.material = lookObj.mesh.material;
+  }
+  if (!lookMesh.material) { lookRaf = requestAnimationFrame(drawLook); return; }
+  if (lookSpin) lookYaw += 0.0055;
+  const cp = Math.cos(lookPitch);
+  lookCamera.position.set(
+    Math.sin(lookYaw) * cp * lookDist,
+    Math.sin(lookPitch) * lookDist,
+    Math.cos(lookYaw) * cp * lookDist,
+  );
+  lookCamera.lookAt(0, 0, 0);
+  lookRenderer.render(lookScene, lookCamera);
+  lookRaf = requestAnimationFrame(drawLook);
+}
+
+function openLook(o) {
+  if (!lookRenderer) buildLook();
+  releaseLookMats();
+  lookObj = o;
+  lookSerial = o.dealSerial;
+  // The name is the point of the panel as much as the turning is: the deck is
+  // seventy-odd things and half of them are only recognizable once you have been
+  // told, which is the piece's own joke about a field of icons.
+  lookNameEl.textContent = KINDS[o.kindIdx].name;
+  lookYaw = 0.6;
+  lookPitch = 0.25;
+  lookDist = 3.6;
+  lookSpin = true;
+  lookOpen = true;
+  lookEl.hidden = false;
+  lookCloseEl.focus();
+  if (!lookRaf) lookRaf = requestAnimationFrame(drawLook);
+}
+
+/** Give up any material this panel owns; the field's own are only borrowed. */
+function releaseLookMats() {
+  if (lookOwnMats) for (const m of lookOwnMats) m.dispose();
+  lookOwnMats = null;
+  if (lookMesh) lookMesh.material = null;
+}
+
+function closeLook() {
+  lookOpen = false;
+  lookEl.hidden = true;
+  lookObj = null;
+  releaseLookMats();
+  if (lookRaf) cancelAnimationFrame(lookRaf);
+  lookRaf = 0;
+}
+
+lookCloseEl.addEventListener('click', closeLook);
+lookEl.addEventListener('pointerdown', (e) => { if (e.target === lookEl) closeLook(); });
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !lookEl.hidden) closeLook();
+});
+
+// Turning and zooming. Pointer events cover mouse, pen and touch alike; two
+// fingers are tracked by hand because a pinch is the only gesture here that
+// needs more than one.
+{
+  const down = new Map();
+  let lastPinch = 0;
+  lookCanvas.addEventListener('pointerdown', (e) => {
+    lookCanvas.setPointerCapture(e.pointerId);
+    down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    lookSpin = false;
+    lastPinch = 0;
+  });
+  lookCanvas.addEventListener('pointermove', (e) => {
+    const prev = down.get(e.pointerId);
+    if (!prev) return;
+    if (down.size >= 2) {
+      const pts = [...down.values()];
+      const gap = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const pts2 = [...down.values()];
+      const gap2 = Math.hypot(pts2[0].x - pts2[1].x, pts2[0].y - pts2[1].y);
+      if (lastPinch && gap2 > 1) lookDist = clamp(lookDist * (gap / gap2), MIN_DIST, MAX_DIST);
+      lastPinch = gap2;
+      return;
+    }
+    // A drag across the whole panel is a bit more than half a turn, which is
+    // enough to get round the back of a thing without becoming a wrist exercise.
+    const wide = lookCanvas.clientWidth || 1;
+    lookYaw -= ((e.clientX - prev.x) / wide) * 3.4;
+    lookPitch = clamp(lookPitch + ((e.clientY - prev.y) / wide) * 3.4, -1.35, 1.35);
+    down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  });
+  const release = (e) => { down.delete(e.pointerId); lastPinch = 0; };
+  lookCanvas.addEventListener('pointerup', release);
+  lookCanvas.addEventListener('pointercancel', release);
+  lookCanvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    lookSpin = false;
+    lookDist = clamp(lookDist * (1 + e.deltaY * 0.0016), MIN_DIST, MAX_DIST);
+  }, { passive: false });
+}
+
+/**
+ * Which object is under the pointer, if any.
+ *
+ * Raycast against the object meshes explicitly rather than against the scene:
+ * every object also carries a ghost, a transparent double drawn off to one side,
+ * and picking one of those would open the panel on a smear rather than on the
+ * thing that cast it.
+ */
+const picker = new THREE.Raycaster();
+const pickAt = new THREE.Vector2();
+function objectAt(clientX, clientY) {
+  pickAt.x = (clientX / window.innerWidth) * 2 - 1;
+  pickAt.y = -(clientY / window.innerHeight) * 2 + 1;
+  picker.setFromCamera(pickAt, camera);
+  const meshes = [];
+  for (const c of field) for (const o of c.objs) if (o.mesh.visible) meshes.push(o.mesh);
+  const hit = picker.intersectObjects(meshes, false)[0];
+  return hit ? hit.object.userData.obj : null;
+}
+
+// A press that travelled is a drag and not a choice — on a phone it is usually
+// the start of a scroll the page does not do — so the pick is made on pointerup
+// and only if the finger stayed put.
+{
+  let start = null;
+  canvas.addEventListener('pointerdown', (e) => {
+    start = { x: e.clientX, y: e.clientY, t: performance.now() };
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    if (!start) return;
+    const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+    const held = performance.now() - start.t;
+    start = null;
+    if (moved > 10 || held > 700) return;
+    const o = objectAt(e.clientX, e.clientY);
+    if (o) openLook(o);
+  });
+  canvas.addEventListener('pointercancel', () => { start = null; });
+}
+
 // ----------------------------------------------------------------------- start
 lastCols = 0;
 openingSettings();
@@ -2024,6 +2313,7 @@ openingSettings();
 depthNow = cfg.breathDepth;
 aimField();
 resize();
+fieldReady = true;   // from here on, ONLY can re-deal the field
 syncControls();
 animate();
 
@@ -2127,6 +2417,15 @@ const MODELS = [
   { file: 'CookingPot', name: 'cooking pot', voice: 'steam' },
   { file: 'Soda', name: 'soda cup', voice: 'ring' },
   { file: 'KetchupBottle', name: 'ketchup bottle', voice: 'ring' },
+  // Not a model anybody made. A rubber pig off a shelf, scanned with a phone and
+  // put through tools/splat2glb.mjs, which reads the splat cloud as a solid and
+  // hands back 800 triangles in one flat color — the same shape the rest of the
+  // deck arrives in, by a completely different road. It comes out softer than
+  // the packs do, because a scan of a real thing is soft: the surface it was
+  // measured from is uncertain by about a twentieth of the object, and no amount
+  // of triangles invents an edge the capture did not see. That reads as what it
+  // is, which is the point of having it here.
+  { file: 'rubberPig', name: 'rubber pig', voice: 'wood' },
 ];
 const MODEL_WEIGHT = 0.7;
 
@@ -2182,55 +2481,59 @@ function bakeModel(root) {
   return geometry ? { geometry, colors } : null;
 }
 
-{
-  // The food models point at a shared texture atlas this piece does not want and
-  // will not use. Rather than ship 200KB of it to be thrown away, every image
-  // request is answered with a single transparent pixel — which keeps the
-  // console clean instead of showing 404s on load.
-  const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-  const manager = new THREE.LoadingManager();
-  manager.setURLModifier((url) => (/\.(png|jpe?g|webp)$/i.test(url) ? BLANK : url));
-  const loader = new GLTFLoader(manager);
+// The food models point at a shared texture atlas this piece does not want and
+// will not use. Rather than ship 200KB of it to be thrown away, every image
+// request is answered with a single transparent pixel — which keeps the console
+// clean instead of showing 404s on load.
+//
+// At module scope rather than inside the block below, because the closer look
+// fetches models of its own on demand and there is no reason for a second
+// loader with the same settings.
+const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+const modelManager = new THREE.LoadingManager();
+modelManager.setURLModifier((url) => (/\.(png|jpe?g|webp)$/i.test(url) ? BLANK : url));
+const loader = new GLTFLoader(modelManager);
 
-  /**
-   * Fetch one model and inflate it here rather than leaving it to the server.
-   *
-   * glTF is mostly float arrays and gzips to about a quarter of its size, but
-   * GitHub Pages only compresses text and JavaScript — a .glb goes out at full
-   * size and there is no header we can set to change that. So the models are
-   * stored compressed (tools/gzip-models.mjs) and unpacked in the page: the same
-   * seventy objects arrive in about 0.4MB instead of about 1.5MB.
-   *
-   * The file is `.glbz` rather than `.glb.gz` on purpose. A server that sees
-   * `.gz` decides the file is transport-compressed and sets Content-Encoding —
-   * Vite's dev server does — so the browser quietly inflates it and the inflate
-   * below then chokes on plain bytes. Under a name nothing recognizes, the page
-   * is the only thing that unpacks it, in dev and in production alike.
-   *
-   * The magic number is checked anyway, so this works whichever way the file
-   * arrives. Two bytes of paranoia for a class of bug that only shows up after
-   * deploying.
-   *
-   * DecompressionStream costs nothing in reach: this page already needs import
-   * maps, which is the same Safari 16.4 floor.
-   */
-  async function fetchModel(file) {
-    const res = await fetch(`./models/${file}.glbz`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    let buf = await res.arrayBuffer();
-    const head = new Uint8Array(buf, 0, Math.min(2, buf.byteLength));
-    if (head[0] === 0x1f && head[1] === 0x8b) {
-      if (typeof DecompressionStream !== 'function') throw new Error('no DecompressionStream');
-      buf = await new Response(
-        new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip')),
-      ).arrayBuffer();
-    }
-    // parse() rather than load(), because the bytes are already here. The second
-    // argument is the base the file's own references resolve against, which the
-    // Kenney food models still need for the atlas the manager then swaps out.
-    return new Promise((resolve, reject) => loader.parse(buf, './models/', resolve, reject));
+/**
+ * Fetch one model and inflate it here rather than leaving it to the server.
+ *
+ * glTF is mostly float arrays and gzips to about a quarter of its size, but
+ * GitHub Pages only compresses text and JavaScript — a .glb goes out at full
+ * size and there is no header we can set to change that. So the models are
+ * stored compressed (tools/gzip-models.mjs) and unpacked in the page: the same
+ * seventy-one objects arrive in about 0.4MB instead of about 1.5MB.
+ *
+ * The file is `.glbz` rather than `.glb.gz` on purpose. A server that sees
+ * `.gz` decides the file is transport-compressed and sets Content-Encoding —
+ * Vite's dev server does — so the browser quietly inflates it and the inflate
+ * below then chokes on plain bytes. Under a name nothing recognizes, the page
+ * is the only thing that unpacks it, in dev and in production alike.
+ *
+ * The magic number is checked anyway, so this works whichever way the file
+ * arrives. Two bytes of paranoia for a class of bug that only shows up after
+ * deploying.
+ *
+ * DecompressionStream costs nothing in reach: this page already needs import
+ * maps, which is the same Safari 16.4 floor.
+ */
+async function fetchModel(file) {
+  const res = await fetch(`./models/${file}.glbz`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  let buf = await res.arrayBuffer();
+  const head = new Uint8Array(buf, 0, Math.min(2, buf.byteLength));
+  if (head[0] === 0x1f && head[1] === 0x8b) {
+    if (typeof DecompressionStream !== 'function') throw new Error('no DecompressionStream');
+    buf = await new Response(
+      new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip')),
+    ).arrayBuffer();
   }
+  // parse() rather than load(), because the bytes are already here. The second
+  // argument is the base the file's own references resolve against, which the
+  // Kenney food models still need for the atlas the manager then swaps out.
+  return new Promise((resolve, reject) => loader.parse(buf, './models/', resolve, reject));
+}
 
+{
   // Every model is optional by design, so anything that cannot be loaded costs
   // the field that one build and nothing else. Reported once with a count rather
   // than sixty-two times, because the interesting failure is all of them.

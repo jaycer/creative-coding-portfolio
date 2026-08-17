@@ -200,7 +200,7 @@
       .sheet .info-btn:hover { background: rgba(255,255,255,0.14); opacity: 1; }
       .sheet .tips-check:focus-visible + .info-btn { border-color: rgba(255,255,255,0.55); opacity: 1; }
       .sheet:has(.tips-check:checked) .info-btn { opacity: 1; background: rgba(255,255,255,0.12); }
-      .sheet .close {
+      .sheet .close, .look .close {
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -214,8 +214,8 @@
         opacity: 0.75;
         transition: background 0.15s ease, opacity 0.15s ease;
       }
-      .sheet .close:hover { background: rgba(255,255,255,0.14); opacity: 1; }
-      .sheet .close:focus-visible { border-color: rgba(255,255,255,0.55); opacity: 1; }
+      .sheet .close:hover, .look .close:hover { background: rgba(255,255,255,0.14); opacity: 1; }
+      .sheet .close:focus-visible, .look .close:focus-visible { border-color: rgba(255,255,255,0.55); opacity: 1; }
 
       .sheet .setting {
         display: flex;
@@ -392,10 +392,83 @@
       }
       .sheet .action:hover { background: #fff; }
 
+      /* The inspector. Unlike the settings scrim this one DOES dim, and for the
+         opposite reason: the settings are half-visible in the field behind them
+         and want it left alone, while this is here so you can look at one thing.
+         The field keeps drifting underneath, just quietly. */
+      .look {
+        position: fixed;
+        inset: 0;
+        z-index: 25;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        background: rgba(0,0,0,0.55);
+        animation: scrim-in 0.18s ease;
+      }
+      .look[hidden] { display: none; }
+      .look-panel {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        max-width: 640px;
+        /* Square-ish and never taller than the window: an object normalized to a
+           unit sphere has no aspect worth favouring, and a tall panel on a phone
+           would push the name off the bottom. */
+        max-height: 100%;
+        aspect-ratio: 1 / 1;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: rgba(0,0,0,0.72);
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 16px;
+        overflow: hidden;
+        animation: sheet-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+      }
+      /* The canvas fills the panel and the labels float over it, so the object
+         gets the whole box rather than the box minus a header. */
+      /* position: static overrides the blanket `canvas { position: fixed }` at
+         the top of this file, which is written for the one full-window canvas
+         the piece draws into and would otherwise pin this one over the page. */
+      .look-panel canvas {
+        position: static;
+        display: block;
+        width: 100%;
+        height: 100%;
+        touch-action: none;
+        cursor: grab;
+      }
+      .look-panel canvas:active { cursor: grabbing; }
+      .look-name {
+        position: absolute;
+        left: 18px; bottom: 14px;
+        margin: 0;
+        font-size: 1.05rem;
+        font-weight: 650;
+        letter-spacing: -0.01em;
+        text-shadow: 0 1px 6px rgba(0,0,0,0.9);
+        pointer-events: none;
+      }
+      .look-hint {
+        position: absolute;
+        right: 18px; bottom: 16px;
+        margin: 0;
+        font-size: 0.74rem;
+        opacity: 0.55;
+        text-shadow: 0 1px 6px rgba(0,0,0,0.9);
+        pointer-events: none;
+      }
+      .look .close {
+        position: absolute;
+        top: 10px; right: 10px;
+      }
+
       @keyframes scrim-in { from { opacity: 0; } }
       @keyframes sheet-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
       @media (prefers-reduced-motion: reduce) {
-        .scrim, .sheet { animation: none; }
+        .scrim, .sheet, .look, .look-panel { animation: none; }
       }
     </style>
   </head>
@@ -410,6 +483,15 @@
     </header>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div class="look" id="look" hidden>
+      <div class="look-panel" role="dialog" aria-modal="true" aria-labelledby="look-name">
+        <canvas id="look-canvas"></canvas>
+        <h2 class="look-name" id="look-name"></h2>
+        <p class="look-hint">Drag to turn · scroll to zoom</p>
+        <button class="close" id="look-close" type="button" aria-label="Close">✕</button>
+      </div>
+    </div>
 
     <div class="scrim" id="scrim" hidden>
       <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
