@@ -469,7 +469,7 @@ const FINISHES = [
   //
   // Roughness is the matte half. Colours pale for the same reason as the glow: a
   // dark swatch has almost nothing to scatter.
-  { name: 'resin', colors: [0xe6ded0, 0xd8e3e6, 0xe9dbe4, 0xdde6d8], rough: 0.62, metal: 0, glow: 0.16 },
+  { name: 'resin', colors: [0xf0c6bb, 0xbdd9e6, 0xefdcb0, 0xcfe0cd, 0xdcc8e0], rough: 0.62, metal: 0, glow: 0.2 },
 ];
 
 // ---------------------------------------------------------------------- the rng

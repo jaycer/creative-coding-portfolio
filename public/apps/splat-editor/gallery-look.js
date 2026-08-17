@@ -20,6 +20,7 @@ export const FINISHES = [
   { name: 'velvet', colors: [0x9c2a63, 0x35619f, 0x3e8c5c, 0x8f4229], rough: 0.9, metal: 0 },
   { name: 'gloss', colors: [0x5c6478, 0xf2f0ea, 0xc0342f], rough: 0.14, metal: 0.2 },
   { name: 'neon', colors: [0xff3d8b, 0x2fe8ff, 0xb4ff3d, 0xffb02f], rough: 0.4, metal: 0.1, glow: 0.5 },
+  { name: 'resin', colors: [0xf0c6bb, 0xbdd9e6, 0xefdcb0, 0xcfe0cd, 0xdcc8e0], rough: 0.62, metal: 0, glow: 0.2 },
 ];
 
 /** The room: a vertical wash, darkest overhead. Not a radial pool, on purpose. */
