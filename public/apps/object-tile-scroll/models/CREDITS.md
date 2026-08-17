@@ -94,6 +94,79 @@ the subject is paler than the room, and it eats the subject's own shadowed parts
 along with the haze. The pig took the crop — measured, the brightness cull came
 back a third smaller because it had thinned his belly and undersides away.
 
+The pig currently in the deck was built in the Splat Editor rather than here —
+same pipeline, since the tool and the editor import it from one file — from a
+cloud hand-cleaned twice. Erasing the second time, with the flat-colour view to
+find the haze by density rather than by colour, took the surface from 2.2mm to
+1.9mm off the points and the worst dent from 40.5mm to 13.1mm.
+
+Anything built in the editor comes out in the SCAN's frame, because that is the
+frame the cloud is in and rotating it mid-session would make every erase stroke
+land somewhere unexpected. It has to be stood up before it can go in the deck:
+
+```
+node tools/orient-glb.mjs --in ~/Downloads/bertRebuilt.glb \
+  --out public/apps/object-tile-scroll/models/rubberPig.glb --up +x
+node tools/gzip-models.mjs --dir public/apps/object-tile-scroll/models
+```
+
+That also re-emits it in the deck's own format — positions only, unindexed, no
+normals — which is both smaller and the thing every other model here is.
+
+Check the axis by looking, not by reasoning about the bounding box. This scan
+was converted with `--up -x` for most of its life on the strength of its box
+coming out 20.0 x 12.2 x 11.2 cm, which is the right SHAPE for a standing pig
+and says nothing whatever about which end is up — a pig on its back measures the
+same. It was on its back the whole time. Six renders on a floor grid, one per
+candidate axis, settles it in about a minute and cannot be argued with.
+
+The best settings measured so far, for a scan of a real object:
+
+```
+--hull 480 --consensus 0.99 --isolation 3 --grid 96
+```
+
+`--isolation` matters more than it looks. It drops splats with fewer than N
+neighbours nearby, and the default of 6 was quietly causing the dent in the pig's
+back: the thinly-covered columns are exactly the ones whose splats have few
+neighbours, so the cull deleted the little evidence there was and the silhouettes
+then read short in those columns. Relaxing it to 3 took the back from 52 dented
+columns to 8, and the surface's p90 departure from the points from 6.6mm to
+2.2mm, at no cost to the fit anywhere else. The capture is thin there; the cull
+was making it thinner.
+
+The radius that counts as "nearby" is measured from the scan's own median splat
+spacing (3x it) and no longer from the output grid. It used to be two grid cells,
+which meant asking for a finer grid discarded more of the INPUT — 17,585 splats
+kept at grid 64 against 10,992 at 128, for the same file. `--isolation-mm`
+overrides it if a capture needs something else.
+
+`--hull` traces the silhouette from N directions and keeps what is inside them
+all. `--consensus` is what makes a large N worth paying for, and the reasoning is
+worth knowing before changing either number.
+
+A strict intersection is a MINIMUM over N estimates, so it keeps the shortest
+answer any view has ever given — and every extra direction is another chance to
+be given a short one. That is not convergence, it is drift, and it was measured
+three ways. Tracing the same 240 directions from both ends, which adds no
+information about the shape at all, takes 3.2% of the volume off. The synthetic
+fixture with matched noise drifts at a third of the rate this scan does. And the
+damage is not spread evenly: it lands where coverage is thin, so the dent in the
+pig's back goes from 15mm deep at 60 directions to 27mm at 960, while the fit
+elsewhere stops improving at 240.
+
+Forgiving the four worst objections out of 480 stops it. The concavities survive
+because a real one — the gap between the legs — is objected to by dozens of views
+once there are that many, so four is nowhere near enough to fill it; that was
+checked by counting separate blobs in cross-section, which is unchanged from
+strict up to a budget of 4 and only starts merging at 9. The dent comes back to
+12.5mm, shallower than the strict 60-direction build, and the result stops caring
+how it was sampled: strict, the two spiral handednesses and the both-ends variant
+disagree by up to 3.2%, and under `--consensus 0.99` they agree to 0.4%.
+
+Below about 200 directions do NOT use it. A concavity seen by only four views
+cannot survive a budget of four.
+
 `--vertex-color` exists and works, and was tried here and dropped. It keeps the
 color the capture measured, one per vertex, smooth-shaded — and smooth shading
 is exactly what makes a scan's holes visible. Faceting hides them: every hollow

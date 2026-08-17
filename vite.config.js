@@ -142,8 +142,15 @@ function siteUrls() {
         let file = resolve(__dirname, 'public', rel);
         if (url.endsWith('/')) file = resolve(file, 'index.html');
         if (!existsSync(file) || !statSync(file).isFile()) return next();
+        // Served whether or not it carries the token, and that is not an
+        // optimisation gone missing — it is what makes `/apps/<slug>/` resolve
+        // at all. Vite does not fall back to index.html for a directory under
+        // /public, so this middleware is the only thing answering those URLs,
+        // and handing back only the pages needing substitution meant any static
+        // app without Open Graph tags 404'd on its own folder. Nothing under
+        // /public is transformed by Vite anyway, so serving it here costs
+        // nothing and the substitution simply no-ops when there is no token.
         const html = readFileSync(file, 'utf-8');
-        if (!html.includes(TOKEN)) return next();
         res.setHeader('Content-Type', 'text/html');
         res.end(fill(html));
       });

@@ -448,6 +448,28 @@ const FINISHES = [
   { name: 'velvet', colors: [0x9c2a63, 0x35619f, 0x3e8c5c, 0x8f4229], rough: 0.9, metal: 0 },
   { name: 'gloss', colors: [0x5c6478, 0xf2f0ea, 0xc0342f], rough: 0.14, metal: 0.2 },
   { name: 'neon', colors: [0xff3d8b, 0x2fe8ff, 0xb4ff3d, 0xffb02f], rough: 0.4, metal: 0.1, glow: 0.5 },
+  // Translucent matte — the milky resin a bath toy is moulded from, and the one
+  // finish here the deck can claim by descent: the rubber pig really is this
+  // material, and its translucency is why that scan came out soft to begin with.
+  //
+  // Built out of a small `glow` rather than out of transmission, which was the
+  // obvious route and the wrong one. Real transmission shows what is BEHIND the
+  // object, and what is behind everything in this piece is a near-black room —
+  // tried at 0.72 and the back rank turned into silhouettes, which is precisely
+  // what the luminance floor on every other swatch exists to prevent. It also
+  // costs a whole extra pass over the scene every frame, which an ambient piece
+  // can least afford.
+  //
+  // What makes a milky object read as milky in a dark room is not the wall
+  // coming through it. It is light entering the surface, bouncing about inside,
+  // and leaving again toward the eye — and there is no wall in that description.
+  // A low emissive is that light, and it holds up at the back of the room where
+  // transmission gave up. Well under neon's, which is a thing making light
+  // rather than a thing that has been lit.
+  //
+  // Roughness is the matte half. Colours pale for the same reason as the glow: a
+  // dark swatch has almost nothing to scatter.
+  { name: 'resin', colors: [0xf0c6bb, 0xbdd9e6, 0xefdcb0, 0xcfe0cd, 0xdcc8e0], rough: 0.62, metal: 0, glow: 0.2 },
 ];
 
 // ---------------------------------------------------------------------- the rng
