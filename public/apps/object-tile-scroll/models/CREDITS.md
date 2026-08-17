@@ -64,14 +64,24 @@ node tools/gzip-models.mjs --dir public/apps/object-tile-scroll/models
 `gzip-models` is idempotent and takes whatever `.glb` it finds, so it works the
 same for a converted OBJ pack and for a Kenney GLB copied straight in.
 
-For a scan of a real object — a `.ply` out of Scaniverse, Polycam or any other
-Gaussian-splat capture:
+For a scan of a real object — a `.spz` or a `.ply` out of Scaniverse, Polycam or
+any other Gaussian-splat capture:
 
 ```
-node tools/splat2glb.mjs --in ~/Downloads/Thing.ply \
+node tools/splat2glb.mjs --in ~/Downloads/Thing.spz \
   --out public/apps/object-tile-scroll/models/thing.glb --up -z --tris 800
 node tools/gzip-models.mjs --dir public/apps/object-tile-scroll/models
 ```
+
+**Prefer the SPZ.** Scaniverse offers both and they are the same capture: exported
+both ways, the same scan came back as the same 30,555 points in the same order,
+positions identical to the bit once a Y/Z flip and a 0.13mm recentring are undone,
+scale identical, opacity and color equal to within float32 rounding — and the SPZ
+was 11.4x smaller. The PLY is that file decompressed, with its float32 precision
+as decoration. Converting from either produces the same model; measured, the two
+meshes differ by a 0.13mm translation and nothing else, and the app centres every
+build anyway. The reader turns an SPZ into the PLY's own frame on the way in, so
+`--up` means the same thing whichever one you hand it.
 
 Read that tool's header before running it a second time. The one setting nothing
 can infer is `--up` — a phone has no idea which way up a pig is. After that, the

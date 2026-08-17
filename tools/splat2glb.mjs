@@ -43,8 +43,12 @@
 // haze bracketed as geometry is a model wearing a fur coat. Look at the scan
 // before running this, and read both off what you see.
 //
+// Reads a binary PLY or an SPZ, and they are interchangeable: an SPZ is the same
+// capture at a tenth the size, decoded into the PLY's own frame so --up means the
+// same thing whichever one a scanner handed over.
+//
 // Usage:
-//   node tools/splat2glb.mjs --in <scan.ply> --out <model.glb> [options]
+//   node tools/splat2glb.mjs --in <scan.ply|scan.spz> --out <model.glb> [options]
 //   node tools/splat2glb.mjs --in ~/Downloads/BertScan.ply \
 //     --out public/apps/object-tile-scroll/models/rubberPig.glb \
 //     --up -x --grid 52 --min-opacity 0.45 --crop -0.09,-0.11,-0.07,0.08,0.106,0.08
@@ -71,6 +75,7 @@
 //                   scans of the same object can be compared before either is built.
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => {
@@ -146,8 +151,7 @@ const PLY_TYPES = {
   int: 4, int32: 4, uint: 4, uint32: 4,
 };
 
-function readPly(path) {
-  const raw = readFileSync(path);
+function readPly(raw) {
   const at = raw.indexOf('end_header');
   if (at < 0) throw new Error('not a PLY: no end_header');
   const headEnd = raw.indexOf('\n', at) + 1;
@@ -243,7 +247,99 @@ function readPly(path) {
       rgb[i * 3 + 2] = lin(b8[i] / 255);
     }
   }
-  return { count, x, y, z, opacity, radius, rgb, splat: !!(d0 && s0) };
+  return { count, x, y, z, opacity, radius, rgb, splat: !!(d0 && s0), format: 'ply' };
+}
+
+// --------------------------------------------------------------------- the spz
+// Niantic's splat format, and what Scaniverse actually holds: the PLY it will
+// also give you is this file decompressed, with the float32 precision as
+// decoration. Verified against a scan exported both ways — same 30,555 points in
+// the same order, positions identical TO THE BIT after undoing a Y/Z flip and a
+// sub-millimetre recentring, scale identical, opacity and color equal to within
+// float32 rounding. For 11.4x fewer bytes.
+//
+// So this is here for the file size and for the convenience of not having to
+// pick the right export, not because either carries more of the capture.
+const SPZ_MAGIC = 0x5053474e;          // 'NGSP', little-endian
+const SPZ_SH_DIM = [0, 3, 8, 15];      // coefficients per channel, by SH degree
+
+function readSpz(buf) {
+  const magic = buf.readUInt32LE(0);
+  const version = buf.readUInt32LE(4);
+  const count = buf.readUInt32LE(8);
+  const shDegree = buf.readUInt8(12);
+  const fractionalBits = buf.readUInt8(13);
+  if (magic !== SPZ_MAGIC) throw new Error('not an SPZ: wrong magic');
+  if (version !== 2) {
+    throw new Error(`SPZ version ${version} — this reads version 2. A wrong layout `
+      + 'would decode to plausible garbage rather than fail, so it refuses instead.');
+  }
+  const shDim = SPZ_SH_DIM[shDegree];
+  if (shDim === undefined) throw new Error(`SPZ SH degree ${shDegree} is not 0-3`);
+
+  // Positions, alpha, color, scale, rotation, then the higher SH bands. Checked
+  // against the file length, because a layout that is off by one field still
+  // decodes — into something that looks like a scan of nothing in particular.
+  const per = 9 + 1 + 3 + 3 + 3 + shDim * 3;
+  const want = 16 + count * per;
+  if (buf.length !== want) {
+    throw new Error(`SPZ is ${buf.length} bytes; ${count} points at ${per} bytes each plus a 16-byte header is ${want}`);
+  }
+
+  const x = new Float64Array(count);
+  const y = new Float64Array(count);
+  const z = new Float64Array(count);
+  const opacity = new Float64Array(count);
+  const radius = new Float64Array(count);
+  const rgb = new Float64Array(count * 3);
+
+  const SH_C0 = 0.28209479177387814;
+  // The three constants that are not in the header and have to be known: color
+  // is stored with a 0.15 scale about a half-way grey, log-scale in sixteenths
+  // offset by -10, and position as 24-bit fixed point with the header's
+  // fractional bits. All three were confirmed against the matching PLY.
+  const COLOR_SCALE = 0.15;
+  const denom = 1 << fractionalBits;
+  let o = 16;
+  const posAt = o; o += count * 9;
+  const alphaAt = o; o += count;
+  const colorAt = o; o += count * 3;
+  const scaleAt = o;
+
+  for (let i = 0; i < count; i++) {
+    const p = posAt + i * 9;
+    for (let k = 0; k < 3; k++) {
+      const b0 = buf[p + k * 3]; const b1 = buf[p + k * 3 + 1]; const b2 = buf[p + k * 3 + 2];
+      let v = b0 | (b1 << 8) | (b2 << 16);
+      if (v >= 0x800000) v -= 0x1000000;
+      const val = v / denom;
+      // Into the frame Scaniverse's own PLY uses, so --up means the same thing
+      // whichever file somebody happened to export. SPZ is Y-up; that PLY is
+      // written with Y and Z negated, and every recipe written down here was
+      // worked out against the PLY.
+      if (k === 0) x[i] = val;
+      else if (k === 1) y[i] = -val;
+      else z[i] = -val;
+    }
+    opacity[i] = buf[alphaAt + i] / 255;
+    let r = 0;
+    for (let k = 0; k < 3; k++) {
+      const c = SH_C0 * ((buf[colorAt + i * 3 + k] / 255 - 0.5) / COLOR_SCALE) + 0.5;
+      rgb[i * 3 + k] = c < 0 ? 0 : c > 1 ? 1 : c;
+      r += Math.exp(buf[scaleAt + i * 3 + k] / 16 - 10) / 3;
+    }
+    radius[i] = r;
+  }
+  return { count, x, y, z, opacity, radius, rgb, splat: true, format: 'spz', fractionalBits };
+}
+
+/** Read whichever of the two a scanner handed over. */
+function readScan(path) {
+  let buf = readFileSync(path);
+  if (buf[0] === 0x1f && buf[1] === 0x8b) buf = gunzipSync(buf);   // SPZ ships gzipped
+  if (buf.length >= 4 && buf.readUInt32LE(0) === SPZ_MAGIC) return readSpz(buf);
+  if (buf.subarray(0, 3).toString('latin1') === 'ply') return readPly(buf);
+  throw new Error(`${path} is neither a PLY nor an SPZ`);
 }
 
 // -------------------------------------------------------------------- the cull
@@ -1706,7 +1802,7 @@ function orient(verts, up, yawDeg) {
 
 // --------------------------------------------------------------------- the run
 const t0 = Date.now();
-const pts = readPly(inPath);
+const pts = readScan(inPath);
 say(`read      ${pts.count} ${pts.splat ? 'splats' : 'points'} from ${inPath}`);
 
 // The whole file's extent, printed whether or not it is cropped, because it is
@@ -1737,9 +1833,13 @@ if (CHECK) {
   say(`size      ${mm(size)} on its longest side`);
 
   const q = quantisation(pts);
-  if (q.step) {
-    say(`precision positions land on a ${mm(q.step)} lattice — this file is a decoded`);
-    say(`          quantisation, not a raw capture. Its float32 is decoration.`);
+  if (q.step && pts.format === 'spz') {
+    say(`precision ${mm(q.step)} position lattice, ${pts.fractionalBits} fractional bits — quantised at`);
+    say(`          source, which is what this format is. opacity ${q.opacity} levels, color ${q.color}`);
+  } else if (q.step) {
+    say(`precision positions land on a ${mm(q.step)} lattice, so this file is a decoded`);
+    say(`          quantisation and its float32 is decoration. The same scan as SPZ`);
+    say(`          would be a tenth the size and carry the same numbers.`);
     say(`          opacity ${q.opacity} levels, color ${q.color} levels`);
   } else {
     say(`precision positions look continuous (${q.posLevels > 4096 ? '>4096' : q.posLevels} distinct), opacity ${q.opacity} levels`);
