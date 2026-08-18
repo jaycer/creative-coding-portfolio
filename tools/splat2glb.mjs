@@ -16,6 +16,45 @@
 // the object, on the scan this was written for — and everything below that is
 // invention. The model comes out soft. That is the scan, not the budget.
 //
+// PRIOR ART, since the question comes up and the answer is not "nothing".
+// Surveyed 2026-08-18, which is after this was written rather than before it.
+//
+// The best reconstructors - SuGaR, 2DGS, Gaussian Opacity Fields - cannot be
+// used here at all, and not for a licensing reason. They are training-time
+// methods: they want the original photographs and the camera poses, and they
+// recover the surface as part of fitting the scene. A finished .spz off a phone
+// is the wrong input to them, and it is the only input this has.
+//
+// The tools that DO take a standalone splat file agree on an approach, and it is
+// the one bracket() argues against: build a density field, threshold it, march
+// cubes over it, accept the blob. Polyvia3D does exactly that, free, in a
+// browser, and says plainly that the result is soft. 3DGS-to-PC does it at the
+// command line and its own authors call the meshing "quite naive, which can lead
+// to noisy results". Open3D or MeshLab with screened Poisson gets there too,
+// given surface normals you have to estimate yourself first.
+//
+// PlayCanvas splat-transform is worth naming because it looks like this tool and
+// is not: its GLB is splat data in a KHR_gaussian_splatting container, and it
+// does no surface reconstruction of any kind.
+//
+// What none of them produce is what the deck needs - a few hundred to a few
+// thousand triangles, flat-shaded, in flat color groups, at 8-30KB. They hand
+// back either a dense marching-cubes surface or a splat file, so the distance
+// from their output to a model that can stand next to sixty Kenney props is a
+// decimation stage, a color-clustering stage and a writer, which is most of what
+// is below.
+//
+// None of the PARTS are new and none should be claimed as such: visual hull is
+// Laurentini 1994, surface nets is Gibson 1998, Taubin 1995, quadric error
+// metrics is Garland & Heckbert 1997, and wrap.js is a cousin of CGAL's alpha
+// wrapping. What is here is the combination, the output target, and the numbers.
+//
+// The Splat Editor's cleaning half has a direct equivalent in SuperSplat
+// (PlayCanvas, MIT, in the browser, GPU brush and lasso selection with unlimited
+// undo), which is the standard tool for this and does that part better. What it
+// does not do is build the mesh in the page or preview it under the gallery's
+// own lights, which is the reason ours exists.
+//
 // The route, end to end:
 //
 //   splats -> cull -> density grid -> bracket into a solid -> surface nets
