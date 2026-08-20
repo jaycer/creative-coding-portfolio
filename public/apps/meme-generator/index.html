@@ -7,19 +7,19 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="Memes" />
-    <meta name="description" content="Make a meme in the tab. Drop in a photo, stack image and text layers, spin the text to any angle, and export a JPG at Instagram's 4:5 size." />
+    <meta name="description" content="Make a meme in the tab. Drop in a photo, stack image, text and shape layers, spin them to any angle, and export a JPG, PNG or WebP at Instagram's sizes." />
     <meta name="theme-color" content="#0e1014" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
     <meta property="og:title" content="Meme Generator" />
-    <meta property="og:description" content="Make a meme in the tab. Drop in a photo, stack image and text layers, spin the text to any angle, and export a JPG at Instagram's 4:5 size." />
+    <meta property="og:description" content="Make a meme in the tab. Drop in a photo, stack image, text and shape layers, spin them to any angle, and export a JPG, PNG or WebP at Instagram's sizes." />
     <meta property="og:url" content="%SITE_URL%/apps/meme-generator/" />
     <meta property="og:image" content="%SITE_URL%/og/meme-generator.jpg" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Meme Generator" />
-    <meta name="twitter:description" content="Make a meme in the tab. Drop in a photo, stack image and text layers, spin the text to any angle, and export a JPG at Instagram's 4:5 size." />
+    <meta name="twitter:description" content="Make a meme in the tab. Drop in a photo, stack image, text and shape layers, spin them to any angle, and export a JPG, PNG or WebP at Instagram's sizes." />
     <meta name="twitter:image" content="%SITE_URL%/og/meme-generator.jpg" />
     <style>
       /* Anton, self-hosted. See fonts/README.txt for why it is not a CDN link:
@@ -222,6 +222,9 @@
 
       /* --------------------------------------------------------- form pieces */
       .add-row { display: flex; gap: 8px; }
+      /* Three across a 340px panel now. The padding gives way rather than the
+         words: "Add shape" has to stay readable on the narrowest phone. */
+      .add-row .btn { padding: 10px 6px; font-size: 0.84rem; }
       .btn {
         flex: 1;
         font: inherit;
@@ -244,6 +247,10 @@
         gap: 10px;
         margin-top: 12px;
       }
+      /* An author's `display: flex` outranks the browser's own rule for the
+         hidden attribute, so a row switched off in script needs telling twice.
+         The export sheet hides the rows its file type has no use for. */
+      .row[hidden] { display: none; }
       .row label, .row .name {
         flex: none;
         width: 74px;
@@ -579,7 +586,7 @@
       <h1>Meme Generator</h1>
       <button class="bar-btn" id="save-btn" type="button">Save</button>
       <button class="bar-btn" id="load-btn" type="button">Load</button>
-      <button class="export" id="export-btn" type="button">Export JPG</button>
+      <button class="export" id="export-btn" type="button" aria-haspopup="dialog" aria-expanded="false">Export</button>
       <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false"></button>
     </header>
 
@@ -595,6 +602,7 @@
           <div class="add-row">
             <button class="btn" id="add-image" type="button">Add image</button>
             <button class="btn" id="add-text" type="button">Add text</button>
+            <button class="btn" id="add-shape" type="button">Add shape</button>
           </div>
           <input type="file" id="file" accept="image/*" multiple hidden />
           <p class="hint" id="add-hint">Drop a photo on the picture or paste one. Drag to move, and grab a corner to size or the arm above to spin.</p>
@@ -666,6 +674,36 @@
             </div>
           </div>
 
+          <div id="shape-controls" hidden>
+            <div class="row">
+              <label for="shape-select">Shape</label>
+              <select id="shape-select"></select>
+            </div>
+            <div class="row">
+              <label for="shape-w-range">Width</label>
+              <input type="range" id="shape-w-range" min="8" max="2000" step="1" />
+              <span class="val"><input class="num" id="shape-w-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Width in pixels" value="–" /></span>
+            </div>
+            <div class="row">
+              <label for="shape-h-range">Height</label>
+              <input type="range" id="shape-h-range" min="8" max="2000" step="1" />
+              <span class="val"><input class="num" id="shape-h-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Height in pixels" value="–" /></span>
+            </div>
+            <div class="row">
+              <span class="name">Fill</span>
+              <div class="seg" id="fill-seg">
+                <button type="button" data-fill="solid" aria-pressed="true">Solid</button>
+                <button type="button" data-fill="none" aria-pressed="false">None</button>
+              </div>
+            </div>
+            <div class="row">
+              <label for="shape-fill">Color</label>
+              <input type="color" id="shape-fill" aria-label="Fill color" title="Fill color" />
+              <input type="color" id="shape-stroke" aria-label="Outline color" title="Outline color" />
+              <input type="range" id="shape-stroke-range" min="0" max="60" step="1" aria-label="Outline width" title="Outline width" />
+            </div>
+          </div>
+
           <div class="row">
             <label for="rot-range">Rotate</label>
             <input type="range" id="rot-range" min="-180" max="180" step="1" />
@@ -695,7 +733,7 @@
           <h2 id="sheet-title">Meme Generator</h2>
           <button class="close" id="close-btn" type="button" aria-label="Close settings">✕</button>
         </div>
-        <p class="intro">A meme in the tab. Pictures and text stack up as layers, the text turns to any angle, and Export writes a JPG at the size the app is set to. Save writes the work itself, pictures and all, as a file to pick up later. Images and text stay local.</p>
+        <p class="intro">A meme in the tab. Pictures, text and shapes stack up as layers, any of them turns to any angle, and Export writes a file at the size the app is set to. Save writes the work itself, pictures and all, as a file to pick up later. Images and text stay local.</p>
 
         <div class="row">
           <label for="format-select">Format</label>
@@ -710,6 +748,39 @@
 
         <button class="action" id="done-btn" type="button">Back to it</button>
         <button class="reset" id="reset-btn" type="button">Clear everything</button>
+      </div>
+    </div>
+
+    <div class="scrim" id="export-scrim" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="export-title">
+        <div class="sheet-head">
+          <h2 id="export-title">Export</h2>
+          <button class="close" id="export-close" type="button" aria-label="Close export">✕</button>
+        </div>
+
+        <div class="row">
+          <span class="name">File</span>
+          <div class="seg" id="type-seg">
+            <button type="button" data-type="image/jpeg" aria-pressed="true">JPG</button>
+            <button type="button" data-type="image/png" aria-pressed="false">PNG</button>
+            <button type="button" data-type="image/webp" aria-pressed="false">WebP</button>
+          </div>
+        </div>
+        <div class="row" id="quality-row">
+          <label for="quality-range">Quality</label>
+          <input type="range" id="quality-range" min="50" max="100" step="1" />
+          <span class="val"><input class="num" id="quality-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Quality as a percentage" value="–" /><span class="unit">%</span></span>
+        </div>
+        <div class="row" id="alpha-row">
+          <span class="name">Backdrop</span>
+          <div class="seg" id="alpha-seg">
+            <button type="button" data-alpha="keep" aria-pressed="true">Color</button>
+            <button type="button" data-alpha="drop" aria-pressed="false">None</button>
+          </div>
+        </div>
+        <p class="px" id="export-px">–</p>
+
+        <button class="action" id="export-go" type="button">Export</button>
       </div>
     </div>
 

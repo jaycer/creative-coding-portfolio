@@ -52,6 +52,77 @@ const FONTS = [
 ];
 const fontById = (id) => FONTS.find((f) => f.id === id) || FONTS[0];
 
+// ----------------------------------------------------------------- the shapes
+// The geometry a meme actually asks for: a box to black out a name, a ring to
+// draw around the thing, an arrow pointing at it, a star on it.
+//
+// Every one of them is a path drawn into a w×h box centered on the origin, so a
+// single pair of controls drives the whole set and a circle is simply an ellipse
+// in a square box. Nothing here knows about rotation, color or position — those
+// belong to the layer, exactly as they do for a picture.
+const TAU = Math.PI * 2;
+
+/** A closed run of points, each given as a fraction of the box. */
+const poly = (pts) => (c, w, h) => {
+  for (let i = 0; i < pts.length; i++) {
+    const x = pts[i][0] * w;
+    const y = pts[i][1] * h;
+    if (i) c.lineTo(x, y); else c.moveTo(x, y);
+  }
+};
+
+/** n corners spaced around the box's ellipse, the first one at twelve o'clock —
+ *  which is what makes a pentagon point up and a hexagon sit flat. */
+const regular = (n) => (c, w, h) => {
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + (i * TAU) / n;
+    const x = (Math.cos(a) * w) / 2;
+    const y = (Math.sin(a) * h) / 2;
+    if (i) c.lineTo(x, y); else c.moveTo(x, y);
+  }
+};
+
+/** Points and valleys alternating. The inner radius is 0.382 of the outer one,
+ *  which is where a five-pointed star's edges run straight through each other
+ *  rather than kinking at the valley. */
+const star = (n, inner) => (c, w, h) => {
+  for (let i = 0; i < n * 2; i++) {
+    const r = i % 2 ? inner : 0.5;
+    const a = -Math.PI / 2 + (i * Math.PI) / n;
+    const x = Math.cos(a) * r * w;
+    const y = Math.sin(a) * r * h;
+    if (i) c.lineTo(x, y); else c.moveTo(x, y);
+  }
+};
+
+/** Rounded corners by hand rather than through ctx.roundRect, which older
+ *  Safari does not have. arcTo draws the identical corner. */
+function roundBox(c, w, h) {
+  const r = Math.min(w, h) * 0.16;
+  const x = -w / 2;
+  const y = -h / 2;
+  c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r);
+  c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r);
+  c.arcTo(x, y, x + w, y, r);
+}
+
+const SHAPES = [
+  { id: 'rect', label: 'Rectangle', path: (c, w, h) => c.rect(-w / 2, -h / 2, w, h) },
+  { id: 'round-rect', label: 'Rounded box', path: roundBox },
+  { id: 'ellipse', label: 'Ellipse', path: (c, w, h) => c.ellipse(0, 0, w / 2, h / 2, 0, 0, TAU) },
+  { id: 'triangle', label: 'Triangle', path: poly([[0, -0.5], [0.5, 0.5], [-0.5, 0.5]]) },
+  { id: 'diamond', label: 'Diamond', path: poly([[0, -0.5], [0.5, 0], [0, 0.5], [-0.5, 0]]) },
+  { id: 'pentagon', label: 'Pentagon', path: regular(5) },
+  { id: 'hexagon', label: 'Hexagon', path: regular(6) },
+  { id: 'star', label: 'Star', path: star(5, 0.191) },
+  { id: 'arrow', label: 'Arrow', path: poly([
+    [-0.5, -0.16], [0.12, -0.16], [0.12, -0.42], [0.5, 0], [0.12, 0.42], [0.12, 0.16], [-0.5, 0.16],
+  ]) },
+];
+const shapeById = (id) => SHAPES.find((s) => s.id === id) || SHAPES[0];
+
 // How a layer meets the ones under it. These are the canvas compositing modes
 // under plain names: the id is what goes on the wire and into the save file, the
 // op is what the context is set to.
@@ -135,6 +206,11 @@ const MIN_TEXT = 12;
 const MAX_TEXT = 500;
 const MIN_SCALE = 0.02;
 const MAX_SCALE = 8;
+// The same pair the two shape sliders carry in the markup, and for the same
+// reason the text sizes are up there: a corner drag and a typed number have to
+// agree on where the ends are.
+const MIN_SHAPE = 8;
+const MAX_SHAPE = 2000;
 const JPEG_QUALITY = 0.92;
 
 // ------------------------------------------------------------------ the state
@@ -218,6 +294,11 @@ function bounds(layer) {
   if (layer.type === 'image') {
     return { w: layer.natW * layer.scale, h: layer.natH * layer.scale };
   }
+  if (layer.type === 'shape') {
+    // A stroke straddles the path, so half of it stands outside the box.
+    const pad = layer.strokeW / 2;
+    return { w: layer.w + pad * 2, h: layer.h + pad * 2 };
+  }
   const m = layoutText(layer);
   // The outline hangs outside the glyphs, so the grab box has to include it or
   // the handles sit inside the shape they are meant to be holding.
@@ -227,15 +308,22 @@ function bounds(layer) {
 
 // ------------------------------------------------------------------- painting
 /**
- * Draw the whole picture into a context. `overlay` is the only difference
- * between what is on screen and what gets exported: the selection box, the
- * handles and the empty-canvas hint are all in it, and the export asks for
- * none of them.
+ * Draw the whole picture into a context. `overlay` is the difference between
+ * what is on screen and what gets exported: the selection box, the handles and
+ * the empty-canvas hint are all in it, and the export asks for none of them.
+ *
+ * `transparent` leaves the backdrop off entirely, for the export formats that
+ * have an alpha channel to put nothing into. Everything downstream of here
+ * already handles a frame that is not opaque — see compositeByHand.
  */
-function paint(c, overlay) {
+function paint(c, overlay, opts) {
+  const transparent = !!(opts && opts.transparent);
   c.save();
-  c.fillStyle = state.bg;
-  c.fillRect(0, 0, W(), H());
+  if (transparent) c.clearRect(0, 0, W(), H());
+  else {
+    c.fillStyle = state.bg;
+    c.fillRect(0, 0, W(), H());
+  }
   c.imageSmoothingEnabled = true;
   c.imageSmoothingQuality = 'high';
 
@@ -250,13 +338,7 @@ function paint(c, overlay) {
     c.globalCompositeOperation = blendOf(layer);
     c.translate(layer.x, layer.y);
     c.rotate(layer.rot);
-    if (layer.type === 'image') {
-      const w = layer.natW * layer.scale;
-      const h = layer.natH * layer.scale;
-      c.drawImage(layer.bitmap, -w / 2, -h / 2, w, h);
-    } else {
-      paintText(c, layer);
-    }
+    paintBody(c, layer);
     c.restore();
   }
   c.restore();
@@ -284,8 +366,32 @@ function needsBuffer(layer) {
   // A blend done by hand always needs it: the arithmetic reads the layer and
   // the picture as two separate images, so the layer has to exist as one.
   if (manualBlend(layer)) return true;
-  if (layer.type !== 'text' || layer.strokeW <= 0) return false;
+  // Two overlapping draws is the whole test. An outlined shape has the same
+  // flaw outlined text does; an unfilled one is a single stroke and does not.
+  const twoDraws = layer.strokeW > 0 &&
+    (layer.type === 'text' || (layer.type === 'shape' && layer.filled));
+  if (!twoDraws) return false;
   return blendOf(layer) !== 'source-over' || layer.opacity < 1;
+}
+
+/**
+ * A layer as itself, in its own frame: the context arrives already translated
+ * to the layer's point and turned to its angle, and leaves with nothing set on
+ * it. The one place that knows how each kind of layer is actually drawn, so the
+ * direct path and the buffered one below cannot drift apart.
+ */
+function paintBody(c, layer) {
+  if (layer.type === 'image') {
+    const w = layer.natW * layer.scale;
+    const h = layer.natH * layer.scale;
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = 'high';
+    c.drawImage(layer.bitmap, -w / 2, -h / 2, w, h);
+  } else if (layer.type === 'shape') {
+    paintShape(c, layer);
+  } else {
+    paintText(c, layer);
+  }
 }
 
 // One buffer, reused. A second full-frame canvas is 5MB at 1080×1350 and there
@@ -311,15 +417,7 @@ function paintThroughBuffer(c, layer) {
   bc.rotate(layer.rot);
   // Composed at full strength and with no blend: what lands in here is the
   // layer as a thing in itself, outline and letters already resolved.
-  if (layer.type === 'image') {
-    const w = layer.natW * layer.scale;
-    const h = layer.natH * layer.scale;
-    bc.imageSmoothingEnabled = true;
-    bc.imageSmoothingQuality = 'high';
-    bc.drawImage(layer.bitmap, -w / 2, -h / 2, w, h);
-  } else {
-    paintText(bc, layer);
-  }
+  paintBody(bc, layer);
   bc.restore();
 
   const manual = manualBlend(layer);
@@ -351,9 +449,12 @@ function layerBox(layer) {
  * not offer. Only over the layer's own box, so a line of text costs a band of
  * pixels rather than the whole frame.
  *
- * The picture underneath is always opaque — the frame starts life filled with
- * the backdrop color — so this is the simple case of the compositing formula:
- * the result is the blend of the two colors, faded in by the layer's own alpha.
+ * This is the compositing formula in full, because the picture underneath is
+ * not always opaque: an export with the backdrop left off starts the frame
+ * empty, and a blend against nothing has to come out as the layer itself
+ * rather than as a blend against black. Where the frame IS opaque the third
+ * term drops out and the first vanishes, leaving what this used to be — the
+ * blend of the two colors faded in by the layer's own alpha.
  */
 function compositeByHand(c, layer) {
   const blend = blendById(layer.blend);
@@ -366,13 +467,20 @@ function compositeByHand(c, layer) {
   const u = under.data;
   const o = over.data;
   for (let i = 0; i < u.length; i += 4) {
-    const a = (o[i + 3] / 255) * layer.opacity;
-    if (a === 0) continue;
+    const as = (o[i + 3] / 255) * layer.opacity;   // the layer, here
+    if (as === 0) continue;
+    const ab = u[i + 3] / 255;                     // the picture, here
+    const ao = as + ab * (1 - as);
     for (let k = 0; k < 3; k++) {
       const cb = u[i + k];
       const mixed = lut[o[i + k] * 256 + cb];
-      u[i + k] = cb + (mixed - cb) * a;
+      // Layer over nothing, layer blended into picture, picture showing past
+      // the layer — and back out of premultiplied, which is how the bytes in
+      // an ImageData are written.
+      const co = as * (1 - ab) * o[i + k] + as * ab * mixed + (1 - as) * ab * cb;
+      u[i + k] = ao ? co / ao : 0;
     }
+    u[i + 3] = ao * 255;
   }
   // putImageData ignores globalAlpha and the composite mode, which is right
   // here: both of them have already been paid, above, by hand.
@@ -403,13 +511,34 @@ function paintText(c, layer) {
   }
 }
 
+/**
+ * Fill, then outline. The outline is centered on the path, so half of it is
+ * buried under the fill — which is right here: unlike text, where the two colors
+ * are the whole look, a shape's outline is a border and reads as one.
+ */
+function paintShape(c, layer) {
+  c.beginPath();
+  shapeById(layer.shape).path(c, layer.w, layer.h);
+  c.closePath();
+  if (layer.filled) {
+    c.fillStyle = layer.color;
+    c.fill();
+  }
+  if (layer.strokeW > 0) {
+    c.lineWidth = layer.strokeW;
+    c.lineJoin = 'round';
+    c.strokeStyle = layer.stroke;
+    c.stroke();
+  }
+}
+
 function paintHint(c) {
   c.save();
   c.fillStyle = 'rgba(255,255,255,0.34)';
   c.textAlign = 'center';
   c.textBaseline = 'middle';
   c.font = `500 40px ${FONTS[1].stack}`;
-  c.fillText('Add an image, or some text', W() / 2, H() / 2);
+  c.fillText('Add an image, some text, or a shape', W() / 2, H() / 2);
   c.restore();
 }
 
@@ -543,6 +672,30 @@ function addText() {
   syncAll();
 }
 
+function addShape() {
+  // Two fifths of the frame across and square: big enough to be the thing you
+  // just added rather than a speck in the middle, small enough to sit inside a
+  // photo without covering it.
+  const side = Math.round(W() * 0.4);
+  const layer = Object.assign(baseLayer('shape'), {
+    shape: 'rect',
+    w: side,
+    h: side,
+    filled: true,
+    color: '#ffffff',
+    stroke: '#000000',
+    // Outline off to start with. A shape arrives as one flat color, which is
+    // what a box over a name or a block behind a caption wants to be.
+    strokeW: 0,
+  });
+  // On top, where an annotation belongs: a shape is nearly always drawn over
+  // the photo rather than under it.
+  state.layers.push(layer);
+  selectLayer(layer.id);
+  touch();
+  syncAll();
+}
+
 function addImage(bitmap, name, blob) {
   const layer = Object.assign(baseLayer('image'), {
     bitmap,
@@ -555,11 +708,12 @@ function addImage(bitmap, name, blob) {
     scale: 1,
   });
   fitLayer(layer, 'cover');
-  // A picture arrives under the words already on the meme, which is nearly
-  // always what was meant: text on top of the photo, not buried by the next one.
-  const firstText = state.layers.findIndex((l) => l.type === 'text');
-  if (firstText === -1) state.layers.push(layer);
-  else state.layers.splice(firstText, 0, layer);
+  // A picture arrives under the words and the marks already on the meme, which
+  // is nearly always what was meant: the caption and the arrow pointing at the
+  // thing stay on top of the photo, rather than being buried by the next one.
+  const firstMark = state.layers.findIndex((l) => l.type === 'text' || l.type === 'shape');
+  if (firstMark === -1) state.layers.push(layer);
+  else state.layers.splice(firstMark, 0, layer);
   selectLayer(layer.id);
   touch();
   syncAll();
@@ -620,11 +774,19 @@ function selectLayer(id) {
   draw();
 }
 
-// The one number a gesture changes, whatever kind of layer it is holding.
-const sizeOf = (l) => (l.type === 'text' ? l.size : l.scale);
+// The one number a gesture changes, whatever kind of layer it is holding. A
+// shape is held by its width, and its height comes along in proportion.
+const sizeOf = (l) => (l.type === 'text' ? l.size : l.type === 'shape' ? l.w : l.scale);
 function setSize(l, v) {
-  if (l.type === 'text') l.size = clamp(Math.round(v), MIN_TEXT, MAX_TEXT);
-  else l.scale = clamp(v, MIN_SCALE, MAX_SCALE);
+  if (l.type === 'text') { l.size = clamp(Math.round(v), MIN_TEXT, MAX_TEXT); return; }
+  if (l.type !== 'shape') { l.scale = clamp(v, MIN_SCALE, MAX_SCALE); return; }
+  // Both sides are clamped, so the width is held back to whatever still leaves
+  // the height in range. Clamping them one at a time instead would let a wide
+  // shape dragged past the end come back a different shape than it went.
+  const ar = l.h / Math.max(1, l.w);
+  const w = clamp(Math.round(v), Math.max(MIN_SHAPE, MIN_SHAPE / ar), Math.min(MAX_SHAPE, MAX_SHAPE / ar));
+  l.w = Math.round(w);
+  l.h = clamp(Math.round(w * ar), MIN_SHAPE, MAX_SHAPE);
 }
 
 // ------------------------------------------------------- pointer interaction
@@ -799,6 +961,7 @@ const LOCK_OPEN =
 
 function layerName(l) {
   if (l.type === 'image') return l.name;
+  if (l.type === 'shape') return shapeById(l.shape).label;
   const first = (l.text || '').split('\n')[0].trim();
   return first || 'Text';
 }
@@ -816,7 +979,7 @@ function syncLayerList() {
 
     const kind = document.createElement('span');
     kind.className = 'layer-kind';
-    kind.textContent = l.type === 'image' ? '▦' : 'T';
+    kind.textContent = l.type === 'image' ? '▦' : l.type === 'shape' ? '◆' : 'T';
     const name = document.createElement('span');
     name.className = 'layer-name';
     name.textContent = layerName(l);
@@ -879,6 +1042,7 @@ const inspector = el('inspector');
 const inspTitle = el('insp-title');
 const textControls = el('text-controls');
 const imageControls = el('image-controls');
+const shapeControls = el('shape-controls');
 const textInput = el('text-input');
 const fontSelect = el('font-select');
 const sizeRange = el('size-range');
@@ -890,6 +1054,13 @@ const fillColor = el('fill-color');
 const strokeColor = el('stroke-color');
 const strokeRange = el('stroke-range');
 const scaleRange = el('scale-range');
+const shapeSelect = el('shape-select');
+const shapeWRange = el('shape-w-range');
+const shapeHRange = el('shape-h-range');
+const fillSeg = el('fill-seg');
+const shapeFill = el('shape-fill');
+const shapeStroke = el('shape-stroke');
+const shapeStrokeRange = el('shape-stroke-range');
 const rotRange = el('rot-range');
 const blendSelect = el('blend-select');
 const opacityRange = el('opacity-range');
@@ -919,6 +1090,13 @@ for (const f of FONTS) {
   o.textContent = f.label;
   o.style.fontFamily = f.stack;
   fontSelect.appendChild(o);
+}
+
+for (const sh of SHAPES) {
+  const o = document.createElement('option');
+  o.value = sh.id;
+  o.textContent = sh.label;
+  shapeSelect.appendChild(o);
 }
 
 // ------------------------------------------------------- the numbers, typed
@@ -993,6 +1171,12 @@ function syncTransformControls() {
   if (l.type === 'text') {
     sizeRange.value = String(l.size);
     showNum('size-val', l.size);
+  } else if (l.type === 'shape') {
+    // Both, because a corner drag moves them together.
+    shapeWRange.value = String(Math.round(l.w));
+    showNum('shape-w-val', Math.round(l.w));
+    shapeHRange.value = String(Math.round(l.h));
+    showNum('shape-h-val', Math.round(l.h));
   } else {
     scaleRange.value = String(Math.round(l.scale * 100));
     showNum('scale-val', Math.round(l.scale * 100));
@@ -1004,9 +1188,22 @@ function syncInspector() {
   inspector.hidden = !l;
   if (!l) return;
   const isText = l.type === 'text';
+  const isShape = l.type === 'shape';
+  const isImage = l.type === 'image';
   textControls.hidden = !isText;
-  imageControls.hidden = isText;
-  inspTitle.textContent = isText ? 'Text layer' : 'Image layer';
+  imageControls.hidden = !isImage;
+  shapeControls.hidden = !isShape;
+  inspTitle.textContent = isText ? 'Text layer' : isShape ? 'Shape layer' : 'Image layer';
+
+  if (isShape) {
+    shapeSelect.value = shapeById(l.shape).id;
+    shapeFill.value = l.color;
+    shapeStroke.value = l.stroke;
+    shapeStrokeRange.value = String(Math.round(l.strokeW));
+    for (const b of fillSeg.querySelectorAll('button')) {
+      b.setAttribute('aria-pressed', String((b.dataset.fill === 'solid') === l.filled));
+    }
+  }
 
   if (isText) {
     // Only written when it is not the field being typed in, or the caret jumps
@@ -1062,6 +1259,21 @@ onControl(wrapRange, 'input', (l) => {
 onControl(strokeRange, 'input', (l) => { l.strokeW = Number(strokeRange.value) / 100; });
 onControl(fillColor, 'input', (l) => { l.color = fillColor.value; });
 onControl(strokeColor, 'input', (l) => { l.stroke = strokeColor.value; });
+onControl(shapeSelect, 'change', (l) => { l.shape = shapeById(shapeSelect.value).id; }, { relist: true });
+onControl(shapeWRange, 'input', (l) => {
+  // Typed and dragged sizes set one side only: the proportion is the shape's to
+  // keep or to lose, and squashing a circle into an oval is a thing people do
+  // on purpose. The canvas corner handle is the one that holds the ratio.
+  l.w = clamp(Number(shapeWRange.value), MIN_SHAPE, MAX_SHAPE);
+  showNum('shape-w-val', Math.round(l.w));
+});
+onControl(shapeHRange, 'input', (l) => {
+  l.h = clamp(Number(shapeHRange.value), MIN_SHAPE, MAX_SHAPE);
+  showNum('shape-h-val', Math.round(l.h));
+});
+onControl(shapeFill, 'input', (l) => { l.color = shapeFill.value; });
+onControl(shapeStroke, 'input', (l) => { l.stroke = shapeStroke.value; });
+onControl(shapeStrokeRange, 'input', (l) => { l.strokeW = Number(shapeStrokeRange.value); });
 onControl(scaleRange, 'input', (l) => {
   l.scale = Number(scaleRange.value) / 100;
   showNum('scale-val', scaleRange.value);
@@ -1080,6 +1292,8 @@ onControl(opacityRange, 'input', (l) => {
 bindNumberField('size-val', sizeRange);
 bindNumberField('wrap-val', wrapRange);
 bindNumberField('scale-val', scaleRange);
+bindNumberField('shape-w-val', shapeWRange);
+bindNumberField('shape-h-val', shapeHRange);
 bindNumberField('rot-val', rotRange);
 bindNumberField('opacity-val', opacityRange);
 
@@ -1092,6 +1306,19 @@ alignSeg.addEventListener('click', (e) => {
   syncInspector();
   draw();
 });
+fillSeg.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  const l = selected();
+  if (!b || !l || l.type !== 'shape') return;
+  l.filled = b.dataset.fill === 'solid';
+  // An unfilled shape with no outline is nothing at all, and the panel would
+  // look like it had broken. Turning the fill off gives it an outline to be.
+  if (!l.filled && l.strokeW <= 0) l.strokeW = Math.max(6, Math.round(Math.min(l.w, l.h) * 0.04));
+  touch();
+  syncInspector();
+  draw();
+});
+
 capsOn.addEventListener('click', () => { const l = selected(); if (l) { l.caps = true; touch(); syncInspector(); draw(); } });
 capsOff.addEventListener('click', () => { const l = selected(); if (l) { l.caps = false; touch(); syncInspector(); draw(); } });
 
@@ -1127,6 +1354,7 @@ el('dupe-btn').addEventListener('click', () => { if (state.selected != null) dup
 // -------------------------------------------------------------- adding image
 const fileInput = el('file');
 el('add-text').addEventListener('click', addText);
+el('add-shape').addEventListener('click', addShape);
 el('add-image').addEventListener('click', () => fileInput.click());
 
 fileInput.addEventListener('change', async () => {
@@ -1201,22 +1429,109 @@ window.addEventListener('paste', async (e) => {
 });
 
 // --------------------------------------------------------------- the export
+// Three files a meme is ever wanted as. JPG is what gets posted; PNG is what
+// survives being edited again, and is the one that can carry a hole where the
+// backdrop was; WebP is both at half the bytes, where it is supported.
+const TYPES = [
+  { mime: 'image/jpeg', ext: 'jpg', label: 'JPG', lossy: true, alpha: false },
+  { mime: 'image/png', ext: 'png', label: 'PNG', lossy: false, alpha: true },
+  { mime: 'image/webp', ext: 'webp', label: 'WebP', lossy: true, alpha: true },
+];
+const typeById = (mime) => TYPES.find((t) => t.mime === mime) || TYPES[0];
+
+/** Can this engine actually write that format? Safari could not write WebP for
+ *  years, and a canvas asked for one it does not know hands back a PNG under
+ *  the wrong extension rather than failing — so the button comes off the sheet
+ *  instead of lying about what it will produce. */
+function encodes(mime) {
+  const probe = document.createElement('canvas');
+  probe.width = 1;
+  probe.height = 1;
+  return probe.toDataURL(mime).startsWith('data:' + mime);
+}
+
+const exportOpts = { mime: 'image/jpeg', quality: JPEG_QUALITY, transparent: false };
+
 const exportBtn = el('export-btn');
+const exportScrim = el('export-scrim');
+const typeSeg = el('type-seg');
+const alphaSeg = el('alpha-seg');
+const alphaRow = el('alpha-row');
+const qualityRow = el('quality-row');
+const qualityRange = el('quality-range');
+const exportPx = el('export-px');
 let exportLabelTimer = 0;
 
-exportBtn.addEventListener('click', () => {
+for (const b of typeSeg.querySelectorAll('button')) {
+  if (!encodes(b.dataset.type)) b.remove();
+}
+
+/** The sheet shows only what the chosen format can actually do. PNG has no
+ *  quality to set, and JPG has no transparency to keep — so those rows go away
+ *  rather than sitting there doing nothing. */
+function syncExportSheet() {
+  const t = typeById(exportOpts.mime);
+  for (const b of typeSeg.querySelectorAll('button')) {
+    b.setAttribute('aria-pressed', String(b.dataset.type === t.mime));
+  }
+  qualityRow.hidden = !t.lossy;
+  alphaRow.hidden = !t.alpha;
+  const drop = t.alpha && exportOpts.transparent;
+  for (const b of alphaSeg.querySelectorAll('button')) {
+    b.setAttribute('aria-pressed', String((b.dataset.alpha === 'drop') === drop));
+  }
+  qualityRange.value = String(Math.round(exportOpts.quality * 100));
+  showNum('quality-val', Math.round(exportOpts.quality * 100));
+  exportPx.textContent = `${W()} × ${H()} pixels · ${t.label}`;
+}
+
+function openExport() {
+  syncExportSheet();
+  exportScrim.hidden = false;
+  exportBtn.setAttribute('aria-expanded', 'true');
+}
+function closeExport() {
+  exportScrim.hidden = true;
+  exportBtn.setAttribute('aria-expanded', 'false');
+}
+
+exportBtn.addEventListener('click', openExport);
+el('export-close').addEventListener('click', closeExport);
+exportScrim.addEventListener('click', (e) => { if (e.target === exportScrim) closeExport(); });
+
+typeSeg.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  exportOpts.mime = typeById(b.dataset.type).mime;
+  syncExportSheet();
+});
+alphaSeg.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  exportOpts.transparent = b.dataset.alpha === 'drop';
+  syncExportSheet();
+});
+qualityRange.addEventListener('input', () => {
+  exportOpts.quality = Number(qualityRange.value) / 100;
+  showNum('quality-val', qualityRange.value);
+});
+bindNumberField('quality-val', qualityRange);
+
+el('export-go').addEventListener('click', () => {
+  const t = typeById(exportOpts.mime);
   // Painted into a canvas of its own with the overlay off, rather than
   // repainting the visible one and hoping the async toBlob lands before the
   // next frame puts the handles back.
   const off = document.createElement('canvas');
   off.width = W();
   off.height = H();
-  paint(off.getContext('2d'), false);
+  paint(off.getContext('2d'), false, { transparent: t.alpha && exportOpts.transparent });
   // Stamped with the moment rather than the size: a folder full of exports
   // wants to sort by when you made them, and every export at a given format
-  // has the same dimensions anyway. Same stamp the save files carry, so a JPG
-  // and the document it came from sit next to each other.
-  const name = `meme-${stamp()}.jpg`;
+  // has the same dimensions anyway. Same stamp the save files carry, so an
+  // export and the document it came from sit next to each other.
+  const name = `meme-${stamp()}.${t.ext}`;
+  closeExport();
   off.toBlob((blob) => {
     if (!blob) { window.alert('The export failed.'); return; }
     const url = URL.createObjectURL(blob);
@@ -1229,8 +1544,8 @@ exportBtn.addEventListener('click', () => {
     setTimeout(() => URL.revokeObjectURL(url), 10000);
     exportBtn.textContent = 'Saved';
     clearTimeout(exportLabelTimer);
-    exportLabelTimer = setTimeout(() => { exportBtn.textContent = 'Export JPG'; }, 1400);
-  }, 'image/jpeg', JPEG_QUALITY);
+    exportLabelTimer = setTimeout(() => { exportBtn.textContent = 'Export'; }, 1400);
+  }, t.mime, t.lossy ? exportOpts.quality : undefined);
 });
 
 // ------------------------------------------------------------ save and load
@@ -1245,7 +1560,11 @@ exportBtn.addEventListener('click', () => {
 // it, which shared/build-version.js reads off /version.json. If the shape ever
 // has to change in a way this loader cannot read, `build` is what says which
 // version of the app to hand an old file back to.
-const FILE_VERSION = 1;
+// Bumped to 2 when shapes arrived. A version 1 file still opens here and always
+// will — nothing about it changed — but a file with shapes in it opened by a
+// build that predates them would have quietly read them as text, so that build
+// is told plainly that the file is newer than it is.
+const FILE_VERSION = 2;
 
 const toastEl = el('toast');
 let toastTimer = 0;
@@ -1316,6 +1635,14 @@ async function saveProject() {
         assets[id] = { name: l.name, src: await blobToDataUrl(l.blob) };
       }
       layers.push({ ...common, asset: id, scale: round(l.scale, 9) });
+    } else if (l.type === 'shape') {
+      layers.push({
+        ...common,
+        shape: l.shape,
+        w: round(l.w, 9), h: round(l.h, 9),
+        filled: l.filled,
+        color: l.color, stroke: l.stroke, strokeW: round(l.strokeW, 3),
+      });
     } else {
       layers.push({
         ...common,
@@ -1390,7 +1717,8 @@ async function loadProject(file) {
   let texts = 0;
   for (const raw of doc.layers) {
     if (!raw || typeof raw !== 'object') continue;
-    const l = baseLayer(raw.type === 'image' ? 'image' : 'text');
+    const kind = raw.type === 'image' || raw.type === 'shape' ? raw.type : 'text';
+    const l = baseLayer(kind);
     l.x = numOr(raw.x, W() / 2);
     l.y = numOr(raw.y, H() / 2);
     l.rot = (numOr(raw.rot, 0) * Math.PI) / 180;
@@ -1407,6 +1735,14 @@ async function loadProject(file) {
       l.natW = a.bitmap.width;
       l.natH = a.bitmap.height;
       l.scale = clamp(numOr(raw.scale, 1), MIN_SCALE, MAX_SCALE);
+    } else if (l.type === 'shape') {
+      l.shape = shapeById(raw.shape).id;
+      l.w = clamp(numOr(raw.w, W() * 0.4), MIN_SHAPE, MAX_SHAPE);
+      l.h = clamp(numOr(raw.h, W() * 0.4), MIN_SHAPE, MAX_SHAPE);
+      l.filled = raw.filled !== false;
+      l.color = hexOr(raw.color, '#ffffff');
+      l.stroke = hexOr(raw.stroke, '#000000');
+      l.strokeW = clamp(numOr(raw.strokeW, 0), 0, 60);
     } else {
       l.text = typeof raw.text === 'string' ? raw.text : '';
       l.font = fontById(raw.font).id;
@@ -1490,6 +1826,7 @@ function applyFormat(id) {
   canvas.height = next.h;
   formatSelect.value = next.id;
   pxVal.textContent = `${next.w} × ${next.h} pixels`;
+  syncExportSheet();
   draw();
 }
 
@@ -1527,7 +1864,8 @@ const typing = () => {
 
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (!scrim.hidden) closeMenu();
+    if (!exportScrim.hidden) closeExport();
+    else if (!scrim.hidden) closeMenu();
     else selectLayer(null);
     return;
   }
@@ -1579,6 +1917,7 @@ window.addEventListener('resize', draw);
 formatSelect.value = state.format.id;
 bgColor.value = state.bg;
 pxVal.textContent = `${W()} × ${H()} pixels`;
+syncExportSheet();
 syncAll();
 
 // Anton is a file, and a file takes a moment. Text measured before it arrives is
