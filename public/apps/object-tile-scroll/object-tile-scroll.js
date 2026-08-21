@@ -986,8 +986,12 @@ function backOf(col) {
  * the field only ever asks for MORE reach — a column that has covered the
  * diagonal once can keep those slots, and dropping them the moment the bearing
  * swings back would be a drop for nothing.
+ *
+ * `dropped`, if given, collects the slots that go instead of disposing them here
+ * — see respace, which has to finish laying the field out before it can afford
+ * to run anything that might throw.
  */
-function fitRows(col, step, shrink) {
+function fitRows(col, step, shrink, dropped) {
   const need = rowsFor(col.depth, step);
   while (col.objs.length < need) {
     const back = backOf(col);
@@ -1008,7 +1012,7 @@ function fitRows(col, step, shrink) {
     const back = backOf(col);
     if (back.v + back.scale > edge) break;
     col.objs.splice(col.objs.indexOf(back), 1);
-    disposeObject(back);
+    if (dropped) dropped.push(back); else disposeObject(back);
   }
   col.rows = col.objs.length;
   col.span = col.rows * step;
@@ -1049,8 +1053,17 @@ function respace() {
   const step = rowStep();
   const cols = columnCount();
 
+  // Everything this drops is set aside and thrown away at the very end, once the
+  // lattice is settled. Disposing an object runs code that is not the field's —
+  // the closer look borrows an object's materials and has to be told it is
+  // losing them — and a throw in there used to abandon respace halfway, leaving
+  // the surviving columns wearing the ndcU of the wider layout they had just
+  // grown out of. That reads as the field stopping partway across, with a dead
+  // band at the right edge, since columns come off the END of the array and
+  // ndcU is handed out by index.
+  const orphaned = [];
   while (field.length > cols) {
-    for (const o of field.pop().objs) disposeObject(o);
+    for (const o of field.pop().objs) orphaned.push(o);
   }
   while (field.length < cols) {
     const i = field.length;
@@ -1080,9 +1093,12 @@ function respace() {
     // them, so their ratio is the truth about where its objects are standing.
     const was = col.rows ? col.span / col.rows : step;
     if (was !== step) for (const o of col.objs) o.v *= step / was;
-    fitRows(col, step, true);
+    fitRows(col, step, true, orphaned);
   }
   placeColumns();
+
+  // The field is laid out and placed; now it is safe to let go.
+  for (const o of orphaned) disposeObject(o);
 }
 
 /**
@@ -2162,7 +2178,14 @@ function onObjectGone(o) {
 
 function detachLook() {
   if (!lookObj || lookOwnMats) return;
-  const mats = Array.isArray(lookMesh.material) ? lookMesh.material : [lookMesh.material];
+  // Nothing borrowed yet, so there is nothing to keep a copy of: openLook clears
+  // the material and only the next drawLook fills it in, and an object can be
+  // disposed inside that gap — a whole frame normally, and unbounded once the
+  // tab stops being drawn, since drawLook rides on requestAnimationFrame. Let go
+  // of the object and leave the panel to pick the material up on its next pass.
+  const mat = lookMesh && lookMesh.material;
+  if (!mat) { lookObj = null; return; }
+  const mats = Array.isArray(mat) ? mat : [mat];
   lookOwnMats = mats.map((m) => m.clone());
   lookMesh.material = lookOwnMats.length === 1 ? lookOwnMats[0] : lookOwnMats;
   lookObj = null;
