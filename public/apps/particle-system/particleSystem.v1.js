@@ -13,9 +13,13 @@ var exitSizeThreshold = 1;          // size below which a particle is gone
 
 // --- color ---
 var backgroundColor = null;
-var targetBackgroundColor = null;
-var backgroundLerpAmount = 0.004;   // background color step per lerp
-var backgroundLerpMod = 25;         // frames between background lerps
+var bgWalk = null;                  // the background's current hue, sat and brightness
+var targetBgWalk = null;            // where the background is drifting to
+var bgSkipMinHue = 60;              // start of the hue band the background avoids
+var bgSkipMaxHue = 200;             // end of the hue band the background avoids
+var hueCircle = 360;                // degrees in a full turn of hue
+var backgroundLerpAmount = 0.004;   // background color step, spread over the frames below
+var backgroundLerpFrames = 25;      // frames that step is spread across
 var newTargetBgInSeconds = 60;      // seconds between new background targets
 var msPerSecond = 1000;             // milliseconds in one second
 var bgMinSat = 30;                  // background saturation floor, percent
@@ -26,9 +30,11 @@ var particleMinSat = 25;            // particle saturation floor, percent
 var particleMaxSat = 100;           // particle saturation ceiling, percent
 var particleMinBright = 50;         // particle brightness floor, percent
 var particleMaxBright = 100;        // particle brightness ceiling, percent
+var minParticleAlpha = 0.5;         // least opaque a particle can be
 var maxParticleAlpha = 1;           // most opaque a particle can be
-var minColorChanges = 2;            // fewest new colors per expansion
-var maxColorChanges = 4;            // most new colors per expansion
+var opaqueAlpha = 1;                // the background is never see through
+var minColorChanges = 1;            // fewest new colors per expansion
+var maxColorChanges = 2;            // most new colors per expansion
 
 // --- hue selection ---
 var greenHuePercentage = 0.075;     // chance of a green hue
@@ -56,14 +62,15 @@ var ampEpsilon = 0.0001;            // tolerance at the wave extremes
 
 function setup() {
   colorMode(HSB);
-  blendMode(OVERLAY);
-  backgroundColor = getBackgroundColor();
-  targetBackgroundColor = getBackgroundColor();
+  
+  bgWalk = getBackgroundWalk();
+  targetBgWalk = getBackgroundWalk();
+  backgroundColor = getWalkColor(bgWalk);
 
   // change the target background color based on a timer
   var timer = new DeltaTimer(function (time) {
     
-    targetBackgroundColor = getBackgroundColor();
+    targetBgWalk = getBackgroundWalk();
     
   }, newTargetBgInSeconds * msPerSecond);
 
@@ -90,12 +97,15 @@ function factorSetup(bgColor) {
 function draw() {
   noStroke();
   
-  if (frameCount % backgroundLerpMod == 0) {
-    // lerp towards the targetBackgroundColor 
-    backgroundColor = lerpColor(backgroundColor, targetBackgroundColor, backgroundLerpAmount); 
-  }
+  // walk towards the target background a little at a time. Taking the whole step
+  // once every backgroundLerpFrames drifts just as fast, but lands as a pulse that
+  // a blend mode amplifies through every particle stacked on top of it.
+  bgWalk = lerpWalk(bgWalk, targetBgWalk, backgroundLerpAmount / backgroundLerpFrames);
+  backgroundColor = getWalkColor(bgWalk);
   
+  blendMode(BLEND);
   background(backgroundColor);
+  // could add a call blendMode(OVERLAY) here, but shimmer has become a concern that cannot be diagnosed 
   
   // add particles as needed
   if (frameCount % transitionRateMod == 0 && particles.length < particleAmount) {
@@ -130,7 +140,6 @@ function draw() {
     // change the max period every cycle
     defaultMaxPeriod = random(minMaxPeriod, maxMaxPeriod);
     isExiting = false;
-    //print('isExiting',isExiting);
   }
 }
 
@@ -147,7 +156,8 @@ class Particle {
     // required properties: position, size, color, speed
     this.position = createVector(random(width), random(height));
     this.size = minParticleSize;
-    this.color = getParticleColor();
+    this.walk = getParticleWalk();
+    this.color = getWalkColor(this.walk);
     this.speed = random(maxSpeed*-1, maxSpeed);
     this.speedY = random(maxSpeed*-1, maxSpeed);
     
@@ -162,8 +172,8 @@ class Particle {
     this.colorChanges = floor(random(minColorChanges, maxColorChanges + 1));
     this.colorStepFrames = max(1, floor(this.period / this.colorChanges));
     this.colorStepFrame = 0;
-    this.colorFrom = this.color;
-    this.colorTo = getParticleColor();
+    this.colorFrom = this.walk;
+    this.colorTo = getParticleWalk();
     this.frameCountOffset = frameCountOffset;
     this.amp = ampMin;
     this.isExiting = false;
@@ -208,8 +218,8 @@ class Particle {
       if (this.amp > ampMax - ampEpsilon && !this.isGrowing) {
         this.isGrowing = true;
         // new fill and max
-        this.colorFrom = this.color;
-        this.colorTo = getParticleColor();
+        this.colorFrom = this.walk;
+        this.colorTo = getParticleWalk();
         this.colorStepFrame = 0;
         this.maxSize = random(this.minSize, defaultMaxSize);
       }
@@ -219,11 +229,12 @@ class Particle {
         if (++this.colorStepFrame >= this.colorStepFrames) {
           this.colorStepFrame = 0;
           this.colorFrom = this.colorTo;
-          this.colorTo = getParticleColor();
+          this.colorTo = getParticleWalk();
         }
 
         // walk toward it at a steady rate, so the color never sits still
-        this.color = lerpColor(this.colorFrom, this.colorTo, this.colorStepFrame / this.colorStepFrames);
+        this.walk = lerpWalk(this.colorFrom, this.colorTo, this.colorStepFrame / this.colorStepFrames);
+        this.color = getWalkColor(this.walk);
       }
       
       this.size = map(this.amp, ampMin, ampMax, this.maxSize, this.minSize);
@@ -237,23 +248,48 @@ function windowResized() {
 }
 
 // helper functions
-function getHSBColor(minS, maxS, minB, maxB, isAlwaysOpaque = false) {
-  // get a random color with certain parameters
-  if (isAlwaysOpaque) {
-    return color('hsb('+getHue()+', '+floor(random(minS,maxS))+'%, '+floor(random(minB,maxB))+'%)');
-  } else {
-    return color('hsba('+getHue()+', '+floor(random(minS,maxS))+'%, '+floor(random(minB,maxB))+'%,'+random(maxParticleAlpha)+')');
-  }
-}
-
-function getBackgroundColor() {
+// Colors are held as numbers rather than as p5 colors because lerpColor takes the
+// short way around the color wheel, so a run between two hues covers as little
+// ground as it can and, for the background, cuts through the skipped band whenever
+// the two sit on opposite sides of it. Lerping the numbers instead sends the hue
+// the way it was picked, however far round that is. The background's hues run past
+// a full turn, over the arc that begins where the band ends and comes back around
+// to where it begins, so a step between two of them stays on the arc.
+function getBackgroundWalk() {
   // parameters for all background colors
-  return getHSBColor(bgMinSat, bgMaxSat, bgMinBright, bgMaxBright, true);
+  return {
+    hue: random(bgSkipMaxHue, bgSkipMinHue + hueCircle),
+    sat: random(bgMinSat, bgMaxSat),
+    bright: random(bgMinBright, bgMaxBright),
+    alpha: opaqueAlpha
+  };
 }
 
-function getParticleColor() {
+function getParticleWalk() {
   // parameters for all particle colors
-  return getHSBColor(particleMinSat, particleMaxSat, particleMinBright, particleMaxBright);
+  return {
+    hue: getHue(),
+    sat: random(particleMinSat, particleMaxSat),
+    bright: random(particleMinBright, particleMaxBright),
+    alpha: random(minParticleAlpha, maxParticleAlpha)
+  };
+}
+
+function lerpWalk(from, to, amount) {
+  // step each of the four towards the target
+  return {
+    hue: lerp(from.hue, to.hue, amount),
+    sat: lerp(from.sat, to.sat, amount),
+    bright: lerp(from.bright, to.bright, amount),
+    alpha: lerp(from.alpha, to.alpha, amount)
+  };
+}
+
+function getWalkColor(walk) {
+  // bring the hue back onto the color wheel to draw with it, and keep the four
+  // as they are: rounding them steps the whole screen a full percent at a time,
+  // which a blend mode picks up and turns into a flicker
+  return color(walk.hue % hueCircle, walk.sat, walk.bright, walk.alpha);
 }
 
 function getHue(){
