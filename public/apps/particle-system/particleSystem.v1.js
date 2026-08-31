@@ -1,27 +1,58 @@
 // a particle system using p5js
-// v1
-// todo: make the cursor disappear after a while
-//       https://stackoverflow.com/questions/3354239/hiding-the-mouse-cursor-when-idle-using-javascript
+// Jayce Renner
 
-var particleAmount;
+// --- particle field ---
+var particleAmount;                 // count derived from the canvas area
 var particles = [];
-var defaultMaxSize = 400; // max particle size
+var particleDensity = 0.00009;      // particles per square pixel
+var defaultMaxSize = 500;           // max particle size
+var maxSizeScreenRatio = 0.5;       // max size vs shortest screen edge
+var minParticleSize = 0;            // smallest particle size
+var maxSpeed = 1;                   // max pixels moved per frame
+var exitSizeThreshold = 1;          // size below which a particle is gone
+
+// --- color ---
 var backgroundColor = null;
 var targetBackgroundColor = null;
-var backgroundLerpAmount = 0.004;
-var transitionRateMod = 5; // determines rate of particle emission and decay
-var backgroundLerpMod = 25;
-var exitMod = 2400;
+var backgroundLerpAmount = 0.004;   // background color step per lerp
+var backgroundLerpMod = 25;         // frames between background lerps
+var newTargetBgInSeconds = 60;      // seconds between new background targets
+var msPerSecond = 1000;             // milliseconds in one second
+var bgMinSat = 30;                  // background saturation floor, percent
+var bgMaxSat = 44;                  // background saturation ceiling, percent
+var bgMinBright = 40;               // background brightness floor, percent
+var bgMaxBright = 54;               // background brightness ceiling, percent
+var particleMinSat = 25;            // particle saturation floor, percent
+var particleMaxSat = 100;           // particle saturation ceiling, percent
+var particleMinBright = 50;         // particle brightness floor, percent
+var particleMaxBright = 100;        // particle brightness ceiling, percent
+var maxParticleAlpha = 1;           // most opaque a particle can be
+var minColorChanges = 2;            // fewest new colors per expansion
+var maxColorChanges = 4;            // most new colors per expansion
+
+// --- hue selection ---
+var greenHuePercentage = 0.075;     // chance of a green hue
+var greenMinHue = 70;               // start of the green band, degrees
+var greenMaxHue = 180;              // end of the green band, degrees
+var warmHueChance = 0.5;            // roll above this picks a warm hue
+var warmMinHue = 0;                 // start of red to yellow, degrees
+var warmMaxHue = 360;               // end of red to yellow, degrees
+var coolMinHue = 0;                 // start of blue to red, degrees
+var coolMaxHue = 360;               // end of blue to red, degrees
+
+// --- timing ---
+var transitionRateMod = 5;          // determines rate of particle emission and decay
+var exitMod = 2400;                 // frames per lifespan before exiting
+var isExiting = false;
 
 // variables limiting particle expansion and contraction
-var minMaxPeriod = 1000;
-var maxMaxPeriod = 3000;
-var defaultMaxPeriod = 3000;
-
-var isExiting = false;
-var newTargetBgInSeconds = 60;
-var maxSpeed = 1;
-var greenHuePercentage = 0.075;
+var minMaxPeriod = 1000;            // shortest possible cycle limit
+var maxMaxPeriod = 3000;            // longest possible cycle limit
+var defaultMaxPeriod = 3000;        // this cycle's chosen limit
+var minPeriod = 500;                // fastest a particle can pulse
+var ampMin = -1;                    // wave low, fully expanded
+var ampMax = 1;                     // wave high, fully contracted
+var ampEpsilon = 0.0001;            // tolerance at the wave extremes
 
 function setup() {
   colorMode(HSB);
@@ -33,9 +64,8 @@ function setup() {
   var timer = new DeltaTimer(function (time) {
     
     targetBackgroundColor = getBackgroundColor();
-    //printColorRGB("new target", targetBackgroundColor);
     
-  }, newTargetBgInSeconds * 1000);
+  }, newTargetBgInSeconds * msPerSecond);
 
   timer.start();
   
@@ -51,9 +81,9 @@ function factorSetup(bgColor) {
   cnv.position(0, 0, 'fixed');
   backgroundColor = bgColor;
 
-  defaultMaxSize = wscale * 0.5;
+  defaultMaxSize = wscale * maxSizeScreenRatio;
   // base the amount of particles on this ratio
-  particleAmount = floor((ww * wh) * 0.00009);
+  particleAmount = floor((ww * wh) * particleDensity);
   defaultMaxPeriod = random(minMaxPeriod, maxMaxPeriod);
 }
 
@@ -63,7 +93,6 @@ function draw() {
   if (frameCount % backgroundLerpMod == 0) {
     // lerp towards the targetBackgroundColor 
     backgroundColor = lerpColor(backgroundColor, targetBackgroundColor, backgroundLerpAmount); 
-    //printColorRGB("lerpt", backgroundColor);
   }
   
   background(backgroundColor);
@@ -114,26 +143,29 @@ function draw() {
 class Particle {
   
   constructor(frameCountOffset) {
+
     // required properties: position, size, color, speed
     this.position = createVector(random(width), random(height));
-    this.size = 0;
+    this.size = minParticleSize;
     this.color = getParticleColor();
     this.speed = random(maxSpeed*-1, maxSpeed);
     this.speedY = random(maxSpeed*-1, maxSpeed);
     
-    this.targetColor = getParticleColor();
-    this.minSize = 0;
+    this.minSize = minParticleSize;
     this.maxSize = random(this.minSize, defaultMaxSize);
     this.isGrowing = true;
-    
-    this.minParticleLerp = 0.01;
-    this.maxParticleLerp = 0.05;
-    this.lerpPercent = random(this.minParticleLerp, this.maxParticleLerp);
 
     // period determines the speed of expansion and contraction
-    this.period = random(500, defaultMaxPeriod);
+    this.period = random(minPeriod, defaultMaxPeriod);
+
+    // walk through a run of colors over the course of an expansion
+    this.colorChanges = floor(random(minColorChanges, maxColorChanges + 1));
+    this.colorStepFrames = max(1, floor(this.period / this.colorChanges));
+    this.colorStepFrame = 0;
+    this.colorFrom = this.color;
+    this.colorTo = getParticleColor();
     this.frameCountOffset = frameCountOffset;
-    this.amp = -1;
+    this.amp = ampMin;
     this.isExiting = false;
     this.hasExited = false;
   }
@@ -159,7 +191,7 @@ class Particle {
 
   resize() {
 
-    if (this.isExiting && this.size < 1) {
+    if (this.isExiting && this.size < exitSizeThreshold) {
       
       // flag the end of lifespan
       this.hasExited = true;
@@ -169,32 +201,35 @@ class Particle {
       // determine the size based on a wave to provide easing
       this.amp = cos(PI * (frameCount - this.frameCountOffset) / this.period);
 
-      if (this.amp < -0.9999 && this.isGrowing) {
+      if (this.amp < ampMin + ampEpsilon && this.isGrowing) {
         this.isGrowing = false;
-        this.lerpPercent = this.lerpPercent * -1;
       }
 
-      if (this.amp > 0.9999 && !this.isGrowing) {
+      if (this.amp > ampMax - ampEpsilon && !this.isGrowing) {
         this.isGrowing = true;
         // new fill and max
-        this.targetColor = getParticleColor();
+        this.colorFrom = this.color;
+        this.colorTo = getParticleColor();
+        this.colorStepFrame = 0;
         this.maxSize = random(this.minSize, defaultMaxSize);
-        this.lerpPercent = abs(this.lerpPercent);
       }
 
       if (this.isGrowing) {
-        // lerp the particle color during expansion
-        this.color = lerpColor(this.color, this.targetColor, this.lerpPercent);
+        // once the run reaches its color, set off toward another one
+        if (++this.colorStepFrame >= this.colorStepFrames) {
+          this.colorStepFrame = 0;
+          this.colorFrom = this.colorTo;
+          this.colorTo = getParticleColor();
+        }
+
+        // walk toward it at a steady rate, so the color never sits still
+        this.color = lerpColor(this.colorFrom, this.colorTo, this.colorStepFrame / this.colorStepFrames);
       }
       
-      this.size = map(this.amp, -1, 1, this.maxSize, this.minSize);
+      this.size = map(this.amp, ampMin, ampMax, this.maxSize, this.minSize);
     }
   }
 }
-
-//function mouseClicked() {
-//  saveCanvas('still-of-particle-system-v1-by-laxinline', 'png');
-//}
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
@@ -207,18 +242,18 @@ function getHSBColor(minS, maxS, minB, maxB, isAlwaysOpaque = false) {
   if (isAlwaysOpaque) {
     return color('hsb('+getHue()+', '+floor(random(minS,maxS))+'%, '+floor(random(minB,maxB))+'%)');
   } else {
-    return color('hsba('+getHue()+', '+floor(random(minS,maxS))+'%, '+floor(random(minB,maxB))+'%,'+random(1)+')');
+    return color('hsba('+getHue()+', '+floor(random(minS,maxS))+'%, '+floor(random(minB,maxB))+'%,'+random(maxParticleAlpha)+')');
   }
 }
 
 function getBackgroundColor() {
   // parameters for all background colors
-  return getHSBColor(30,44,40,54,true);
+  return getHSBColor(bgMinSat, bgMaxSat, bgMinBright, bgMaxBright, true);
 }
 
 function getParticleColor() {
   // parameters for all particle colors
-  return getHSBColor(25,100,50,100);
+  return getHSBColor(particleMinSat, particleMaxSat, particleMinBright, particleMaxBright);
 }
 
 function getHue(){
@@ -227,30 +262,26 @@ function getHue(){
   
   if (x < greenHuePercentage) {
     
-    let greenHue = floor(random(70,180));
-    //print('green hue', greenHue);
+    let greenHue = floor(random(greenMinHue, greenMaxHue));
     
     return greenHue;
     
-  } else if (x > 0.5) {
+  } else if (x > warmHueChance) {
     
     // red to yellow
-    return floor(random(0,70));
+    return floor(random(warmMinHue, warmMaxHue));
     
   } else {
     
     // blue to red
-    return floor(random(180,360));
+    return floor(random(coolMinHue, coolMaxHue));
   }
-}
-
-function printColorRGB(message, color){
-  print(message, floor(red(color)), floor(green(color)), floor(blue(color)));
 }
 
 // provides an accurate, repeatable timer
 // from https://stackoverflow.com/a/11624239/4463445
 class DeltaTimer {
+
     constructor(render, interval) {
         var timeout;
         var lastTime;
