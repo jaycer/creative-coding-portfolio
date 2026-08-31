@@ -27,8 +27,8 @@ var particleMaxSat = 100;           // particle saturation ceiling, percent
 var particleMinBright = 50;         // particle brightness floor, percent
 var particleMaxBright = 100;        // particle brightness ceiling, percent
 var maxParticleAlpha = 1;           // most opaque a particle can be
-var minParticleLerp = 0.01;         // slowest particle color blend
-var maxParticleLerp = 0.1;          // fastest particle color blend
+var minColorChanges = 2;            // fewest new colors per expansion
+var maxColorChanges = 4;            // most new colors per expansion
 
 // --- hue selection ---
 var greenHuePercentage = 0.075;     // chance of a green hue
@@ -151,17 +151,19 @@ class Particle {
     this.speed = random(maxSpeed*-1, maxSpeed);
     this.speedY = random(maxSpeed*-1, maxSpeed);
     
-    this.targetColor = getParticleColor();
     this.minSize = minParticleSize;
     this.maxSize = random(this.minSize, defaultMaxSize);
     this.isGrowing = true;
-    
-    this.minParticleLerp = minParticleLerp;
-    this.maxParticleLerp = maxParticleLerp;
-    this.lerpPercent = random(this.minParticleLerp, this.maxParticleLerp);
 
     // period determines the speed of expansion and contraction
     this.period = random(minPeriod, defaultMaxPeriod);
+
+    // walk through a run of colors over the course of an expansion
+    this.colorChanges = floor(random(minColorChanges, maxColorChanges + 1));
+    this.colorStepFrames = max(1, floor(this.period / this.colorChanges));
+    this.colorStepFrame = 0;
+    this.colorFrom = this.color;
+    this.colorTo = getParticleColor();
     this.frameCountOffset = frameCountOffset;
     this.amp = ampMin;
     this.isExiting = false;
@@ -201,20 +203,27 @@ class Particle {
 
       if (this.amp < ampMin + ampEpsilon && this.isGrowing) {
         this.isGrowing = false;
-        this.lerpPercent = this.lerpPercent * -1;
       }
 
       if (this.amp > ampMax - ampEpsilon && !this.isGrowing) {
         this.isGrowing = true;
         // new fill and max
-        this.targetColor = getParticleColor();
+        this.colorFrom = this.color;
+        this.colorTo = getParticleColor();
+        this.colorStepFrame = 0;
         this.maxSize = random(this.minSize, defaultMaxSize);
-        this.lerpPercent = abs(this.lerpPercent);
       }
 
       if (this.isGrowing) {
-        // lerp the particle color during expansion
-        this.color = lerpColor(this.color, this.targetColor, this.lerpPercent);
+        // once the run reaches its color, set off toward another one
+        if (++this.colorStepFrame >= this.colorStepFrames) {
+          this.colorStepFrame = 0;
+          this.colorFrom = this.colorTo;
+          this.colorTo = getParticleColor();
+        }
+
+        // walk toward it at a steady rate, so the color never sits still
+        this.color = lerpColor(this.colorFrom, this.colorTo, this.colorStepFrame / this.colorStepFrames);
       }
       
       this.size = map(this.amp, ampMin, ampMax, this.maxSize, this.minSize);
