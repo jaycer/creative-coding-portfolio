@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image Tiler — Jayce Renner</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Tiler" />
+    <meta name="description" content="Drop in a picture and repeat it into a grid. Set how many across and down, mirror alternate tiles so the seams disappear, stagger the rows like brickwork, then export the whole sheet as one image. Your image stays local." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="Image Tiler" />
+    <meta property="og:description" content="Drop in a picture and repeat it into a grid. Set how many across and down, mirror alternate tiles so the seams disappear, stagger the rows like brickwork, then export the whole sheet as one image. Your image stays local." />
+    <meta property="og:url" content="%SITE_URL%/apps/image-tiler/" />
+    <meta property="og:image" content="%SITE_URL%/og/image-tiler.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Image Tiler" />
+    <meta name="twitter:description" content="Drop in a picture and repeat it into a grid. Set how many across and down, mirror alternate tiles so the seams disappear, stagger the rows like brickwork, then export the whole sheet as one image. Your image stays local." />
+    <meta name="twitter:image" content="%SITE_URL%/og/image-tiler.jpg" />
+    <style>
+      * { box-sizing: border-box; }
+      :root {
+        --ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        --line: rgba(255,255,255,0.16);
+        --line-strong: rgba(255,255,255,0.32);
+        --dim: rgba(255,255,255,0.62);
+        --accent: #7fe8c0;
+        --bar-h: 54px;
+      }
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #0e1014;
+        color: #fff;
+        font-family: var(--ui);
+        -webkit-text-size-adjust: 100%;
+      }
+
+      /* ------------------------------------------------------------- top bar */
+      .bar {
+        position: relative;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        height: var(--bar-h);
+        padding: 0 16px;
+        background: #14161c;
+        border-bottom: 1px solid var(--line);
+      }
+      .bar h1 { margin: 0 auto 0 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+      .bar .back {
+        color: #fff;
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        padding: 6px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        white-space: nowrap;
+        transition: background 0.15s ease;
+      }
+      .bar .back:hover { background: rgba(255,255,255,0.12); }
+      .bar .menu {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        background: none;
+        height: 30px;
+        padding: 0 13px;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .bar .menu:hover { background: rgba(255,255,255,0.12); }
+      .bar .export {
+        font: inherit;
+        font-size: 0.85rem;
+        font-weight: 650;
+        color: #10231d;
+        background: var(--accent);
+        height: 30px;
+        padding: 0 16px;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: background 0.15s ease;
+      }
+      .bar .export:hover { background: #fff; }
+      .bar .export:disabled {
+        color: var(--dim);
+        background: rgba(255,255,255,0.08);
+        cursor: default;
+      }
+
+      .toast {
+        position: fixed;
+        left: 50%; bottom: 30px;
+        z-index: 30;
+        transform: translateX(-50%) translateY(8px);
+        padding: 9px 16px;
+        font-size: 0.85rem;
+        color: #fff;
+        background: rgba(0,0,0,0.78);
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      /* ------------------------------------------------------ stage + panel */
+      .work {
+        display: flex;
+        height: calc(100% - var(--bar-h));
+      }
+      .stage {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        /* A checker, so a sheet with a white background reads as a sheet rather
+           than as a hole in the page, and so a gutter is visibly a choice. */
+        background:
+          repeating-conic-gradient(#191c23 0% 25%, #14161c 0% 50%) 50% / 22px 22px;
+      }
+      /* Both limits, or a tall sheet overflows the stage on a short window. */
+      #canvas {
+        max-width: 100%;
+        max-height: 100%;
+        border-radius: 4px;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.6);
+      }
+      #canvas[hidden] { display: none; }
+      .stage.dropping::after {
+        content: 'Drop the image';
+        position: absolute;
+        inset: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--accent);
+        background: rgba(14,16,20,0.75);
+        border: 2px dashed var(--accent);
+        border-radius: 12px;
+        pointer-events: none;
+      }
+
+      /* The empty state is the drop target as much as the stage is, so it is
+         sized and centered rather than being a line of text in the middle. */
+      .empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        max-width: 320px;
+        padding: 34px 26px;
+        text-align: center;
+        border: 1px dashed var(--line-strong);
+        border-radius: 14px;
+      }
+      .empty[hidden] { display: none; }
+      .empty p { margin: 0; font-size: 0.86rem; line-height: 1.5; color: var(--dim); }
+
+      .panel {
+        flex: none;
+        width: 340px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 16px 16px 40px;
+        background: #14161c;
+        border-left: 1px solid var(--line);
+      }
+      .panel h2 {
+        margin: 0 0 8px;
+        font-size: 0.72rem;
+        font-weight: 650;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--dim);
+      }
+      .panel section + section { margin-top: 20px; }
+      .panel .hint {
+        margin: 10px 0 0;
+        font-size: 0.78rem;
+        line-height: 1.45;
+        color: var(--dim);
+      }
+      /* Greyed rather than removed while there is no picture: the controls are
+         what the app IS, and a panel that fills in only after you have found the
+         file button does not say what the file button is for. */
+      .panel section[aria-disabled="true"] { opacity: 0.4; pointer-events: none; }
+
+      /* --------------------------------------------------------- form pieces */
+      .btn {
+        width: 100%;
+        font: inherit;
+        font-size: 0.88rem;
+        font-weight: 550;
+        color: #fff;
+        background: rgba(255,255,255,0.08);
+        padding: 10px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .btn:hover { background: rgba(255,255,255,0.16); }
+      .btn:active { background: rgba(255,255,255,0.22); }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      /* An author's `display: flex` outranks the browser's rule for the hidden
+         attribute, so a row switched off in script needs telling twice. */
+      .row[hidden] { display: none; }
+      .row label, .row .name {
+        flex: none;
+        width: 74px;
+        font-size: 0.82rem;
+        color: var(--dim);
+      }
+      /* The readout is a field you can type in, and goes on reading as a number
+         until you do: no border, no background, no spinner. */
+      .row .val {
+        flex: none;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        width: 58px;
+        padding: 2px 4px;
+        font-size: 0.78rem;
+        font-variant-numeric: tabular-nums;
+        color: var(--dim);
+        border: 1px solid transparent;
+        border-radius: 5px;
+        cursor: text;
+      }
+      .row .val:hover { border-color: var(--line); }
+      .row .val:focus-within {
+        color: #fff;
+        background: rgba(255,255,255,0.1);
+        border-color: rgba(255,255,255,0.55);
+      }
+      .row .val .num {
+        width: 100%;
+        min-width: 0;
+        padding: 0;
+        font: inherit;
+        font-variant-numeric: tabular-nums;
+        text-align: right;
+        color: inherit;
+        background: none;
+        border: none;
+        cursor: text;
+      }
+      .row .val .num:focus, .row .val .num:focus-visible { outline: none; }
+      /* A typed value out of range is said quietly rather than refused. */
+      .row .val .num[aria-invalid="true"] { color: #ffb4a8; }
+      .row .val .unit { flex: none; }
+      input[type="range"] {
+        flex: 1;
+        min-width: 0;
+        height: 22px;
+        margin: 0;
+        accent-color: var(--accent);
+        background: none;
+      }
+      select, input[type="text"] {
+        font: inherit;
+        font-size: 0.88rem;
+        color: #fff;
+        background: rgba(255,255,255,0.08);
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+        padding: 8px 10px;
+      }
+      /* The native arrow goes with `appearance: none`, so one is drawn back on.
+         Without it a select reads as a text field that will not take a caret. */
+      select {
+        flex: 1;
+        min-width: 0;
+        appearance: none;
+        -webkit-appearance: none;
+        padding-right: 30px;
+        background-image:
+          linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.7) 50%),
+          linear-gradient(135deg, rgba(255,255,255,0.7) 50%, transparent 50%);
+        background-position: right 14px center, right 9px center;
+        background-size: 5px 5px, 5px 5px;
+        background-repeat: no-repeat;
+      }
+      select option { color: #08080e; }
+
+      /* The link switch, and the mirror toggles: a pill, because they are two
+         states rather than a value. */
+      .toggle {
+        position: relative;
+        flex: none;
+        width: 40px; height: 24px;
+        margin: 0;
+        appearance: none;
+        -webkit-appearance: none;
+        background: rgba(255,255,255,0.16);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .toggle::after {
+        content: '';
+        position: absolute;
+        top: 3px; left: 3px;
+        width: 18px; height: 18px;
+        background: #fff;
+        border-radius: 50%;
+        transition: transform 0.15s ease;
+      }
+      .toggle:checked { background: var(--accent); }
+      .toggle:checked::after { transform: translateX(16px); }
+
+      .swatch {
+        flex: none;
+        width: 40px; height: 28px;
+        padding: 0;
+        background: none;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .swatch::-webkit-color-swatch-wrapper { padding: 3px; }
+      .swatch::-webkit-color-swatch { border: none; border-radius: 5px; }
+      .swatch::-moz-color-swatch { border: none; border-radius: 5px; }
+
+      .out {
+        margin: 12px 0 0;
+        font-size: 0.78rem;
+        font-variant-numeric: tabular-nums;
+        color: var(--dim);
+      }
+      .out.warn { color: #ffb4a8; }
+
+      /* ------------------------------------------------------------- the sheet */
+      .scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        background: rgba(6,7,11,0.55);
+      }
+      .scrim[hidden] { display: none; }
+      .sheet {
+        position: relative;
+        width: 100%;
+        max-width: 340px;
+        max-height: 100%;
+        overflow-y: auto;
+        padding: 18px 20px 20px;
+        color: #fff;
+        background: #14161c;
+        border: 1px solid var(--line-strong);
+        border-radius: 16px;
+      }
+      .sheet-head { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+      .sheet h2 { margin: 0 auto 0 0; font-size: 1.05rem; font-weight: 650; letter-spacing: -0.01em; }
+      .sheet p { margin: 0 0 12px; font-size: 0.82rem; line-height: 1.5; color: var(--dim); }
+      .sheet p:last-of-type { margin-bottom: 0; }
+      .sheet .close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px; height: 26px;
+        font-size: 0.85rem;
+        color: #fff;
+        background: none;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        cursor: pointer;
+      }
+      .sheet .close:hover { background: rgba(255,255,255,0.14); }
+
+      @media (max-width: 820px) {
+        .back-label { display: none; }
+        .bar { gap: 9px; padding: 0 12px; }
+        .bar h1 { display: none; }
+        .work { flex-direction: column; }
+        .stage { flex: 1 1 42%; min-height: 140px; padding: 10px; }
+        .panel {
+          width: 100%;
+          flex: 1 1 58%;
+          min-height: 0;
+          border-left: none;
+          border-top: 1px solid var(--line);
+          padding: 14px 14px 30px;
+          padding-bottom: calc(30px + env(safe-area-inset-bottom));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="bar">
+      <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
+      <h1>Image Tiler</h1>
+      <button class="export" id="export-btn" type="button" disabled>Export</button>
+      <button class="menu" id="menu-btn" type="button" aria-label="About" aria-haspopup="dialog" aria-expanded="false"></button>
+    </header>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <main class="work">
+      <div class="stage" id="stage">
+        <div class="empty" id="empty">
+          <button class="btn" id="empty-btn" type="button">Choose an image</button>
+          <p>Or drop one here, or paste one. It stays on your device: nothing is uploaded anywhere.</p>
+        </div>
+        <canvas id="canvas" hidden></canvas>
+      </div>
+
+      <aside class="panel">
+        <section>
+          <button class="btn" id="file-btn" type="button">Choose image</button>
+          <input type="file" id="file" accept="image/*" hidden />
+          <p class="hint" id="src-hint">No image yet. Drop one on the picture, or paste one.</p>
+        </section>
+
+        <section id="grid-section" aria-disabled="true">
+          <h2>Grid</h2>
+          <div class="row">
+            <label for="across">Across</label>
+            <input type="range" id="across" min="1" max="32" step="1" value="3" />
+            <span class="val"><input class="num" id="across-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Tiles across" value="3" /></span>
+          </div>
+          <div class="row">
+            <label for="down">Down</label>
+            <input type="range" id="down" min="1" max="32" step="1" value="3" />
+            <span class="val"><input class="num" id="down-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Tiles down" value="3" /></span>
+          </div>
+          <div class="row">
+            <span class="name">Square</span>
+            <input type="checkbox" class="toggle" id="link" checked aria-label="Keep the grid square" />
+          </div>
+          <p class="hint">On, one number sets both and the sheet comes out the same shape as your picture.</p>
+        </section>
+
+        <section id="pattern-section" aria-disabled="true">
+          <h2>Pattern</h2>
+          <div class="row">
+            <label for="mirror">Mirror</label>
+            <select id="mirror">
+              <option value="off">Off</option>
+              <option value="x">Every other column</option>
+              <option value="both">Columns and rows</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="offset">Offset</label>
+            <input type="range" id="offset" min="0" max="100" step="1" value="0" />
+            <span class="val"><input class="num" id="offset-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Row offset as a percentage" value="0" /><span class="unit">%</span></span>
+          </div>
+          <div class="row">
+            <label for="gap">Gap</label>
+            <input type="range" id="gap" min="0" max="30" step="1" value="0" />
+            <span class="val"><input class="num" id="gap-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Gap as a percentage of a tile" value="0" /><span class="unit">%</span></span>
+          </div>
+          <div class="row">
+            <label for="bg">Behind</label>
+            <input type="color" class="swatch" id="bg" value="#ffffff" />
+          </div>
+          <p class="hint">Mirror flips alternate tiles, which is what makes the seams disappear. Offset slides every other row sideways, like brickwork.</p>
+        </section>
+
+        <section id="export-section" aria-disabled="true">
+          <h2>Export</h2>
+          <div class="row">
+            <label for="width">Width</label>
+            <input type="range" id="width" min="256" max="8000" step="64" value="2048" />
+            <span class="val"><input class="num" id="width-val" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Export width in pixels" value="2048" /></span>
+          </div>
+          <div class="row">
+            <label for="format">Format</label>
+            <select id="format">
+              <option value="image/png">PNG</option>
+              <option value="image/jpeg">JPEG</option>
+            </select>
+          </div>
+          <p class="out" id="out-size">&nbsp;</p>
+        </section>
+      </aside>
+    </main>
+
+    <div class="scrim" id="scrim" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <div class="sheet-head">
+          <h2 id="sheet-title">Image Tiler</h2>
+          <button class="close" id="close-btn" type="button" aria-label="Close">✕</button>
+        </div>
+        <p>One picture, repeated into a grid, out as a single sheet.</p>
+        <p>Across and Down set the count. Mirror flips alternate tiles so the edges meet themselves and the seam goes away, which is how a photo becomes a pattern rather than a contact sheet. Offset slides every other row sideways. Gap opens a gutter in whatever color sits behind.</p>
+        <p>Your image stays local. It is read in the page, drawn to a canvas, and downloaded from there. Nothing is uploaded anywhere.</p>
+      </div>
+    </div>
+
+    <script src="../shared/menu-icon.js"></script>
+    <script src="./image-tiler.js"></script>
+  </body>
+</html>
