@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 600 400" width="600" height="400">
+  <!-- A real frame off the running piece (the Snake Columns preset), at the native
+       256 by 224 and scaled up here the same way the app scales it: nearest
+       neighbor, so the tile shows the actual pixel grid rather than a smoothed
+       photograph of one. Stored as a 4-bit indexed PNG because the frame really
+       is 16 colors - two indexed layers added - so that is simply what it is,
+       and it costs a fifth of what the truecolor version did. -->
+  <defs>
+    <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.72"/>
+    </linearGradient>
+  </defs>
+  <rect width="600" height="400" fill="#12001c"/>
+  <image x="0" y="-10" width="600" height="420" preserveAspectRatio="xMidYMid slice"
+         image-rendering="pixelated" style="image-rendering:pixelated"
+         xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAADgBAMAAAAeb6VjAAAAGFBMVEUBBg4/DlOVMZ0ABgkXLTOsWMdWNX0YLTiY7c0kAAACpElEQVR42u2d0W2DQBBExx3k3EEuHZgWcAcmHfjcgWk/BwpgKZHjj8Bbibm/aBXtsD5Cdt5yluo6pJRzbuZ1yvk9Jc2rxo8rxuH0GsMfS7yKSentMZ7WjcPpxaZPR4Ef/rj5xKbPjcDqj3Gx6auAtq5z132W0s/rXsq169p5rRDvpvggoP5Qym2JlyF+WX7//+PXJS44fxXA5m8F5x8EYPtvjAsuQCe4ABbQBdgD9G14hu9DtbCCCA8j/nGMFkHrXeRrRdCKF/lSEbRqihckaOUUf0oQ25geEt4bB2iPQ0jw5xCiCLtVkGAF+r1r324nKsElsIAAe4C+C+ACpECPAzj/zqEBevm/mQZb/nMuNn0V8MO02bhHFJu+FLHpa28I96YXwd355A9wJo1gh2YUgBp1RjZGNkY2FhAB2cB3AY5sqNGNaamBFYjuAkVO0CwCwCKI7sYFD1JlZXiWS7QrYl5iXuIiGNnwXrGRDS7geduw/n/Meto1bNC1CC5AEVyAIjj/TXD+XnD+ScAdc+2FXv63ABjZ3FlmwiObKzzNJniYLhCyocwqwcjIyGYQwFqVPLLBrVrWqG1OokdlBBfAAnKAPUDfBTAwaUTPrIVANqgC0aODamBoJPjN70dkw3wOoqdIIyAb9j0fowJeQgyPiHfJAviEmFOKe8W4W87zApyYWAC9BwIhG+Z5IDi/kU0MZIMyE8HIaEA2LDPhkQ0+TYfPE0aZqIRnSumpWniumLbp6Nly3Ko1sjExMbIJcBewJYiAbFgFRjY8sgny5jU4yIS/fY+fP4CP8+FnUPAjnbBDoR72aNTDLpWRjZGNkY0F+DUfHtmEeeHRJ6Pt+fJ3Xn3+xGb8y3ToMyHDIBvsDy//ZTr0c0f0gaRGNrxXbGRjAfTBaF8WCWByBgdhZAAAAABJRU5ErkJggg=="/>
+  <rect x="0" y="280" width="600" height="120" fill="url(#scrim)"/>
+  <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="32" font-weight="600" fill="#fff">Earthbound Layers</text>
+</svg>

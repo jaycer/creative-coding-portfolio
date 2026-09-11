@@ -8,6 +8,7 @@
 // entries, not for static folders under /public. To add work: drop a folder in
 // either place and add a row here.
 export const apps = [
+  { slug: 'earthbound-layers', title: 'Earthbound Layers', blurb: 'The battle backgrounds of a 1994 RPG, rebuilt as a fragment shader. Two indexed layers, each with its own rotating palette and its own per scanline distortion, added together and drawn on a 256 by 224 grid. Shuffle deals a new pair. Patterns and palettes are original, not ROM data.', entry: 'index.html' },
   { slug: 'image-tiler', title: 'Image Tiler', blurb: 'Drop in a picture and repeat it into a grid. Set how many across and down, mirror alternate tiles so the seams disappear, stagger the rows like brickwork, then export the whole sheet as one image. Your picture stays local.', entry: 'index.html' },
   { slug: 'splat-editor', title: 'Splat Editor', blurb: 'Open a Gaussian splat scan from a phone and brush the haze off it with a resizable eraser, then build a low poly model from what is left. The build draws round the object from hundreds of directions and keeps only what falls inside every outline, and a preview shows it lit the way the gallery would light it. Scans stay local.', entry: 'index.html' },
   { slug: 'meme-generator', title: 'Meme Generator', blurb: 'Make a meme in the tab. Drop in a photo, stack pictures, text and shapes as layers you can reorder, turn any of them to the angle you want, and export a JPG, PNG or WebP at Instagram\'s sizes. Images and text stay local.', entry: 'index.html' },

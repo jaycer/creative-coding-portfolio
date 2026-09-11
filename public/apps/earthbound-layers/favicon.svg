@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#12001c"/>
+  <!-- Two layers, one rippling over the other: the whole engine in one glyph. -->
+  <g fill="none" stroke-width="4" stroke-linecap="round">
+    <path d="M8 22q8-8 16 0t16 0 16 0" stroke="#e0479b"/>
+    <path d="M8 34q8-8 16 0t16 0 16 0" stroke="#f5d90a" opacity="0.85"/>
+    <path d="M8 46q8-8 16 0t16 0 16 0" stroke="#3fb6e0"/>
+  </g>
+</svg>
