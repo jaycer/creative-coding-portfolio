@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
+  <!-- The thumb is the app's own output: one little picture repeated four across
+       and three down, with alternate columns and rows flipped, so every tile edge
+       meets itself and the seams vanish. That is the feature, drawn rather than
+       described — the paired circles are where two mirrored copies meet.
+       The tile carries no dark band on purpose: a stripe across the bottom row
+       lands exactly where the title goes and reads as a bar through it. -->
+  <defs>
+    <linearGradient id="tg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#e0523c"/>
+      <stop offset="0.55" stop-color="#a2439a"/>
+      <stop offset="1" stop-color="#2f4fd0"/>
+    </linearGradient>
+    <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.66"/>
+    </linearGradient>
+    <g id="tile">
+      <rect width="150" height="133.334" fill="url(#tg)"/>
+      <circle cx="33" cy="29" r="16" fill="#ffe45e"/>
+      <path d="M150 133.334H108l42-42z" fill="#12141a" opacity="0.55"/>
+    </g>
+  </defs>
+  <rect width="600" height="400" fill="#12141a"/>
+  <use href="#tile" transform="translate(0 0.000) scale(1 1)"/>
+  <use href="#tile" transform="translate(300 0.000) scale(-1 1)"/>
+  <use href="#tile" transform="translate(300 0.000) scale(1 1)"/>
+  <use href="#tile" transform="translate(600 0.000) scale(-1 1)"/>
+  <use href="#tile" transform="translate(0 266.667) scale(1 -1)"/>
+  <use href="#tile" transform="translate(300 266.667) scale(-1 -1)"/>
+  <use href="#tile" transform="translate(300 266.667) scale(1 -1)"/>
+  <use href="#tile" transform="translate(600 266.667) scale(-1 -1)"/>
+  <use href="#tile" transform="translate(0 266.667) scale(1 1)"/>
+  <use href="#tile" transform="translate(300 266.667) scale(-1 1)"/>
+  <use href="#tile" transform="translate(300 266.667) scale(1 1)"/>
+  <use href="#tile" transform="translate(600 266.667) scale(-1 1)"/>
+  <rect x="0" y="280" width="600" height="120" fill="url(#scrim)"/>
+  <text x="40" y="360" font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="34" font-weight="600" fill="#fff">Image Tiler</text>
+</svg>
