@@ -28,10 +28,10 @@
 // The mix is therefore a readout of the picture, and it is silent by default —
 // the header slider is what starts it.
 //
-// The set is seventy-one things. The chairs come from the other chair pieces in
-// this gallery and the iron, dumbbell and desk lamp are built here out of boxes
-// and cylinders; the rest of the household is Kenney's CC0 models, loaded after
-// the field is already running. One of them is a rubber pig off a shelf, scanned
+// The set is seventy-two things. The chairs come from the other chair pieces in
+// this gallery and the iron, dumbbell, desk lamp and skull are built here out of
+// boxes and cylinders; the rest of the household is Kenney's CC0 models, loaded
+// after the field is already running. One of them is a rubber pig off a shelf, scanned
 // with a phone. See models/CREDITS.md, and the bottom of this file for how a
 // model becomes a build.
 
@@ -59,7 +59,10 @@ function partGeometry(p) {
   let g;
   if (p.box) g = new THREE.BoxGeometry(p.box[0], p.box[1], p.box[2]);
   else if (p.cyl) g = new THREE.CylinderGeometry(p.cyl[0], p.cyl[1], p.cyl[2], p.cyl[3] || 16);
-  else g = new THREE.SphereGeometry(p.ball, 14, 10);
+  // `seg` coarsens a ball on purpose. Fourteen by ten is a sphere; six by five is
+  // a set of facets that happen to enclose a volume, and which one a build wants
+  // is a question about the build and not about the budget.
+  else g = new THREE.SphereGeometry(p.ball, (p.seg && p.seg[0]) || 14, (p.seg && p.seg[1]) || 10);
   // Scale first, so a primitive can be stretched along its own axes before it is
   // aimed: a three-sided cylinder is the only way to get a point, and a point
   // that is as long as it is wide is not the point of anything.
@@ -315,6 +318,94 @@ function lampParts() {
   ];
 }
 
+/**
+ * A skull, faceted, worn as chrome — the one thing in the deck that is not a
+ * household object, and the only one that pins its own finish. A mirror ball
+ * made of velvet is not a mirror ball.
+ *
+ * Two things had to be got right and neither is the shape of a skull.
+ *
+ * The first is that the facets have to be TILES. A sphere at fourteen by ten is
+ * a sphere and a smooth chrome sphere in this room is a blob with one highlight
+ * on it; at twelve by eight, flat-shaded, it is ninety-six flat faces each
+ * catching a different piece of the environment map, which is exactly what a
+ * mirror ball is and why one is worth hanging. Everything else here is boxes,
+ * which are already flat, so the coarse ball is the whole trick.
+ *
+ * The second is that the eye sockets have to be HOLES. There is no CSG here and
+ * a dark disc laid on the front of the face reads as an eye, not as a socket —
+ * the opposite of what a skull is. So the face is built as a frame: a brow bar
+ * across the top, a bar under the orbits, a pillar between them and a pillar at
+ * each temple, with a dark slab set two centimeters back behind the lot. What
+ * you see through the two gaps that leaves is a genuine recess with a floor to
+ * it, and it stays a recess from every angle the field will ever turn this to.
+ * The nasal aperture is the same idea one size down, with two canted blocks
+ * closing its upper corners so the hole comes to a point.
+ *
+ * Proportions are a real skull's, in meters, and then thrown away: every build
+ * here is normalized to a unit sphere, so all that survives is the ratios.
+ */
+function skullParts() {
+  // The face wall: everything in this slab is bone, and the hollow sits behind it.
+  const FW0 = 0.050, FW1 = 0.076;
+  const FZ = (FW0 + FW1) / 2, FD = FW1 - FW0;
+  const parts = [];
+  const bone = (p) => { parts.push(p); return p; };
+  const dark = (p) => { p.dark = true; parts.push(p); return p; };
+
+  // The cranium, set back so the face projects past it the way a face does. It
+  // has to be comfortably the widest thing here: a first build had it the same
+  // width as the brow and the whole object read as a ball parked on a box.
+  bone({ ball: 0.078, seg: [12, 8], scale: [1, 1, 1.08], pos: [0, 0.150, -0.022] });
+
+  // The hollow, in two pieces: one behind the orbits and a narrow one behind the
+  // nose. One block spanning both would have to be as wide as the orbits are far
+  // apart, and below the cranium there is nothing out at that width to hide its
+  // sides behind — it showed as two dark rails down the cheeks.
+  dark({ box: [0.086, 0.064, 0.036], pos: [0, 0.117, 0.032] });
+  dark({ box: [0.030, 0.034, 0.036], pos: [0, 0.075, 0.032] });
+
+  bone({ box: [0.118, 0.024, FD], pos: [0, 0.152, FZ] });      // brow
+  bone({ box: [0.022, 0.038, FD], pos: [0, 0.121, FZ] });      // between the orbits
+  for (const s of [1, -1]) {
+    // Set back from the brow, which is most of what stops the face reading as one
+    // flat plate: a skull turns away at the temple, it does not stop square.
+    bone({ box: [0.018, 0.038, FD], pos: [s * 0.050, 0.121, FZ - 0.007] });
+    bone({ box: [0.030, 0.014, FD], pos: [s * 0.026, 0.095, FZ] });   // orbit floor
+    bone({ box: [0.035, 0.026, FD], pos: [s * 0.0305, 0.075, FZ] });  // beside the nose
+    // The upper corners of the nasal gap, so the hole comes to a point rather
+    // than sitting there as a slot.
+    bone({ box: [0.026, 0.011, FD], rot: [0, 0, s * 0.85], pos: [s * 0.012, 0.084, FZ] });
+    // The arch back to the ear. In profile this is the whole silhouette of a
+    // skull, and without it the head is a sphere with a mask leaning on it.
+    bone({ box: [0.012, 0.013, 0.064], rot: [0, s * 0.3, 0], pos: [s * 0.050, 0.097, 0.024] });
+  }
+
+  // The arch the teeth stand in, the dark seam where the two rows meet, and the
+  // rows themselves. Seven a side: fewer and they read as a grille, more and at
+  // the size this is actually seen they close up into one bar.
+  bone({ box: [0.072, 0.017, 0.024], pos: [0, 0.054, 0.052] });
+  dark({ box: [0.068, 0.004, 0.028], pos: [0, 0.046, 0.062] });
+  for (let i = -3; i <= 3; i++) {
+    bone({ box: [0.008, 0.016, 0.026], pos: [i * 0.0095, 0.0545, 0.063] });
+    bone({ box: [0.008, 0.014, 0.026], pos: [i * 0.0095, 0.038, 0.063] });
+  }
+
+  // The jaw, as one run: chin, the sides swept back off it, and the rami up into
+  // the cranium — which is where a real one ends, and why the top of each has to
+  // finish inside the ball rather than short of it, floating.
+  bone({ box: [0.050, 0.028, 0.030], pos: [0, 0.016, 0.052] });
+  for (const s of [1, -1]) {
+    bone({ box: [0.017, 0.028, 0.064], rot: [0, s * 0.28, 0], pos: [s * 0.040, 0.023, 0.020] });
+    // Overlapping the side in x, not merely near it: at 11mm apart these two read
+    // as a bar propped beside a jaw rather than as the corner of one, and the
+    // whole mandible came away from the head. The lean is backward, which is the
+    // way a real ramus goes and the reason the joint ends up under the ball.
+    bone({ box: [0.014, 0.078, 0.026], rot: [-0.16, 0, -s * 0.05], pos: [s * 0.045, 0.064, -0.008] });
+  }
+  return parts;
+}
+
 // ------------------------------------------------------------------ the deck
 // One entry per build the field can deal. `weight` is how often it comes up and
 // `voice` is which timbre in audio.js it sings with. Kinds are registered rather
@@ -368,7 +459,7 @@ function normalize(g) {
  * says and every other part moves with it, keeping the screen dark and the
  * leaves distinct from the pot.
  */
-function addKind({ name, weight, voice, geometry, srcColors }) {
+function addKind({ name, weight, voice, geometry, srcColors, finish }) {
   const groups = [];
   if (!srcColors || srcColors.length < 2) {
     groups.push({ dh: 0, ds: 0, dl: 0 });
@@ -391,7 +482,10 @@ function addKind({ name, weight, voice, geometry, srcColors }) {
   // weight, so pickKind can never reach it.
   if (ONLY && name !== ONLY) weight = 0;
   KIND_BY_NAME.set(name, KINDS.length);
-  KINDS.push({ name, weight, voice, geometry: normalize(geometry), groups });
+  // `finish` is normally undefined, and that is the piece working as written:
+  // what a thing is made of is dealt, not declared. It exists for the one build
+  // whose material IS the build.
+  KINDS.push({ name, weight, voice, geometry: normalize(geometry), groups, finish });
   totalWeight += weight;
   // And when the one being looked at arrives — the models load after the field
   // is already running — throw the field away and deal it again, rather than
@@ -402,6 +496,43 @@ function addKind({ name, weight, voice, geometry, srcColors }) {
     lastCols = 0;
     resize();
   }
+}
+
+/**
+ * Turn a parts list into the geometry and colors addKind wants.
+ *
+ * Two options, both of which exist for the skull and neither of which the eight
+ * builds above ask for:
+ *
+ * `dark` on a part puts it in a second color group. The imported models get
+ * their groups from the materials they arrived with; a hand-built object had no
+ * materials to arrive with, so it says which of its own parts are the dark ones
+ * and the group is made here. The two colors handed back are not colors anybody
+ * will see — addKind keeps the RELATIONSHIP between them and throws the pair
+ * away — so all that is being said is "that group, half a lightness down".
+ *
+ * `flat` drops the index and recomputes, which turns averaged vertex normals
+ * into face normals. On boxes it changes nothing, because a box is already flat.
+ * On the coarse ball it is the whole point: smooth normals would round the
+ * facets back off and hand back the chrome blob the low segment count was there
+ * to avoid.
+ */
+function buildParts(parts, { flat = false } = {}) {
+  const bone = [], dark = [];
+  for (const p of parts) (p.dark ? dark : bone).push(partGeometry(p));
+  let geometry = mergeGeometries(bone);
+  let srcColors;
+  if (dark.length) {
+    // Bone first: addKind measures every other group against the first one, and
+    // reads the first one as the color the object actually is.
+    geometry = mergeGeometries([geometry, mergeGeometries(dark)], true);
+    srcColors = [new THREE.Color(0xffffff), new THREE.Color().setHSL(0, 0, 0.45)];
+  }
+  if (flat) {
+    geometry = geometry.toNonIndexed();
+    geometry.computeVertexNormals();
+  }
+  return { geometry, srcColors };
 }
 
 // The five chairs carried over from the other chair pieces were weighted for a
@@ -418,8 +549,13 @@ for (const k of [
   { name: 'clothes iron', parts: ironParts, weight: 2.2, voice: 'steam' },
   { name: 'dumbbell', parts: dumbbellParts, weight: 2.2, voice: 'ring' },
   { name: 'desk lamp', parts: lampParts, weight: 2.2, voice: 'hum' },
+  // Weighted well under everything else on purpose. A skull that comes round
+  // once a minute is the thing you wait for; one in every third slot is a
+  // Halloween window, and the field stops being a field of household objects
+  // that a skull has turned up in.
+  { name: 'skull mirror ball', parts: skullParts, weight: 0.9, voice: 'ring', finish: 'chrome', flat: true },
 ]) {
-  addKind({ ...k, geometry: mergeGeometries(k.parts().map(partGeometry)) });
+  addKind({ ...k, ...buildParts(k.parts(), k) });
 }
 
 function pickKind(rand) {
@@ -471,6 +607,10 @@ const FINISHES = [
   // dark swatch has almost nothing to scatter.
   { name: 'resin', colors: [0xf0c6bb, 0xbdd9e6, 0xefdcb0, 0xcfe0cd, 0xdcc8e0], rough: 0.62, metal: 0, glow: 0.2 },
 ];
+// Read by a loaded file, and by the one kind that pins its own finish. It lives
+// here rather than next to save and load because a kind is registered long
+// before either exists.
+const FINISH_BY_NAME = new Map(FINISHES.map((f, i) => [f.name, i]));
 
 // ---------------------------------------------------------------------- the rng
 // Seeded, so ?seed=123 deals the same opening field twice. Only the opening: the
@@ -839,7 +979,11 @@ function deal(o, rand) {
   const kind = KINDS[kindIdx];
   setKind(o, kindIdx);
 
-  const fi = Math.floor(rand() * FINISHES.length);
+  // The roll is taken either way, even where it is about to be overruled: skip
+  // it for the pinned kind and every object dealt after a skull would land on a
+  // different finish than it did before, and a seed would stop meaning anything.
+  const roll = Math.floor(rand() * FINISHES.length);
+  const fi = kind.finish !== undefined ? FINISH_BY_NAME.get(kind.finish) : roll;
   const f = FINISHES[fi];
   o.finishIdx = fi;
   o.baseHex = f.colors[Math.floor(rand() * f.colors.length)];
@@ -1474,8 +1618,6 @@ function sceneSnapshot() {
     })),
   };
 }
-
-const FINISH_BY_NAME = new Map(FINISHES.map((f, i) => [f.name, i]));
 
 /**
  * Put a saved frame back. The columns come from the file rather than from the
@@ -2546,7 +2688,7 @@ const loader = new GLTFLoader(modelManager);
  * GitHub Pages only compresses text and JavaScript — a .glb goes out at full
  * size and there is no header we can set to change that. So the models are
  * stored compressed (tools/gzip-models.mjs) and unpacked in the page: the same
- * seventy-one objects arrive in about 0.4MB instead of about 1.5MB.
+ * sixty-three models arrive in about 0.4MB instead of about 1.5MB.
  *
  * The file is `.glbz` rather than `.glb.gz` on purpose. A server that sees
  * `.gz` decides the file is transport-compressed and sets Content-Encoding —
