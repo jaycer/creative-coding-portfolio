@@ -78,6 +78,25 @@ const sliders = opt('slider', '').split(',').filter(Boolean).map((pair) => {
 const clicks = opt('click', '').split(',').filter(Boolean);
 // --wait lets the scene run on for a while first, for apps that build up over time
 const waitSeconds = Number(opt('wait', 0));
+// --tap 0.5,0.42 presses the canvas at that fraction of the viewport, through
+// real mouse events, so an app that opens something on a tap can be shot with it
+// open. Object Tile Scroll's inspector is the case it was added for: it is the
+// only way to see one object big, and it opens on a press that did not travel.
+// A list of points may be given (--tap 0.5,0.42;0.3,0.7) and each is tried in
+// turn until --tap-wait sees something appear, because in a field of drifting
+// objects a fixed point is a guess. Pair it with --query seed=N to make the
+// field the same one twice.
+// `--tap grid` walks a coarse grid instead of naming points, which is what a
+// sparse field wants: the objects here cover well under a quarter of the frame,
+// and seven hand-picked points all landed on the dark.
+const tapArg = opt('tap', '');
+const taps = tapArg === 'grid'
+  ? Array.from({ length: 9 * 6 }, (_, i) => ({ x: ((i % 9) + 1) / 10, y: (Math.floor(i / 9) + 1) / 7 }))
+  : tapArg.split(';').filter(Boolean).map((pair) => {
+    const [x, y] = pair.split(',').map(Number);
+    return { x, y };
+  });
+const tapWait = opt('tap-wait');
 
 // --- find the cached Chrome for Testing ------------------------------------
 function findChrome() {
@@ -199,6 +218,29 @@ if (clicks.length) {
 }
 
 if (waitSeconds) await page.waitForTimeout(waitSeconds * 1000);
+
+// Tapping comes after --wait, so the shot is of whatever the scene had become by
+// then rather than of its opening frame.
+if (taps.length) {
+  const box = page.viewportSize();
+  let landed = false;
+  for (const t of taps) {
+    await page.mouse.move(box.width * t.x, box.height * t.y);
+    await page.mouse.down();
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+    if (!tapWait) { landed = true; break; }
+    landed = await page.evaluate((sel) => {
+      const el = document.querySelector(sel);
+      // Not offsetParent: these panels are position:fixed, and a fixed element
+      // reports no offsetParent even when it is plainly on the screen.
+      return !!el && !el.hidden && el.getBoundingClientRect().width > 0;
+    }, tapWait);
+    if (landed) break;
+  }
+  if (tapWait && !landed) console.log(`tap: nothing matched ${tapWait} at any of the ${taps.length} point(s)`);
+  else if (tapWait) console.log(`tap: ${tapWait} opened`);
+}
 
 // Held before anything is read off the page, so the JSON that gets written and
 // the pixels that get captured are the same frame.
