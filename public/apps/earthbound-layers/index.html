@@ -315,6 +315,15 @@
           <select id="preset"></select>
         </div>
         <div class="row">
+          <span class="name">Auto shuffle</span>
+          <input type="checkbox" class="toggle" id="auto" checked aria-label="Deal a new pair on a timer" />
+        </div>
+        <div class="row">
+          <label for="every">Every</label>
+          <input type="range" id="every" min="15" max="300" step="15" value="180" aria-label="How long between shuffles" />
+          <span class="val" id="every-val">3:00</span>
+        </div>
+        <div class="row">
           <span class="name">Fill screen</span>
           <input type="checkbox" class="toggle" id="fill" aria-label="Fill the screen instead of keeping the 256 by 224 frame" />
         </div>

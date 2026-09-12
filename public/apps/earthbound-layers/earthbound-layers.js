@@ -308,6 +308,9 @@ const cfg = {
   blend: 'add',
   rate: 1,
   fill: false,
+  auto: true,        // deal a fresh pair on a timer, the way the original kept
+  autoSecs: 180,     // handing you a different one every battle
+
   layers: [layerDefaults(), layerDefaults()],
 };
 
@@ -319,6 +322,10 @@ const cfg = {
 let clock = 0;
 const cyc = [0, 0];
 const scroll = [0, 0];
+// Wall-clock seconds since the field was last dealt. Deliberately NOT scaled by
+// the Speed slider: "every three minutes" is a promise about the clock on the
+// wall, not about how fast the picture happens to be moving.
+let sinceDeal = 0;
 
 // ----------------------------------------------------------------- the presets
 // Named for what they look like. Two layers each, because that is what the
@@ -471,6 +478,7 @@ const PRESETS = [
 ];
 
 function applyPreset(p) {
+  sinceDeal = 0;
   cfg.blend = p.blend;
   for (let i = 0; i < 2; i++) {
     cfg.layers[i] = { ...layerDefaults(), ...p.layers[i] };
@@ -488,6 +496,9 @@ function applyPreset(p) {
  * turns out to have.
  */
 function shuffle() {
+  sinceDeal = 0;
+  // The preset picker no longer names what is on screen, so it stops claiming to.
+  if (typeof presetEl !== 'undefined' && presetEl) presetEl.value = '';
   const r = (a, b) => a + Math.random() * (b - a);
   const pick = (arr) => Math.floor(Math.random() * arr.length);
   const ground = {
@@ -523,6 +534,18 @@ function frame(now) {
   const dt = paused ? 0 : Math.min((now - last) / 1000, 0.1);
   last = now;
   clock += dt * cfg.rate;
+
+  // Auto shuffle, held back while the sheet is open. Dealing a new field out
+  // from under somebody who is in the middle of tuning one would throw their
+  // work away, and everything else in here is written so that a setting adjusts
+  // what is on screen rather than replacing it. Closing the sheet starts the
+  // interval over rather than firing immediately.
+  if (!scrim.hidden) {
+    sinceDeal = 0;
+  } else if (cfg.auto && !paused) {
+    sinceDeal += dt;
+    if (sinceDeal >= cfg.autoSecs) shuffle();
+  }
   for (let i = 0; i < 2; i++) {
     const L = cfg.layers[i];
     cyc[i] += dt * cfg.rate * (L.cycle / 100) * 8;
@@ -686,6 +709,26 @@ presetEl.addEventListener('change', () => {
   if (p) applyPreset(p);
 });
 
+const autoEl = document.getElementById('auto');
+const everyEl = document.getElementById('every');
+const everyVal = document.getElementById('every-val');
+/** m:ss, so a number that spans fifteen seconds to five minutes reads as a time. */
+const asTime = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+autoEl.addEventListener('change', () => {
+  cfg.auto = autoEl.checked;
+  sinceDeal = 0;
+  paintAuto();
+});
+everyEl.addEventListener('input', () => {
+  cfg.autoSecs = Number(everyEl.value);
+  everyVal.textContent = asTime(cfg.autoSecs);
+  sinceDeal = 0;
+});
+/** The interval row is meaningless with the switch off, so it goes away. */
+function paintAuto() {
+  everyEl.closest('.row').hidden = !cfg.auto;
+}
+
 const fillEl = document.getElementById('fill');
 fillEl.addEventListener('change', () => {
   cfg.fill = fillEl.checked;
@@ -712,6 +755,10 @@ function syncControls() {
   }
   blendEl.value = cfg.blend;
   fillEl.checked = cfg.fill;
+  autoEl.checked = cfg.auto;
+  everyEl.value = String(cfg.autoSecs);
+  everyVal.textContent = asTime(cfg.autoSecs);
+  paintAuto();
   resize();
   rateEl.value = String(Math.round(cfg.rate * 100));
   rateVal.textContent = `${cfg.rate.toFixed(1)}×`;
@@ -727,6 +774,8 @@ function sceneSnapshot() {
     blend: cfg.blend,
     rate: cfg.rate,
     fill: cfg.fill,
+    auto: cfg.auto,
+    autoSecs: cfg.autoSecs,
     // Names rather than indices: a file should still open as the picture it was
     // saved from after a pattern is added to the middle of the list.
     layers: cfg.layers.map((L) => ({
@@ -746,6 +795,9 @@ function loadScene(data) {
   cfg.blend = BLENDS[data.blend] !== undefined ? data.blend : 'add';
   cfg.rate = typeof data.rate === 'number' ? data.rate : 1;
   cfg.fill = !!data.fill;
+  cfg.auto = data.auto !== undefined ? !!data.auto : true;
+  if (typeof data.autoSecs === 'number') cfg.autoSecs = Math.max(15, Math.min(300, data.autoSecs));
+  sinceDeal = 0;
   for (let i = 0; i < 2; i++) {
     const src = data.layers[i] || {};
     const L = { ...layerDefaults() };
@@ -811,7 +863,6 @@ pauseBtn.addEventListener('click', () => {
 
 document.getElementById('shuffle-btn').addEventListener('click', () => {
   shuffle();
-  presetEl.value = '';
   toast('Shuffled');
 });
 
