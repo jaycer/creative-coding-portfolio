@@ -97,6 +97,23 @@ const taps = tapArg === 'grid'
     return { x, y };
   });
 const tapWait = opt('tap-wait');
+// --mic <wav> hands Chrome a 16-bit PCM WAV as the microphone (it loops), and
+// grants the page permission to it, so an app that listens to the room can be
+// driven against input whose tempo is known exactly. tools/make-beat-wav.mjs
+// makes one. Without --mic a listening app gets a plain refusal, which is the
+// other path worth seeing.
+const mic = opt('mic');
+// --keys 2,ArrowRight presses keys on the page after --wait, for apps whose
+// state is reached from the keyboard (a2v picks scenes with 1 to 6).
+const keys = opt('keys', '').split(',').filter(Boolean);
+// --eval '<js>' runs an expression on the page just before the shot and prints
+// what it returns, for probing the DOM when a screenshot raises a question.
+const evalJs = opt('eval');
+// --vsync keeps the browser's normal frame cap. The default uncaps it for
+// --fps, which also runs any per-frame effect (trails, accumulation) at
+// thousands of steps a second, so a shot of a time-based piece is not what a
+// visitor sees without this.
+const vsync = flag('vsync');
 
 // --- find the cached Chrome for Testing ------------------------------------
 function findChrome() {
@@ -133,12 +150,13 @@ const browser = await chromium.launch({
     // Uncap rAF so --fps reads real render throughput, not the 60Hz vsync cap.
     // With the pile at rest (demo off) physics is nearly free, so the frame cost
     // this exposes is dominated by rendering — which is what a shadow change moves.
-    '--disable-gpu-vsync', '--disable-frame-rate-limit',
+    ...(vsync ? [] : ['--disable-gpu-vsync', '--disable-frame-rate-limit']),
+    ...(mic ? ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--use-file-for-fake-audio-capture=${mic}`] : []),
   ],
 });
 const context = mobile
-  ? await browser.newContext({ ...devices['iPhone 13'] })
-  : await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2 });
+  ? await browser.newContext({ ...devices['iPhone 13'], ...(mic ? { permissions: ['microphone'] } : {}) })
+  : await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, ...(mic ? { permissions: ['microphone'] } : {}) });
 const page = await context.newPage();
 page.on('console', (m) => { if (m.type() === 'error') console.log('PAGE ERR', m.text()); });
 page.on('pageerror', (e) => console.log('PAGE EXC', e.message));
@@ -217,7 +235,40 @@ if (clicks.length) {
   await page.waitForTimeout(300);
 }
 
+// a2v: the title card is up on load, with the picture already running behind
+// it. With a microphone to offer, press Listen, which is what starts the
+// follower; without one, Just watch, so the shot is of the piece free-running.
+if (app === 'a2v') {
+  await page.evaluate((withMic) => document.getElementById(withMic ? 'idleListen' : 'idleWatch')?.click(), !!mic);
+  await page.waitForTimeout(500);
+}
+
 if (waitSeconds) await page.waitForTimeout(waitSeconds * 1000);
+
+if (keys.length) {
+  for (const k of keys) await page.keyboard.press(k);
+  await page.waitForTimeout(1500);
+}
+
+// What the follower made of the room, for a listening app. Read off the DOM the
+// visitor sees, so a wrong number here is a wrong number on screen.
+if (app === 'a2v') {
+  const heard = await page.evaluate(() => ({
+    status: document.getElementById('listenStatus')?.textContent || '',
+    bpm: document.getElementById('bpmText')?.textContent || '',
+    searching: document.getElementById('meter')?.classList.contains('searching'),
+    pill: document.getElementById('meterMsg')?.hidden ? '' : document.getElementById('meterMsg')?.textContent,
+    state: window.a2vState ? window.a2vState() : null,
+  }));
+  console.log('a2v', JSON.stringify(heard));
+}
+if (app === 'hey-chair' && mic) {
+  const heard = await page.evaluate(() => ({
+    status: document.getElementById('listen-status')?.textContent || '',
+    meter: document.getElementById('bpm-meter')?.textContent?.trim() || '',
+  }));
+  console.log('hey-chair', JSON.stringify(heard));
+}
 
 // Tapping comes after --wait, so the shot is of whatever the scene had become by
 // then rather than of its opening frame.
@@ -297,6 +348,8 @@ if (wantFps) {
   }), fpsSeconds);
   console.log('FPS', JSON.stringify(fps));
 }
+
+if (evalJs) console.log('eval', JSON.stringify(await page.evaluate(evalJs)));
 
 await page.screenshot({ path: out });
 console.log('wrote', out);
