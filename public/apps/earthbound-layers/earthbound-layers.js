@@ -307,7 +307,7 @@ const layerDefaults = () => ({
 const cfg = {
   blend: 'add',
   rate: 1,
-  fill: false,
+  fill: true,
   auto: true,        // deal a fresh pair on a timer, the way the original kept
   autoSecs: 180,     // handing you a different one every battle
 
@@ -493,7 +493,9 @@ function applyPreset(p) {
  * be violent is a mess, and one where both are calm is a wallpaper. So one layer
  * is dealt as the ground and the other as the detail — wider and slower against
  * narrower and faster — which is the shape almost every one of the originals
- * turns out to have.
+ * turns out to have. The two ranges overlap, though, and reach most of the way
+ * out to the ends of the sliders: the pairing is what carries the character, so
+ * the numbers inside it can be allowed to get strange.
  */
 function shuffle() {
   sinceDeal = 0;
@@ -501,23 +503,27 @@ function shuffle() {
   if (typeof presetEl !== 'undefined' && presetEl) presetEl.value = '';
   const r = (a, b) => a + Math.random() * (b - a);
   const pick = (arr) => Math.floor(Math.random() * arr.length);
+  // Distortion includes None. Plenty of the originals are undistorted — a flat
+  // pattern that only scrolls and cycles its palette — so leaving it out of the
+  // deal was hiding a whole family of real backgrounds.
+  const distort = () => pick(DISTORTIONS);
   const ground = {
     pattern: pick(PATTERNS), palette: pick(PALETTES),
-    level: Math.round(r(50, 70)),
-    type: 1 + pick([0, 1, 2, 3]),
-    amp: Math.round(r(8, 26)), freq: Math.round(r(1, 5) * 2) / 2,
-    speed: Math.round(r(12, 45)), compress: Math.round(r(-24, 24)),
-    cycle: Math.round(r(6, 30)) * (Math.random() < 0.5 ? -1 : 1),
-    scroll: Math.round(r(-8, 8)),
+    level: Math.round(r(38, 82)),
+    type: distort(),
+    amp: Math.round(r(4, 40)), freq: Math.round(r(0.5, 8) * 2) / 2,
+    speed: Math.round(r(5, 70)), compress: Math.round(r(-36, 36)),
+    cycle: Math.round(r(3, 45)) * (Math.random() < 0.5 ? -1 : 1),
+    scroll: Math.round(r(-16, 16)),
   };
   const detail = {
     pattern: pick(PATTERNS), palette: pick(PALETTES),
-    level: Math.round(r(28, 50)),
-    type: 1 + pick([0, 1, 2, 3]),
-    amp: Math.round(r(3, 14)), freq: Math.round(r(4, 12) * 2) / 2,
-    speed: Math.round(r(40, 110)), compress: Math.round(r(-14, 14)),
-    cycle: Math.round(r(8, 40)) * (Math.random() < 0.5 ? -1 : 1),
-    scroll: Math.round(r(-10, 10)),
+    level: Math.round(r(18, 60)),
+    type: distort(),
+    amp: Math.round(r(2, 24)), freq: Math.round(r(3, 18) * 2) / 2,
+    speed: Math.round(r(25, 165)), compress: Math.round(r(-28, 28)),
+    cycle: Math.round(r(5, 58)) * (Math.random() < 0.5 ? -1 : 1),
+    scroll: Math.round(r(-22, 22)),
   };
   cfg.blend = Math.random() < 0.82 ? 'add' : (Math.random() < 0.6 ? 'screen' : 'diff');
   cfg.layers = [ground, detail];
@@ -582,7 +588,8 @@ function frame(now) {
  * Size the render area, and the element it is shown in.
  *
  * Fit is the authentic frame: 256 by 224, scaled up as far as it goes and
- * letterboxed with whatever is left.
+ * letterboxed with whatever is left. Fill is the default; Fit is there for
+ * anyone who wants the frame the hardware drew.
  *
  * Fill removes the bars WITHOUT stretching and WITHOUT cropping, which is worth
  * spelling out because the two obvious answers do one or the other. Stretching
@@ -794,7 +801,7 @@ function loadScene(data) {
   }
   cfg.blend = BLENDS[data.blend] !== undefined ? data.blend : 'add';
   cfg.rate = typeof data.rate === 'number' ? data.rate : 1;
-  cfg.fill = !!data.fill;
+  cfg.fill = data.fill !== undefined ? !!data.fill : true;
   cfg.auto = data.auto !== undefined ? !!data.auto : true;
   if (typeof data.autoSecs === 'number') cfg.autoSecs = Math.max(15, Math.min(300, data.autoSecs));
   sinceDeal = 0;

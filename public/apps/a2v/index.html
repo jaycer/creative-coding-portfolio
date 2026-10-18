@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>A2V — Jayce Renner</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="A2V" />
+    <meta name="description" content="Audio to visuals. It listens through the microphone, finds the beat of whatever is playing, and draws to it: pixels, flow fields, orbs, spirals, layers and bloons, each borrowed from somewhere in the gallery. Sound stays local." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="A2V" />
+    <meta property="og:description" content="Audio to visuals. It listens through the microphone, finds the beat of whatever is playing, and draws to it: pixels, flow fields, orbs, spirals, layers and bloons. Sound stays local." />
+    <meta property="og:url" content="%SITE_URL%/apps/a2v/" />
+    <meta property="og:image" content="%SITE_URL%/og/a2v.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="A2V" />
+    <meta name="twitter:description" content="Audio to visuals. It listens, finds the beat, and draws to it." />
+    <meta name="twitter:image" content="%SITE_URL%/og/a2v.jpg" />
+    <style>
+      /* V2A's panel, mirrored: the same near-black, with the magenta and the
+         cyan swapped so the two read as a pair. The picture supplies the rest
+         of the color, and here the picture is the whole screen. */
+      :root {
+        --bg:        #05070c;
+        --bg-2:      #030407;
+        --panel:     #10141c;
+        --panel-2:   #171c26;
+        --line:      #232a36;
+        --line-soft: #1a202a;
+        --ink:       #dfe5ef;
+        --ink-dim:   #8e98a9;
+        --ink-faint: #626b7a;
+        --accent:    #e8619f;
+        --accent-dim:#86365c;
+        --accent-ink:#2a0716;
+        --hot:       #5ad2e6;
+        --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+        --bar-h: calc(52px + env(safe-area-inset-top, 0px));
+        --sheet-h: 64vh;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--bg);
+        color: var(--ink);
+        font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+        overscroll-behavior: none;
+      }
+
+      /* ---- top bar ---- */
+      .bar {
+        position: fixed; top: 0; left: 0; right: 0; z-index: 40;
+        height: var(--bar-h);
+        display: flex; align-items: center; gap: 8px;
+        padding: env(safe-area-inset-top, 0px) 14px 0;
+        background: rgba(5, 7, 12, 0.78);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .bar .back, .bar-btn {
+        font-family: var(--sans); font-size: 0.8rem; letter-spacing: 0.01em;
+        text-decoration: none; color: var(--ink-dim); background: none;
+        height: 30px; padding: 0 12px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid var(--line); border-radius: 999px;
+        white-space: nowrap; cursor: pointer;
+        transition: color .15s ease, border-color .15s ease, background .15s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .bar .back:hover, .bar-btn:hover { color: var(--ink); border-color: var(--ink-faint); background: rgba(223,229,239,.05); }
+      .bar-btn:focus-visible, .back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      .bar-btn[aria-pressed="true"] {
+        color: var(--accent-ink); background: var(--accent); border-color: var(--accent); font-weight: 600;
+      }
+      .bar-btn[aria-pressed="true"]:hover { color: var(--accent-ink); background: #f27fb4; border-color: #f27fb4; }
+      .bar-btn[hidden] { display: none; }
+      .bar .crumb {
+        font-size: 0.66rem; letter-spacing: 0.28em; text-transform: uppercase; color: var(--ink-faint);
+      }
+      .bar .push { margin-left: auto; }
+      @media (max-width: 700px) { .bar .crumb, .bar .back-label { display: none; } }
+      @media (max-width: 520px) { .bar .save-load, .bar .full { display: none; } }
+
+      /* ---- stage ---- */
+      .stage {
+        position: fixed; inset: var(--bar-h) 0 0 0;
+        background: var(--bg);
+      }
+      #view { display: block; width: 100%; height: 100%; touch-action: none; cursor: pointer; }
+
+      /* The tempo being followed. Centered, and the number never walks: the
+         digits are tabular and the placeholder is three figure dashes, a digit
+         wide each. */
+      .meter {
+        position: absolute; left: 50%; top: 14px; z-index: 12;
+        transform: translateX(-50%);
+        margin: 0; padding: 7px 15px;
+        display: flex; align-items: center; gap: 9px;
+        font-size: .8rem; color: var(--ink);
+        background: rgba(8, 11, 17, .9);
+        border: 1px solid var(--line); border-radius: 999px;
+        white-space: nowrap; pointer-events: none;
+        max-width: calc(100% - 32px);
+      }
+      .meter[hidden] { display: none; }
+      #meterNum { display: inline-flex; align-items: center; gap: 9px; }
+      #meterNum[hidden], #meterMsg[hidden] { display: none; }
+      #meterMsg { overflow: hidden; text-overflow: ellipsis; }
+      .meter .dot {
+        width: 9px; height: 9px; border-radius: 50%;
+        background: var(--accent); box-shadow: 0 0 10px var(--accent);
+      }
+      .meter .bpm { font-family: var(--mono); font-size: .95rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .meter .unit { font-size: .64rem; letter-spacing: .2em; color: var(--ink-faint); }
+      .meter.searching .bpm, .meter.searching .dot { opacity: .4; }
+
+      /* Nothing heard yet. The picture runs behind it, so this is a title over
+         a live piece rather than a blank stage. Not called .idle: the shared
+         autohide script puts that class on <body> when the pointer rests. */
+      .intro {
+        position: absolute; inset: 0; z-index: 5;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 18px; padding: 28px; text-align: center;
+        background: radial-gradient(60% 60% at 50% 50%, rgba(5,7,12,.72), rgba(5,7,12,.35));
+      }
+      .intro[hidden] { display: none; }
+      .intro h1 {
+        margin: 0; font-size: clamp(2.4rem, 9vw, 4.4rem); font-weight: 600;
+        letter-spacing: -0.04em; line-height: 1;
+        background: linear-gradient(120deg, var(--accent), var(--hot));
+        -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .intro p { margin: 0; max-width: 30rem; color: var(--ink); font-size: .95rem; line-height: 1.6; text-shadow: 0 1px 12px rgba(0,0,0,.8); }
+      .intro .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
+      .intro .note { font-size: .78rem; color: var(--ink-dim); }
+      .big-btn {
+        font-family: var(--sans); font-size: .92rem; font-weight: 600;
+        height: 44px; padding: 0 22px;
+        display: inline-flex; align-items: center; gap: 9px;
+        border-radius: 999px; cursor: pointer;
+        color: var(--accent-ink); background: var(--accent); border: 1px solid var(--accent);
+        transition: background .15s ease, border-color .15s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .big-btn:hover { background: #f27fb4; border-color: #f27fb4; }
+      .big-btn.ghost { color: var(--ink); background: rgba(5,7,12,.5); border-color: var(--line); }
+      .big-btn.ghost:hover { background: rgba(223,229,239,.08); border-color: var(--ink-faint); }
+      .big-btn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+
+      /* ---- controls drawer ---- */
+      .scrim {
+        position: fixed; inset: 0; z-index: 45;
+        background: rgba(3, 4, 7, 0);
+        opacity: 0; pointer-events: none;
+        transition: opacity .2s ease, background .2s ease;
+      }
+      .scrim.show { opacity: 1; pointer-events: auto; }
+      @media (max-width: 620px) { .scrim.show { background: rgba(3, 4, 7, .35); } }
+
+      .dock {
+        position: fixed; top: var(--bar-h); right: 0; bottom: 0; z-index: 50;
+        width: 342px; max-width: 100%;
+        padding: 16px 16px 40px;
+        overflow-y: auto; -webkit-overflow-scrolling: touch;
+        opacity: .86;
+        background: rgba(8, 11, 17, .94);
+        backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+        border-left: 1px solid var(--line-soft);
+        transform: translateX(100%);
+        transition: transform .24s cubic-bezier(.2,.7,.3,1);
+        overscroll-behavior: contain;
+      }
+      .dock.open { transform: none; }
+      @media (max-width: 620px) {
+        /* On a phone the drawer is a sheet. The picture keeps running behind
+           it rather than giving up the space: a visualizer with a third of
+           itself left over is not worth tuning. */
+        .dock {
+          top: auto; left: 0; right: 0; bottom: 0;
+          width: auto; max-height: var(--sheet-h);
+          padding-bottom: calc(28px + env(safe-area-inset-bottom));
+          border-left: 0; border-top: 1px solid var(--line);
+          border-radius: 16px 16px 0 0;
+          transform: translateY(100%);
+        }
+      }
+
+      .group { margin-bottom: 20px; }
+      .group__name {
+        margin: 0 0 10px; font-size: .66rem; letter-spacing: .22em;
+        text-transform: uppercase; color: var(--ink-faint);
+      }
+
+      .seg { display: grid; gap: 4px; grid-auto-flow: column; grid-auto-columns: 1fr;
+             padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+      .seg.wrap { grid-auto-flow: row; grid-template-columns: 1fr 1fr 1fr; }
+      .seg button {
+        font-family: var(--sans); font-size: .78rem; font-weight: 500;
+        height: 30px; padding: 0 4px;
+        color: var(--ink-dim); background: none; border: 0; border-radius: 7px;
+        cursor: pointer; white-space: nowrap;
+        transition: color .12s ease, background .12s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .seg button:hover { color: var(--ink); }
+      .seg button[aria-checked="true"] { color: var(--accent-ink); background: var(--accent); font-weight: 600; }
+      .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      .seg__note, .desc { margin: 7px 0 0; font-size: .74rem; line-height: 1.45; color: var(--ink-faint); }
+
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+      .chip {
+        font-family: var(--sans); font-size: .76rem;
+        padding: 6px 12px; color: var(--ink-dim);
+        background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+        cursor: pointer; transition: color .12s ease, border-color .12s ease, background .12s ease;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .chip:hover { color: var(--ink); border-color: var(--ink-faint); }
+      .chip[aria-pressed="true"] { color: var(--accent); border-color: var(--accent-dim); background: rgba(232,97,159,.1); }
+
+      .ctl { margin-bottom: 11px; }
+      .ctl__top { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+      .ctl__top label { font-size: .8rem; color: var(--ink-dim); }
+      .ctl__val {
+        margin-left: auto; font-family: var(--mono); font-size: .72rem;
+        color: var(--ink); font-variant-numeric: tabular-nums;
+      }
+      /* A control the current scene does not read stays put and goes quiet,
+         rather than vanishing and moving everything under your hand. */
+      .ctl.disabled, .field.disabled { opacity: .35; pointer-events: none; }
+
+      input[type="range"] {
+        -webkit-appearance: none; appearance: none;
+        display: block; width: 100%; height: 18px; margin: 0; padding: 0;
+        background: none; cursor: pointer; touch-action: none;
+      }
+      input[type="range"]:focus { outline: none; }
+      input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+      input[type="range"]::-webkit-slider-runnable-track {
+        height: 3px; border-radius: 2px; border: 0;
+        background: linear-gradient(to right, var(--accent) 0 var(--p,0%), var(--line) var(--p,0%) 100%);
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none; appearance: none;
+        width: 13px; height: 13px; margin-top: -5px; border-radius: 50%;
+        background: var(--ink); border: 0; box-shadow: 0 1px 3px rgba(0,0,0,.5);
+      }
+      input[type="range"]::-moz-range-track {
+        height: 3px; border-radius: 2px; border: 0;
+        background: linear-gradient(to right, var(--accent) 0 var(--p,0%), var(--line) var(--p,0%) 100%);
+      }
+      input[type="range"]::-moz-range-thumb {
+        width: 13px; height: 13px; border-radius: 50%;
+        background: var(--ink); border: 0; box-shadow: 0 1px 3px rgba(0,0,0,.5);
+      }
+
+      .field { margin-bottom: 11px; }
+      .field label { display: block; font-size: .8rem; color: var(--ink-dim); margin-bottom: 4px; }
+      .field[hidden] { display: none; }
+      select {
+        font-family: var(--sans); font-size: .82rem;
+        width: 100%; height: 32px; padding: 0 30px 0 10px;
+        color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+        cursor: pointer; -webkit-appearance: none; appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%238e98a9' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 9px center; background-size: 12px;
+      }
+      select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      select option { color: #08080e; }
+
+      .switches { display: flex; flex-wrap: wrap; gap: 6px; }
+      .sw {
+        display: inline-flex; align-items: center; gap: 7px;
+        font-size: .78rem; color: var(--ink-dim);
+        padding: 6px 12px 6px 9px;
+        background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+        cursor: pointer; user-select: none; -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .sw input { position: absolute; opacity: 0; width: 0; height: 0; }
+      .sw__box {
+        flex: none; width: 14px; height: 14px; border-radius: 4px;
+        border: 1px solid var(--ink-faint); background: none;
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .sw__box::after {
+        content: ''; width: 6px; height: 6px; border-radius: 1px;
+        background: var(--accent-ink); transform: scale(0); transition: transform .12s ease;
+      }
+      .sw input:checked + .sw__box { background: var(--accent); border-color: var(--accent); }
+      .sw input:checked + .sw__box::after { transform: scale(1); }
+      .sw input:checked ~ .sw__text { color: var(--ink); }
+      .sw input:focus-visible + .sw__box { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      .status { margin: 10px 0 0; font-size: .78rem; line-height: 1.45; color: var(--ink-dim); }
+      .status.warn { color: #ffb4a8; }
+      .status[hidden] { display: none; }
+
+      .toast {
+        position: fixed; bottom: 24px; left: 50%; z-index: 70;
+        transform: translateX(-50%) translateY(10px);
+        padding: 10px 18px; border-radius: 999px;
+        background: rgba(8,11,17,.96); border: 1px solid var(--line);
+        color: var(--ink); font-size: .86rem;
+        opacity: 0; pointer-events: none;
+        transition: opacity .2s ease, transform .2s ease;
+        max-width: min(90vw, 460px); text-align: center;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      .sr-only {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <nav class="bar">
+      <a class="back" href="../../">&larr;&nbsp;<span class="back-label">Gallery</span></a>
+      <span class="crumb">Audio to visuals</span>
+      <button class="bar-btn push" id="listenBtn" type="button" aria-pressed="false" title="Follow whatever is playing in the room">Listen</button>
+      <button class="bar-btn full" id="fullBtn" type="button" aria-pressed="false" hidden title="Full screen">Full</button>
+      <button class="bar-btn save-load" id="saveState" type="button">Save</button>
+      <button class="bar-btn save-load" id="loadState" type="button">Load</button>
+      <button class="bar-btn" id="dockBtn" type="button" aria-expanded="false" aria-controls="dock">Controls</button>
+    </nav>
+
+    <main class="stage" id="stage">
+      <canvas id="view"></canvas>
+
+      <p class="meter searching" id="meter" hidden aria-live="off">
+        <span id="meterNum"><span class="dot" id="dot"></span><span class="bpm" id="bpmText">&#8210;&#8210;&#8210;</span><span class="unit">BPM</span></span>
+        <span id="meterMsg" hidden></span>
+      </p>
+
+      <div class="intro" id="idle">
+        <h1>A2V</h1>
+        <p>Audio in, visuals out. It listens to the room, finds the beat, and draws to it. Six scenes, each borrowed from somewhere else in the gallery. Sound stays local.</p>
+        <div class="row">
+          <button class="big-btn" id="idleListen" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
+            Listen
+          </button>
+          <button class="big-btn ghost" id="idleWatch" type="button">Just watch</button>
+        </div>
+        <p class="note">Tap the picture for the next scene</p>
+      </div>
+    </main>
+
+    <div class="scrim" id="scrim"></div>
+
+    <aside class="dock" id="dock" aria-label="Controls">
+      <section class="group">
+        <h2 class="group__name">Scene</h2>
+        <div class="seg wrap" id="scene" role="radiogroup" aria-label="Scene">
+          <button type="button" role="radio" data-v="pixels" aria-checked="true">Pixels</button>
+          <button type="button" role="radio" data-v="flow" aria-checked="false">Flow</button>
+          <button type="button" role="radio" data-v="orbs" aria-checked="false">Orbs</button>
+          <button type="button" role="radio" data-v="spiral" aria-checked="false">Spiral</button>
+          <button type="button" role="radio" data-v="layers" aria-checked="false">Layers</button>
+          <button type="button" role="radio" data-v="bloons" aria-checked="false">Bloons</button>
+        </div>
+        <p class="seg__note" id="sceneNote"></p>
+        <div class="field" style="margin-top:12px">
+          <label for="auto">Change scene</label>
+          <select id="auto">
+            <option value="0">Never</option>
+            <option value="8">Every 8 bars</option>
+            <option value="16" selected>Every 16 bars</option>
+            <option value="32">Every 32 bars</option>
+          </select>
+        </div>
+        <div class="ctl" id="resCtl">
+          <div class="ctl__top"><label for="res">Resolution</label><span class="ctl__val" id="resVal">48 across</span></div>
+          <input type="range" id="res" min="8" max="160" step="1" value="48" />
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="group__name">Look</h2>
+        <div class="chips" id="palettes" style="margin-bottom:12px"></div>
+        <div class="ctl">
+          <div class="ctl__top"><label for="tiles">Tiles</label><span class="ctl__val" id="tilesVal">Off</span></div>
+          <input type="range" id="tiles" min="1" max="6" step="1" value="1" />
+        </div>
+        <p class="desc">Repeats the middle of the picture into a mirrored grid, the way Image Tiler lays a sheet out.</p>
+      </section>
+
+      <section class="group">
+        <h2 class="group__name">Room</h2>
+        <div class="ctl">
+          <div class="ctl__top"><label for="sens">Sensitivity</label><span class="ctl__val" id="sensVal">1.00×</span></div>
+          <input type="range" id="sens" min="0" max="1000" step="1" value="500" />
+        </div>
+        <div class="ctl">
+          <div class="ctl__top"><label for="freeBpm">Free run</label><span class="ctl__val" id="freeBpmVal">110 BPM</span></div>
+          <input type="range" id="freeBpm" min="60" max="160" step="1" value="110" />
+        </div>
+        <p class="desc">The pace it keeps on its own, before the microphone is allowed and whenever nothing out there has a beat.</p>
+        <div class="switches" style="margin-top:12px">
+          <label class="sw"><input type="checkbox" id="meterToggle" checked /><span class="sw__box"></span><span class="sw__text">Show the tempo</span></label>
+        </div>
+        <p class="status" id="listenStatus" hidden></p>
+        <div class="field" id="micRow" hidden style="margin-top:12px">
+          <label for="micSelect">Microphone</label>
+          <select id="micSelect"></select>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2 class="group__name">Keys</h2>
+        <p class="desc">Tap the picture or press the right arrow for the next scene, 1 to 6 for one in particular. L listens, C opens this, F goes full screen.</p>
+      </section>
+    </aside>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <input type="file" id="settingsFile" accept="application/json,.json" class="sr-only" tabindex="-1" aria-hidden="true" />
+
+    <script src="../shared/build-version.js"></script>
+    <script src="../shared/autohide.js"></script>
+    <script type="module" src="./a2v.js"></script>
+  </body>
+</html>

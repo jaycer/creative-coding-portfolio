@@ -170,6 +170,17 @@ export function listenState() {
 }
 
 /**
+ * The node the microphone arrives through, or null while nothing is open. For
+ * a piece that wants more than the beat: hang an analyser of your own off it.
+ * It is replaced whenever the input changes, so compare it each frame rather
+ * than keeping the first one. Anything hung off it must still reach the
+ * destination (through a gain of zero), or WebKit never pulls it.
+ */
+export function listenSource() {
+  return source;
+}
+
+/**
  * Why the microphone did not open. The names are worth keeping apart: on a Mac
  * they are the difference between the browser having been refused and the
  * SYSTEM having refused the browser, and those are fixed in different places.
