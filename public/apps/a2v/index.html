@@ -7,11 +7,11 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-title" content="A2V" />
-    <meta name="description" content="Audio to visuals. It listens through the microphone, finds the beat of whatever is playing, and draws to it: pixels, flow fields, orbs, spirals, layers and bloons, each borrowed from somewhere in the gallery. Sound stays local." />
+    <meta name="description" content="Audio to visuals. It listens through the microphone, finds the beat of whatever is playing, and draws to it: pixels, flow fields, orbs, spirals and layers, each borrowed from somewhere in the gallery. Sound stays local." />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
     <meta property="og:title" content="A2V" />
-    <meta property="og:description" content="Audio to visuals. It listens through the microphone, finds the beat of whatever is playing, and draws to it: pixels, flow fields, orbs, spirals, layers and bloons. Sound stays local." />
+    <meta property="og:description" content="Audio to visuals. It listens through the microphone, finds the beat of whatever is playing, and draws to it: pixels, flow fields, orbs, spirals and layers. Sound stays local." />
     <meta property="og:url" content="%SITE_URL%/apps/a2v/" />
     <meta property="og:image" content="%SITE_URL%/og/a2v.jpg" />
     <meta property="og:image:width" content="1200" />
@@ -342,7 +342,7 @@
 
       <div class="intro" id="idle">
         <h1>A2V</h1>
-        <p>Audio in, visuals out. It listens to the room, finds the beat, and draws to it. Six scenes, each borrowed from somewhere else in the gallery. Sound stays local.</p>
+        <p>Audio in, visuals out. It listens to the room, finds the beat, and draws to it. Five scenes, each borrowed from somewhere else in the gallery. Sound stays local.</p>
         <div class="row">
           <button class="big-btn" id="idleListen" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
@@ -365,19 +365,9 @@
           <button type="button" role="radio" data-v="orbs" aria-checked="false">Orbs</button>
           <button type="button" role="radio" data-v="spiral" aria-checked="false">Spiral</button>
           <button type="button" role="radio" data-v="layers" aria-checked="false">Layers</button>
-          <button type="button" role="radio" data-v="bloons" aria-checked="false">Bloons</button>
         </div>
         <p class="seg__note" id="sceneNote"></p>
-        <div class="field" style="margin-top:12px">
-          <label for="auto">Change scene</label>
-          <select id="auto">
-            <option value="0">Never</option>
-            <option value="8">Every 8 bars</option>
-            <option value="16" selected>Every 16 bars</option>
-            <option value="32">Every 32 bars</option>
-          </select>
-        </div>
-        <div class="ctl" id="resCtl">
+        <div class="ctl" id="resCtl" style="margin-top:12px">
           <div class="ctl__top"><label for="res">Resolution</label><span class="ctl__val" id="resVal">48 across</span></div>
           <input type="range" id="res" min="8" max="160" step="1" value="48" />
         </div>
@@ -416,7 +406,7 @@
 
       <section class="group">
         <h2 class="group__name">Keys</h2>
-        <p class="desc">Tap the picture or press the right arrow for the next scene, 1 to 6 for one in particular. L listens, C opens this, F goes full screen.</p>
+        <p class="desc">Tap the picture or press the right arrow for the next scene, 1 to 5 for one in particular. L listens, C opens this, F goes full screen.</p>
       </section>
     </aside>
 

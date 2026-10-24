@@ -1,4 +1,4 @@
-// A2V — the six ways it draws what it hears.
+// A2V — the five ways it draws what it hears.
 //
 // Each scene is a class with the same small surface, and knows nothing about
 // microphones, clocks or controls:
@@ -15,6 +15,11 @@
 // the room, so a quiet room and a loud one both use the whole range; phase is
 // 0 to 1 across the current beat; pulse is 1 on the beat and decays; beatN and
 // barN count up; struck is true on the one frame an onset landed.
+//
+// Nothing here jumps. A beat is allowed to push a quantity, but the push goes
+// through a Surge, which spreads it over the next fraction of a second, so the
+// picture speeds up and settles rather than stepping; the smoothed bands do
+// the rest. A scene changes its mind (new orb, new pattern) by fading.
 //
 // Several of these borrow from other pieces in the gallery, and say so.
 
@@ -61,8 +66,21 @@ export function noise3(x, y, z) {
     w,
   );
 }
-/** 0 to 1. */
-const noise01 = (x, y, z) => clamp(noise3(x, y, z) * 0.5 + 0.5, 0, 1);
+
+/** A quantity the beat is allowed to push without it ever stepping: the push
+ *  becomes a velocity that drains over `tau` seconds, and integrates to
+ *  exactly the amount asked for. */
+class Surge {
+  constructor(tau = 0.3) { this.v = 0; this.tau = tau; }
+  push(amount) { this.v += amount / this.tau; }
+  /** How far it moved this frame. */
+  step(dt) {
+    const k = Math.exp(-dt / this.tau);
+    const d = this.v * this.tau * (1 - k);
+    this.v *= k;
+    return d;
+  }
+}
 
 // --- palettes ------------------------------------------------------------------
 // Five stops, dark to light. A palette is read as a RING: position 0 to 0.5
@@ -137,8 +155,8 @@ export class Palette {
 // --- Pixels --------------------------------------------------------------------
 // A Perlin field on a coarse grid, drawn at the resolution asked for and
 // scaled up with no smoothing, so every cell is a square. Bass brightens the
-// whole field, each beat pushes the field through time so it morphs, treble
-// sprinkles white cells, and the palette cycles underneath the lot.
+// whole field, each beat urges the field on through time so it keeps morphing,
+// treble sprinkles white cells, and the palette cycles underneath the lot.
 
 class Pixels {
   constructor() {
@@ -147,6 +165,8 @@ class Pixels {
     this.img = null;
     this.z = Math.random() * 50;
     this.off = Math.random();
+    this.zs = new Surge(0.35);
+    this.offs = new Surge(0.5);
   }
   size(f) {
     const n = clamp(Math.round(f.res), 4, 240);
@@ -158,15 +178,15 @@ class Pixels {
     }
   }
   enter() { /* stateless apart from time, which should carry on */ }
-  beat() { this.z += 0.22; this.off += 1 / 10; }
-  bar() { this.off += 1 / 8; }
-  hit() { /* the sparkle below reads a.struck directly */ }
+  beat() { this.zs.push(0.18); this.offs.push(1 / 12); }
+  bar() { this.offs.push(1 / 10); }
+  hit() { /* the sparkle below reads a.hit directly */ }
   draw(g, f, a) {
     this.size(f);
     const n = this.cv.width, m = this.cv.height, d = this.img.data, lut = f.pal.lut;
-    this.z += a.dt * (0.04 + 0.3 * a.level);
-    this.off += a.dt * 0.025 * (1 + 3 * a.treb);
-    const zoom = 2.6 * (1 - 0.12 * a.pulse);
+    this.z += a.dt * (0.04 + 0.3 * a.level) + this.zs.step(a.dt);
+    this.off += a.dt * 0.025 * (1 + 3 * a.treb) + this.offs.step(a.dt);
+    const zoom = 2.6;
     const bright = 0.5 + 0.35 * a.bass + 0.2 * a.hit;
     const z2 = this.z * 1.6 + 3.3;
     let p = 0;
@@ -184,9 +204,9 @@ class Pixels {
       }
     }
     // Treble is sparkle: a scatter of white cells, more of them the brighter
-    // the top end, and a burst on a hit.
+    // the top end, and more again while a hit rings.
     const cells = n * m;
-    const k = Math.floor(a.treb * a.treb * cells * 0.7 * a.dt + (a.struck ? cells * 0.006 : 0));
+    const k = Math.floor((a.treb * a.treb * 0.7 + a.hit * a.hit * 0.5) * cells * a.dt);
     for (let i = 0; i < k; i++) {
       const q = (Math.random() * cells | 0) * 4;
       d[q] = d[q + 1] = d[q + 2] = 255;
@@ -200,8 +220,8 @@ class Pixels {
 
 // --- Flow ----------------------------------------------------------------------
 // Particles riding a Perlin flow field, leaving trails. Bass is their speed,
-// mids their weight, and every beat shoves the field through time so the whole
-// current changes course at once.
+// mids their weight, and every beat urges the field on through time so the
+// current keeps changing course.
 
 class Flow {
   constructor() {
@@ -209,6 +229,7 @@ class Flow {
     this.p = null;
     this.zt = Math.random() * 100;
     this.off = Math.random();
+    this.zs = new Surge(0.4);
     this.W = 0;
     this.H = 0;
   }
@@ -224,16 +245,9 @@ class Flow {
     g.fillStyle = '#000';
     g.fillRect(0, 0, f.W, f.H);
   }
-  beat() { this.zt += 0.28; }
-  bar(a, f) {
-    // A share of them start again somewhere new, so the field never settles
-    // into the few channels everything eventually drains into.
-    const p = this.p;
-    for (let i = 0; i < this.N; i++) {
-      if (Math.random() < 0.15) { p[i * 3] = Math.random() * f.W; p[i * 3 + 1] = Math.random() * f.H; }
-    }
-  }
-  hit() { this.off += 0.03; }
+  beat() { this.zs.push(0.22); }
+  bar() { /* nothing is dealt afresh here: see the trickle in draw */ }
+  hit() { /* the speed below reads a.hit */ }
   draw(g, f, a) {
     if (!this.p || this.W !== f.W || this.H !== f.H) this.enter(g, f);
     g.globalCompositeOperation = 'source-over';
@@ -241,11 +255,15 @@ class Flow {
     // leave the same tail.
     g.fillStyle = `rgba(0,0,0,${(1 - Math.exp(-a.dt / 0.19)).toFixed(3)})`;
     g.fillRect(0, 0, f.W, f.H);
-    this.zt += a.dt * 0.07;
-    this.off += a.dt * 0.015;
+    this.zt += a.dt * 0.07 + this.zs.step(a.dt);
+    this.off += a.dt * 0.015 * (1 + 2 * a.treb);
     const s = Math.min(f.W, f.H);
     const sc = 1.8 / s;
     const spd = s * a.dt * (0.05 + 0.32 * a.bass + 0.45 * a.hit);
+    // A trickle of them start again somewhere new, so the field never settles
+    // into the few channels everything eventually drains into. A trickle, not
+    // a share of them every bar: that put a fresh scatter of dots on screen.
+    const fresh = a.dt * 0.08;
     // One path per color rather than one stroke per particle: twelve strokes a
     // frame instead of twelve hundred.
     const B = 12;
@@ -256,7 +274,7 @@ class Flow {
       const x = p[i * 3], y = p[i * 3 + 1];
       const ang = noise3(x * sc, y * sc, this.zt) * TAU * 1.6;
       const nx = x + Math.cos(ang) * spd, ny = y + Math.sin(ang) * spd;
-      if (nx < 0 || nx >= f.W || ny < 0 || ny >= f.H) {
+      if (nx < 0 || nx >= f.W || ny < 0 || ny >= f.H || Math.random() < fresh) {
         p[i * 3] = Math.random() * f.W;
         p[i * 3 + 1] = Math.random() * f.H;
         continue;
@@ -283,7 +301,8 @@ class Flow {
 // --- Orbs ----------------------------------------------------------------------
 // Borrowed from Particle System: soft orbs drifting and breathing. Here each
 // one breathes in a whole number of beats, one, two or four, so they swell
-// together on the downbeats, and a hit sends a ring out of one of them.
+// together on the downbeats, and a hit sends a ring out of one of them. Orbs
+// come and go by fading, over a couple of seconds each way.
 
 class Orbs {
   constructor() {
@@ -303,23 +322,27 @@ class Orbs {
       min: s * 0.012, max: s * (0.06 + Math.random() * 0.2),
       t: Math.random(), dt: (Math.random() - 0.5) * 0.06,
       al: 0.35 + Math.random() * 0.3,
+      life: 0, going: false,
     };
   }
   enter(g, f) {
     this.W = f.W;
     this.H = f.H;
     this.orbs = [];
-    for (let i = 0; i < 22; i++) this.orbs.push(this.make(f));
+    for (let i = 0; i < 22; i++) { const o = this.make(f); o.life = 1; this.orbs.push(o); }
     this.rings = [];
   }
   beat() { /* the breathing reads the phase directly */ }
   bar(a, f) {
-    // Retire the oldest, bring in a new one, so the field keeps changing.
-    this.orbs.shift();
+    // Retire the oldest, bring in a new one, so the field keeps changing. Both
+    // by fading: the one going out is dropped once it has gone.
+    const old = this.orbs.find((o) => !o.going);
+    if (old) old.going = true;
     this.orbs.push(this.make(f));
   }
   hit(a, f) {
-    const o = this.orbs[Math.floor(Math.random() * this.orbs.length)];
+    const up = this.orbs.filter((o) => o.life > 0.5);
+    const o = up[Math.floor(Math.random() * up.length)];
     if (!o) return;
     this.rings.push({ x: o.x, y: o.y, r: o.max * 0.5, age: 0, t: o.t });
     if (this.rings.length > 12) this.rings.shift();
@@ -333,7 +356,11 @@ class Orbs {
     g.fillRect(0, 0, f.W, f.H);
     const pos = a.beatN + a.phase;
     const swell = 1 + 0.35 * a.bass;
-    for (const o of this.orbs) {
+    for (let i = this.orbs.length - 1; i >= 0; i--) {
+      const o = this.orbs[i];
+      o.life += (o.going ? -1 : 1) * a.dt / 2;
+      if (o.life <= 0) { this.orbs.splice(i, 1); continue; }
+      o.life = Math.min(1, o.life);
       o.x += o.vx * a.dt;
       o.y += o.vy * a.dt;
       if (o.x < 0 || o.x > f.W) { o.vx *= -1; o.x = clamp(o.x, 0, f.W); }
@@ -342,9 +369,10 @@ class Orbs {
       const ph = frac((pos + o.off) / o.beats);
       const r = (o.min + (o.max - o.min) * (0.5 + 0.5 * Math.cos(TAU * ph))) * swell;
       const [r1, g1, b1] = f.pal.rgb(o.t);
+      const al = o.al * o.life;
       const grad = g.createRadialGradient(o.x, o.y, 0, o.x, o.y, r);
-      grad.addColorStop(0, `rgba(${r1},${g1},${b1},${o.al})`);
-      grad.addColorStop(0.65, `rgba(${r1},${g1},${b1},${o.al * 0.75})`);
+      grad.addColorStop(0, `rgba(${r1},${g1},${b1},${al})`);
+      grad.addColorStop(0.65, `rgba(${r1},${g1},${b1},${al * 0.75})`);
       grad.addColorStop(1, `rgba(${r1},${g1},${b1},0)`);
       g.fillStyle = grad;
       g.beginPath();
@@ -370,8 +398,8 @@ class Orbs {
 // the transform turns one degree further and stamps a ring of small squares at
 // a growing radius into a buffer that is never cleared, so paisley arms pile
 // up. The pointer used to set the count and the size; here the mids set the
-// count and the treble the size, the bass fattens the squares, and each beat
-// steps the two colors on.
+// count and the treble the size, the bass fattens the squares, and the two
+// colors drift on, faster the louder the room.
 
 class Spiral {
   constructor() {
@@ -398,20 +426,30 @@ class Spiral {
     this.pc.fillRect(0, 0, this.pg.width, this.pg.height);
     this.fc = 0;
   }
-  beat() { this.A += 0.06; this.C += 0.045; }
-  bar(a) {
-    // The original lets the arms over-paint forever. A touch of fade on every
-    // bar keeps the newest arms readable against the oldest.
-    this.pc.fillStyle = 'rgba(0,0,0,0.1)';
-    this.pc.fillRect(0, 0, this.pg.width, this.pg.height);
-    if (a.barN % 16 === 0) { this.A = Math.random(); this.C = this.A + 0.5; }
-  }
+  beat() { /* the colors drift on their own, below */ }
+  bar() { /* the fade is per frame, below */ }
   hit() { /* the stamp below reads a.hit */ }
   draw(g, f, a) {
     this.ensure(f);
     const pc = this.pc, d = this.pg.width;
     const scaleOut = Math.hypot(f.W, f.H) / d;
     const dim = Math.max(f.W, f.H) / scaleOut;
+    // The original lets the arms over-paint forever. A touch of fade, a tenth
+    // per bar, keeps the newest arms readable against the oldest. Not a tenth
+    // at once on the bar, which read as the whole picture blinking, and not a
+    // sliver every frame either: an eight-bit canvas rounds a fill under about
+    // a hundredth away to nothing. Three hundredths, as often as the bar owes
+    // them.
+    const barLen = 4 * 60 / Math.max(40, a.bpm);
+    this.owed = (this.owed || 0) + 1 - Math.pow(0.9, a.dt / barLen);
+    if (this.owed >= 0.03) {
+      this.owed -= 0.03;
+      pc.fillStyle = 'rgba(0,0,0,0.03)';
+      pc.fillRect(0, 0, d, d);
+    }
+    const drift = a.dt * (0.3 + 0.7 * a.level);
+    this.A += 0.12 * drift;
+    this.C += 0.09 * drift;
     // One stamp per sixtieth of a second, however often the screen refreshes.
     // The original stamped per frame at p5's sixty; at an uncapped rate that
     // would lay down a solid disc.
@@ -443,16 +481,14 @@ class Spiral {
       }
       pc.restore();
     }
-    // Present it: the whole spiral turns slowly, faster when the room is loud,
-    // and breathes a little on the beat.
+    // Present it: the whole spiral turns slowly, faster when the room is loud.
     this.spin += a.dt * 0.04 * (1 + 3 * a.level);
     g.fillStyle = '#000';
     g.fillRect(0, 0, f.W, f.H);
     g.save();
     g.translate(f.W / 2, f.H / 2);
     g.rotate(this.spin);
-    const k = scaleOut * (1 + 0.05 * a.pulse);
-    g.scale(k, k);
+    g.scale(scaleOut, scaleOut);
     g.drawImage(this.pg, -d / 2, -d / 2);
     g.restore();
   }
@@ -462,7 +498,8 @@ class Spiral {
 // Borrowed from Earthbound Layers: two indexed patterns, each with its own
 // rotating palette and its own per-scanline distortion, added together on a
 // coarse grid. The bass bends the distortion, the treble spins the palettes,
-// each beat jolts the lot, and every fourth bar deals one layer afresh.
+// and every fourth bar deals one layer afresh, cross-fading it in over the
+// next two seconds while the layer it replaces fades out.
 
 const PATTERNS = ['Checker', 'Stripes', 'Rings', 'Diagonals', 'Bubbles', 'Spiral'];
 
@@ -473,8 +510,9 @@ class Layers {
     this.img = null;
     this.L = [this.deal(), this.deal()];
     this.t = Math.random() * 100;
-    this.jolt = 0;
-    this.which = 0;
+    this.which = 0;      // the layer the next deal replaces
+    this.next = null;    // the layer coming in, while one is
+    this.mix = 0;        // how far in it is, 0 to 1
     this.dx = [];
     this.dy = [];
   }
@@ -494,12 +532,35 @@ class Layers {
       scale: 20 + Math.random() * 44,
     };
   }
-  enter() { this.L = [this.deal(), this.deal()]; }
-  beat() { this.jolt = 1; for (const L of this.L) L.cyc += 1; }
+  enter() { this.L = [this.deal(), this.deal()]; this.next = null; }
+  beat() { /* the palettes cycle on their own, below */ }
   bar(a) {
-    if (a.barN % 4 === 0) { this.L[this.which] = this.deal(); this.which ^= 1; }
+    if (a.barN % 4 === 0 && !this.next) { this.next = this.deal(); this.mix = 0; }
   }
-  hit() { this.jolt = Math.max(this.jolt, 0.6); }
+  hit() { /* nothing: a jolt here was a jump */ }
+  /** Move a layer on by a frame, and build its 16-entry ramp at weight `w`:
+   *  the layers add, and two full palettes added give white, so a layer on
+   *  its own is half intensity. */
+  advance(L, li, a, f, n, m, k, w) {
+    L.cyc += a.dt * L.cycSpeed * (1 + 2 * a.treb);
+    L.scroll += a.dt * L.scrollSpeed * k;
+    const amp = L.amp * k * (1 + 1.5 * a.bass);
+    let dx = this.dx[li], dy = this.dy[li];
+    if (!dx) { dx = this.dx[li] = new Float32Array(m); dy = this.dy[li] = new Float32Array(m); }
+    for (let y = 0; y < m; y++) {
+      const v = amp * Math.sin((y / m) * L.freq * TAU + this.t * L.speed);
+      if (L.type === 1) { dx[y] = v; dy[y] = 0; }
+      else if (L.type === 2) { dx[y] = (y & 1) ? v : -v; dy[y] = 0; }
+      else { dx[y] = 0; dy[y] = v * 0.5; }
+    }
+    const ramp = new Float32Array(16 * 3);
+    const rot = Math.floor(L.cyc);
+    for (let i = 0; i < 16; i++) {
+      const [r, gg, b] = f.pal.rgb(L.palT + ((i + rot) & 15) / 16);
+      ramp[i * 3] = r * 0.5 * w; ramp[i * 3 + 1] = gg * 0.5 * w; ramp[i * 3 + 2] = b * 0.5 * w;
+    }
+    return { L, ramp, dx, dy, s: L.scale * k };
+  }
   pattern(pat, x, y, s, n, m) {
     switch (pat) {
       case 0: {
@@ -526,48 +587,42 @@ class Layers {
       this.cv.width = n;
       this.cv.height = m;
       this.img = this.cx.createImageData(n, m);
-      this.dx = [new Float32Array(m), new Float32Array(m)];
-      this.dy = [new Float32Array(m), new Float32Array(m)];
+      this.dx = [];
+      this.dy = [];
     }
     this.t += a.dt;
-    this.jolt *= Math.exp(-a.dt / 0.25);
     const k = n / 128;   // everything was tuned at 128 across
-    const ramps = [];
-    for (let li = 0; li < 2; li++) {
-      const L = this.L[li];
-      L.cyc += a.dt * L.cycSpeed * (1 + 2 * a.treb);
-      L.scroll += a.dt * L.scrollSpeed * k;
-      const amp = L.amp * k * (1 + 1.5 * a.bass + 1.5 * this.jolt);
-      const dx = this.dx[li], dy = this.dy[li];
-      for (let y = 0; y < m; y++) {
-        const w = amp * Math.sin((y / m) * L.freq * TAU + this.t * L.speed);
-        if (L.type === 1) { dx[y] = w; dy[y] = 0; }
-        else if (L.type === 2) { dx[y] = (y & 1) ? w : -w; dy[y] = 0; }
-        else { dx[y] = 0; dy[y] = w * 0.5; }
-      }
-      // Sixteen entries, half intensity each, rotated by the cycle: the two
-      // layers add, and two full palettes added give white.
-      const ramp = new Float32Array(16 * 3);
-      const rot = Math.floor(L.cyc);
-      for (let i = 0; i < 16; i++) {
-        const [r, gg, b] = f.pal.rgb(L.palT + ((i + rot) & 15) / 16);
-        ramp[i * 3] = r * 0.5; ramp[i * 3 + 1] = gg * 0.5; ramp[i * 3 + 2] = b * 0.5;
-      }
-      ramps.push(ramp);
+    // The two layers, and a third while a fresh one is coming in: the one
+    // going out gives up its weight to the one taking its place.
+    if (this.next) {
+      this.mix = Math.min(1, this.mix + a.dt / 2);
+      if (this.mix >= 1) { this.L[this.which] = this.next; this.next = null; this.which ^= 1; }
     }
+    const layers = [];
+    for (let li = 0; li < 2; li++) {
+      const w = this.next && li === this.which ? 1 - this.mix : 1;
+      layers.push(this.advance(this.L[li], li, a, f, n, m, k, w));
+    }
+    if (this.next) layers.push(this.advance(this.next, 2, a, f, n, m, k, this.mix));
     const d = this.img.data;
-    const [L0, L1] = this.L;
-    const s0 = L0.scale * k, s1 = L1.scale * k;
+    const nl = layers.length;
     let p = 0;
     for (let y = 0; y < m; y++) {
-      const x0 = this.dx[0][y], y0 = y + this.dy[0][y] + L0.scroll;
-      const x1 = this.dx[1][y], y1 = y + this.dy[1][y] + L1.scroll;
+      for (let li = 0; li < nl; li++) {
+        const q = layers[li];
+        q.x = q.dx[y];
+        q.y = y + q.dy[y] + q.L.scroll;
+      }
       for (let x = 0; x < n; x++, p += 4) {
-        const i0 = this.pattern(L0.pat, x + x0, y0, s0, n, m) * 3;
-        const i1 = this.pattern(L1.pat, x + x1, y1, s1, n, m) * 3;
-        d[p] = ramps[0][i0] + ramps[1][i1];
-        d[p + 1] = ramps[0][i0 + 1] + ramps[1][i1 + 1];
-        d[p + 2] = ramps[0][i0 + 2] + ramps[1][i1 + 2];
+        let r = 0, gg = 0, b = 0;
+        for (let li = 0; li < nl; li++) {
+          const q = layers[li];
+          const i = this.pattern(q.L.pat, x + q.x, q.y, q.s, n, m) * 3;
+          r += q.ramp[i]; gg += q.ramp[i + 1]; b += q.ramp[i + 2];
+        }
+        d[p] = r;
+        d[p + 1] = gg;
+        d[p + 2] = b;
         d[p + 3] = 255;
       }
     }
@@ -578,120 +633,10 @@ class Layers {
   }
 }
 
-// --- Bloons --------------------------------------------------------------------
-// Borrowed from Bloon Boon: glossy balloons drifting up. They swell with the
-// bass, bob on every beat, and a hit pops the highest one into confetti, with
-// a new one let go from the bottom.
-
-class Bloons {
-  constructor() {
-    this.bs = [];
-    this.bits = [];
-    this.lastPop = -10;
-    this.W = 0;
-    this.H = 0;
-  }
-  make(f, atBottom) {
-    const s = Math.min(f.W, f.H);
-    const r = s * (0.035 + Math.random() * 0.05);
-    return {
-      x: r + Math.random() * (f.W - 2 * r),
-      y: atBottom ? f.H + r * 2.5 : Math.random() * f.H,
-      r, vy: s * (0.04 + Math.random() * 0.06), bob: 0,
-      ph: Math.random() * TAU, t: Math.random(),
-    };
-  }
-  enter(g, f) {
-    this.W = f.W;
-    this.H = f.H;
-    this.bs = [];
-    for (let i = 0; i < 18; i++) this.bs.push(this.make(f, false));
-    this.bits = [];
-  }
-  beat() { for (const b of this.bs) b.bob = 1; }
-  bar(a, f) {
-    // Something always pops on a downbeat if the room has been quiet.
-    if (a.t - this.lastPop > 2) this.pop(a, f);
-  }
-  hit(a, f) {
-    // Onsets come several a second on a busy track; a pop every one of them
-    // is a screen of confetti and no balloons.
-    if (a.hit > 0.45 && a.t - this.lastPop > 0.25) this.pop(a, f);
-  }
-  pop(a, f) {
-    let top = null;
-    for (const b of this.bs) if (b.y > -b.r && b.y < f.H && (!top || b.y < top.y)) top = b;
-    if (!top) return;
-    this.lastPop = a.t;
-    const s = Math.min(f.W, f.H);
-    for (let i = 0; i < 26; i++) {
-      const ang = Math.random() * TAU, v = s * (0.2 + Math.random() * 0.6);
-      this.bits.push({ x: top.x, y: top.y, vx: Math.cos(ang) * v, vy: Math.sin(ang) * v - s * 0.2, age: 0, t: top.t + Math.random() * 0.3, w: top.r * 0.18 });
-    }
-    if (this.bits.length > 400) this.bits.splice(0, this.bits.length - 400);
-    Object.assign(top, this.make(f, true));
-  }
-  draw(g, f, a) {
-    if (!this.bs.length || this.W !== f.W || this.H !== f.H) this.enter(g, f);
-    const s = Math.min(f.W, f.H);
-    const [r0, g0, b0] = f.pal.rgb(0.05);
-    const sky = g.createLinearGradient(0, 0, 0, f.H);
-    sky.addColorStop(0, `rgb(${r0 * 0.3 | 0},${g0 * 0.3 | 0},${b0 * 0.3 | 0})`);
-    sky.addColorStop(1, `rgb(${r0 * 0.08 | 0},${g0 * 0.08 | 0},${b0 * 0.08 | 0})`);
-    g.fillStyle = sky;
-    g.fillRect(0, 0, f.W, f.H);
-    this.bs.sort((p, q) => p.r - q.r);
-    const swell = 1 + 0.35 * a.bass;
-    for (const b of this.bs) {
-      b.bob *= Math.exp(-a.dt / 0.18);
-      b.y -= b.vy * a.dt * (1 + 0.6 * a.level) + b.bob * s * 0.9 * a.dt;
-      b.x += Math.sin(a.t * 1.3 + b.ph) * s * 0.03 * a.dt;
-      if (b.y < -b.r * 3) Object.assign(b, this.make(f, true));
-      const r = b.r * swell * (1 + 0.1 * b.bob);
-      const [cr, cg, cb] = f.pal.rgb(b.t);
-      // string
-      g.strokeStyle = 'rgba(255,255,255,0.35)';
-      g.lineWidth = f.dpr;
-      g.beginPath();
-      g.moveTo(b.x, b.y + r * 1.2);
-      g.quadraticCurveTo(b.x + Math.sin(a.t * 2 + b.ph) * r * 0.5, b.y + r * 2.2, b.x + Math.sin(a.t * 2.7 + b.ph) * r * 0.3, b.y + r * 3.4);
-      g.stroke();
-      // body, lit from the upper left
-      const grad = g.createRadialGradient(b.x - r * 0.35, b.y - r * 0.45, r * 0.05, b.x, b.y, r * 1.15);
-      grad.addColorStop(0, `rgba(255,255,255,0.95)`);
-      grad.addColorStop(0.18, `rgba(${cr},${cg},${cb},1)`);
-      grad.addColorStop(1, `rgba(${cr * 0.35 | 0},${cg * 0.35 | 0},${cb * 0.35 | 0},1)`);
-      g.fillStyle = grad;
-      g.beginPath();
-      g.ellipse(b.x, b.y, r, r * 1.15, 0, 0, TAU);
-      g.fill();
-      // knot
-      g.beginPath();
-      g.moveTo(b.x, b.y + r * 1.1);
-      g.lineTo(b.x - r * 0.14, b.y + r * 1.3);
-      g.lineTo(b.x + r * 0.14, b.y + r * 1.3);
-      g.closePath();
-      g.fill();
-    }
-    const grav = s * 1.4;
-    for (let i = this.bits.length - 1; i >= 0; i--) {
-      const k = this.bits[i];
-      k.age += a.dt;
-      if (k.age > 1.2) { this.bits.splice(i, 1); continue; }
-      k.vy += grav * a.dt;
-      k.x += k.vx * a.dt;
-      k.y += k.vy * a.dt;
-      g.fillStyle = f.pal.css(k.t, 1 - k.age / 1.2);
-      g.fillRect(k.x, k.y, k.w, k.w * 0.6);
-    }
-  }
-}
-
 export const SCENES = [
-  { key: 'pixels', name: 'Pixels', make: () => new Pixels(), note: 'A noise field on a coarse grid. Bass brightens it, beats morph it, treble sparkles. Resolution sets the grid.' },
-  { key: 'flow', name: 'Flow', make: () => new Flow(), note: 'Particles ride a Perlin flow field. Bass drives them, mids weight the lines, beats redraw the current.' },
+  { key: 'pixels', name: 'Pixels', make: () => new Pixels(), note: 'A noise field on a coarse grid. Bass brightens it, beats urge it on, treble sparkles. Resolution sets the grid.' },
+  { key: 'flow', name: 'Flow', make: () => new Flow(), note: 'Particles ride a Perlin flow field. Bass drives them, mids weight the lines, beats turn the current.' },
   { key: 'orbs', name: 'Orbs', make: () => new Orbs(), note: 'The Particle System’s orbs, breathing in whole beats so they swell together. Hits send out rings.' },
-  { key: 'spiral', name: 'Spiral', make: () => new Spiral(), note: 'The Spiral Generator’s ring of squares, counted by the mids and sized by the treble. Beats step the colors.' },
-  { key: 'layers', name: 'Layers', make: () => new Layers(), note: 'Earthbound Layers: two patterns with cycling palettes, warped by the bass and jolted by the beat. Every fourth bar deals one layer afresh.' },
-  { key: 'bloons', name: 'Bloons', make: () => new Bloons(), note: 'Bloons from Bloon Boon rise and swell with the bass. Hits pop the highest one.' },
+  { key: 'spiral', name: 'Spiral', make: () => new Spiral(), note: 'The Spiral Generator’s ring of squares, counted by the mids and sized by the treble. The colors drift with the level.' },
+  { key: 'layers', name: 'Layers', make: () => new Layers(), note: 'Earthbound Layers: two patterns with cycling palettes, warped by the bass and spun by the treble. Every fourth bar fades a fresh layer in.' },
 ];
