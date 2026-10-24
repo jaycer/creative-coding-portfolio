@@ -104,7 +104,7 @@ const tapWait = opt('tap-wait');
 // other path worth seeing.
 const mic = opt('mic');
 // --keys 2,ArrowRight presses keys on the page after --wait, for apps whose
-// state is reached from the keyboard (a2v picks scenes with 1 to 6).
+// state is reached from the keyboard (a2v picks scenes with 1 to 5).
 const keys = opt('keys', '').split(',').filter(Boolean);
 // --eval '<js>' runs an expression on the page just before the shot and prints
 // what it returns, for probing the DOM when a screenshot raises a question.

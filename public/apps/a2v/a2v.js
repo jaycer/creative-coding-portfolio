@@ -21,7 +21,7 @@ const els = {
   listenBtn: $('listenBtn'), fullBtn: $('fullBtn'), saveState: $('saveState'), loadState: $('loadState'),
   idleListen: $('idleListen'), idleWatch: $('idleWatch'), settingsFile: $('settingsFile'),
   meter: $('meter'), meterNum: $('meterNum'), meterMsg: $('meterMsg'), bpmText: $('bpmText'), dot: $('dot'),
-  scene: $('scene'), sceneNote: $('sceneNote'), auto: $('auto'),
+  scene: $('scene'), sceneNote: $('sceneNote'),
   res: $('res'), resVal: $('resVal'), resCtl: $('resCtl'),
   palettes: $('palettes'), tiles: $('tiles'), tilesVal: $('tilesVal'),
   sens: $('sens'), sensVal: $('sensVal'), freeBpm: $('freeBpm'), freeBpmVal: $('freeBpmVal'),
@@ -33,7 +33,7 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 // ---------------------------------------------------------------------------
 // Config
 
-const DEFAULTS = { scene: 'pixels', auto: 16, res: 48, palette: 'Neon', tiles: 1, sens: 1, freeBpm: 110, meter: true };
+const DEFAULTS = { scene: 'pixels', res: 48, palette: 'Neon', tiles: 1, sens: 1, freeBpm: 110, meter: true };
 const cfg = { ...DEFAULTS };
 const SAVED = Object.keys(DEFAULTS);
 
@@ -300,7 +300,6 @@ function clockTick(now) {
 const made = {};
 let scene = null;
 let sceneDef = null;
-let barsInScene = 0;
 
 function setScene(key, { quiet = false } = {}) {
   const def = SCENES.find((d) => d.key === key) || SCENES[0];
@@ -308,7 +307,6 @@ function setScene(key, { quiet = false } = {}) {
   sceneDef = def;
   scene = made[def.key] || (made[def.key] = def.make());
   if (W) scene.enter(g, frame);
-  barsInScene = 0;
   for (const b of els.scene.querySelectorAll('button')) b.setAttribute('aria-checked', String(b.dataset.v === def.key));
   els.sceneNote.textContent = def.note;
   els.resCtl.classList.toggle('disabled', def.key !== 'pixels');
@@ -355,10 +353,7 @@ function loop(ms) {
   frame.res = cfg.res;
 
   if (a.beat) { scene.beat(a, frame); beatLog.push(+now.toFixed(3)); if (beatLog.length > 12) beatLog.shift(); }
-  if (a.bar) {
-    scene.bar(a, frame);
-    if (cfg.auto && ++barsInScene >= cfg.auto) stepScene(1);
-  }
+  if (a.bar) scene.bar(a, frame);
   if (a.struck) scene.hit(a, frame);
   scene.draw(g, frame, a);
   present();
@@ -544,7 +539,6 @@ els.scene.addEventListener('click', (e) => {
   const b = e.target.closest('button[data-v]');
   if (b) setScene(b.dataset.v);
 });
-els.auto.addEventListener('change', () => { cfg.auto = +els.auto.value; barsInScene = 0; });
 els.res.addEventListener('input', () => { cfg.res = +els.res.value; paintUI(); });
 els.tiles.addEventListener('input', () => { cfg.tiles = +els.tiles.value; paintUI(); });
 els.sens.addEventListener('input', () => { cfg.sens = sensFromPos(+els.sens.value); paintUI(); });
@@ -579,7 +573,6 @@ function paintUI() {
   els.sensVal.textContent = cfg.sens.toFixed(2) + '×';
   els.freeBpm.value = cfg.freeBpm;
   els.freeBpmVal.textContent = cfg.freeBpm + ' BPM';
-  els.auto.value = String(cfg.auto);
   els.meterToggle.checked = cfg.meter;
   for (const el of [els.res, els.tiles, els.sens, els.freeBpm]) fillRange(el);
 }
@@ -591,11 +584,9 @@ function applyCfg(src) {
   num('tiles', 1, 6);
   num('sens', SENS_LO, SENS_HI);
   num('freeBpm', +els.freeBpm.min, +els.freeBpm.max);
-  num('auto', 0, 64);
   cfg.res = Math.round(cfg.res);
   cfg.tiles = Math.round(cfg.tiles);
   cfg.freeBpm = Math.round(cfg.freeBpm);
-  if (![0, 8, 16, 32].includes(cfg.auto)) cfg.auto = DEFAULTS.auto;
   if (typeof src.meter === 'boolean') cfg.meter = src.meter;
   if (typeof src.palette === 'string') setPalette(src.palette);
   if (typeof src.scene === 'string') setScene(src.scene, { quiet: true });
@@ -692,7 +683,7 @@ document.addEventListener('keydown', (e) => {
 // from, read through the same module scope a visitor's clicks reach.
 window.a2vState = () => {
   const s = listenState();
-  return { ...a, scene: cfg.scene, bars: barsInScene, beats: beatLog.slice(), room: { status: s.status, heard: s.heard, conf: s.conf, level: s.level } };
+  return { ...a, scene: cfg.scene, beats: beatLog.slice(), room: { status: s.status, heard: s.heard, conf: s.conf, level: s.level } };
 };
 
 // ---------------------------------------------------------------------------
