@@ -24,11 +24,14 @@
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC' +
     '), none';
 
+  // Every element, and !important: an app's own `cursor: pointer` on a button
+  // or on its canvas (by id, which outranks anything a class rule can say)
+  // otherwise keeps the arrow up wherever the pointer happens to rest. A2V's
+  // intro buttons sit dead center, exactly where a resting pointer is.
   var style = document.createElement('style');
   style.textContent =
     '.bar{transition:opacity .4s ease}' +
-    'body.idle{cursor:' + BLANK + '}' +
-    'body.idle canvas{cursor:' + BLANK + '}' +
+    'body.idle,body.idle *{cursor:' + BLANK + ' !important}' +
     'body.idle .bar{opacity:0;pointer-events:none}';
   document.head.appendChild(style);
 
