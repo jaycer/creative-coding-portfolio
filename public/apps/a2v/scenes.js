@@ -95,7 +95,12 @@ export const PALETTES = [
   { name: 'Bubblegum', stops: ['#1a0a2a', '#7a2d8a', '#ff5db1', '#ffb8e0', '#8ef2ff'] },
   { name: 'Mono', stops: ['#000000', '#3a3a3a', '#8c8c8c', '#d9d9d9', '#ffffff'] },
   // Drift has no fixed stops: it is rebuilt from a hue that keeps turning.
-  { name: 'Drift', stops: null },
+  { name: 'Drift', stops: null, mode: 'drift' },
+  // Chromatic is rebuilt from the notes being heard: each pitch class is a
+  // hue, C red and a semitone every thirty degrees around the wheel, and the
+  // three loudest make the palette. A single note brings its own harmonics,
+  // so one note reads as root, fifth and third: a triad of color.
+  { name: 'Chromatic', stops: null, mode: 'chroma', note: 'Each note is a hue, C red and on around the wheel by semitone. The three loudest notes heard make the palette.' },
 ];
 
 const hex2rgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
@@ -122,7 +127,16 @@ export class Palette {
   use(def) {
     this.def = def;
     if (def.stops) this.build(def.stops.map(hex2rgb));
+    else if (def.mode === 'chroma') this.tune(this.hues || [0, 210, 120]);
     else this.drift(0);
+  }
+  /** Chromatic: build from three hues, the loudest note's first. Dark and
+   *  light ends are tinted with the first and last, so the ring reads as the
+   *  chord rather than as black and white with color between. */
+  tune(hues) {
+    this.hues = hues;
+    const [h1, h2, h3] = hues;
+    this.build([hsl2rgb(h1, 0.75, 0.08), hsl2rgb(h1, 0.8, 0.36), hsl2rgb(h2, 0.9, 0.55), hsl2rgb(h3, 0.8, 0.72), hsl2rgb(h3, 0.6, 0.92)]);
   }
   /** Drift: turn the hue on and rebuild. Called every frame while it is live. */
   drift(deg) {

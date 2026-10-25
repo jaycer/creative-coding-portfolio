@@ -23,8 +23,8 @@ const els = {
   meter: $('meter'), meterNum: $('meterNum'), meterMsg: $('meterMsg'), bpmText: $('bpmText'), dot: $('dot'),
   scene: $('scene'), sceneNote: $('sceneNote'),
   res: $('res'), resVal: $('resVal'), resCtl: $('resCtl'),
-  palettes: $('palettes'), tiles: $('tiles'), tilesVal: $('tilesVal'),
-  sens: $('sens'), sensVal: $('sensVal'), freeBpm: $('freeBpm'), freeBpmVal: $('freeBpmVal'),
+  palettes: $('palettes'), paletteNote: $('paletteNote'), tiles: $('tiles'), tilesVal: $('tilesVal'),
+  sens: $('sens'), sensVal: $('sensVal'), freeBpm: $('freeBpm'), freeBpmVal: $('freeBpmVal'), autoScene: $('autoScene'),
   meterToggle: $('meterToggle'), listenStatus: $('listenStatus'), micRow: $('micRow'), micSelect: $('micSelect'),
 };
 
@@ -33,7 +33,7 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 // ---------------------------------------------------------------------------
 // Config
 
-const DEFAULTS = { scene: 'pixels', res: 48, palette: 'Neon', tiles: 1, sens: 1, freeBpm: 110, meter: true };
+const DEFAULTS = { scene: 'pixels', res: 48, palette: 'Neon', tiles: 1, sens: 1, freeBpm: 110, autoScene: 16, meter: true };
 const cfg = { ...DEFAULTS };
 const SAVED = Object.keys(DEFAULTS);
 
@@ -57,6 +57,9 @@ function fillRange(el) {
 const vctx = els.view.getContext('2d');
 const work = document.createElement('canvas');
 const g = work.getContext('2d');
+// The scene on its way out keeps drawing here while the new one fades in.
+const work2 = document.createElement('canvas');
+const g2 = work2.getContext('2d');
 let W = 0, H = 0, dpr = 1;
 const pal = new Palette();
 const frame = { W: 0, H: 0, dpr: 1, pal, res: cfg.res, t: 0 };
@@ -77,9 +80,10 @@ function resize() {
   }
   if (w === W && h === H) return;
   W = w; H = h;
-  els.view.width = work.width = W;
-  els.view.height = work.height = H;
+  els.view.width = work.width = work2.width = W;
+  els.view.height = work.height = work2.height = H;
   frame.W = W; frame.H = H; frame.dpr = dpr;
+  fade = null;
   if (scene) scene.enter(g, frame);
 }
 let resizeTimer = null;
@@ -108,29 +112,39 @@ const a = {
 };
 
 let ctx = null;
-let tapSrc = null, anSlow = null, anFast = null, zero = null;
-let specSlow = null, specFast = null, prevFast = null, wave = null;
+let tapSrc = null, anSlow = null, anFast = null, anPitch = null, zero = null;
+let specSlow = null, specFast = null, prevFast = null, wave = null, specPitch = null;
 let bandBins = null;   // [bassLo, bassHi, midHi, trebHi] in slow-analyser bins
 let fluxLo = 1, fluxHi = 2;
+let binPc = null;      // pitch-analyser bin -> pitch class 0..11, or -1 outside the range read
 
 // Running peaks the bands are scored against, and the smoothed results.
 const peak = { level: 0, bass: 0, mid: 0, treb: 0 };
 const sm = { level: 0, bass: 0, mid: 0, treb: 0 };
 let fluxAvg = 0, lastHit = -10;
 
+// Which notes are being heard: twelve pitch classes, each scored against the
+// loudest of the twelve this frame and smoothed, for the Chromatic palette.
+const chroma = new Float32Array(12);
+const chromaRaw = new Float32Array(12);
+let chromaHeard = false;   // true while the spectrum has notes in it
+
 /**
- * Hang two analysers of our own off the listener's source node. Two, because
- * they want opposite things: a smoothed spectrum for the bands, so the picture
- * breathes rather than flickers, and an unsmoothed one for onsets, where any
- * averaging would blunt exactly the edge being looked for. The listener swaps
- * its source when the input changes, so this is checked every frame.
+ * Hang three analysers of our own off the listener's source node. Three,
+ * because they want different things: a smoothed spectrum for the bands, so
+ * the picture breathes rather than flickers; an unsmoothed one for onsets,
+ * where any averaging would blunt exactly the edge being looked for; and a
+ * long one for pitch, because telling C from C sharp in the fourth octave
+ * takes bins a few hertz wide, which the other two are far too coarse for.
+ * The listener swaps its source when the input changes, so this is checked
+ * every frame.
  */
 function retap() {
   const s = listenSource();
   if (s === tapSrc) return;
   tapSrc = s;
   if (zero) { try { zero.disconnect(); } catch { /* already gone */ } zero = null; }
-  anSlow = anFast = null;
+  anSlow = anFast = anPitch = null;
   if (!s || !ctx) return;
   anSlow = ctx.createAnalyser();
   anSlow.fftSize = 2048;
@@ -142,17 +156,20 @@ function retap() {
   anFast.smoothingTimeConstant = 0;
   anFast.minDecibels = -90;
   anFast.maxDecibels = -10;
+  anPitch = ctx.createAnalyser();
+  anPitch.fftSize = 8192;
+  anPitch.smoothingTimeConstant = 0.5;
+  anPitch.minDecibels = -90;
+  anPitch.maxDecibels = -10;
   // Through a gain of zero to the destination: WebKit pulls a graph from its
   // end, and an analyser hanging off nothing is never asked for a sample.
   zero = ctx.createGain();
   zero.gain.value = 0;
-  s.connect(anSlow);
-  s.connect(anFast);
-  anSlow.connect(zero);
-  anFast.connect(zero);
+  for (const an of [anSlow, anFast, anPitch]) { s.connect(an); an.connect(zero); }
   zero.connect(ctx.destination);
   specSlow = new Uint8Array(anSlow.frequencyBinCount);
   specFast = new Uint8Array(anFast.frequencyBinCount);
+  specPitch = new Uint8Array(anPitch.frequencyBinCount);
   prevFast = new Uint8Array(anFast.frequencyBinCount);
   wave = new Float32Array(anFast.fftSize);
   const hzSlow = ctx.sampleRate / anSlow.fftSize;
@@ -161,6 +178,35 @@ function retap() {
   const hzFast = ctx.sampleRate / anFast.fftSize;
   fluxLo = clamp(Math.round(40 / hzFast), 1, anFast.frequencyBinCount);
   fluxHi = clamp(Math.round(8000 / hzFast), fluxLo + 1, anFast.frequencyBinCount);
+  // Pitch class per bin, 80 Hz to 5 kHz: below that even these bins are too
+  // coarse to tell semitones apart, above it there is little but hiss.
+  const hzPitch = ctx.sampleRate / anPitch.fftSize;
+  binPc = new Int8Array(anPitch.frequencyBinCount).fill(-1);
+  for (let i = 1; i < binPc.length; i++) {
+    const hz = i * hzPitch;
+    if (hz < 80 || hz > 5000) continue;
+    const midi = 69 + 12 * Math.log2(hz / 440);
+    binPc[i] = ((Math.round(midi) % 12) + 12) % 12;
+  }
+}
+
+/** Fold the spectrum onto the twelve pitch classes. Power, not magnitude, so
+ *  the notes stand out from the wash between them; then each class against
+ *  the loudest, so a quiet passage keeps its colors. */
+function chromaTick(dt) {
+  anPitch.getByteFrequencyData(specPitch);
+  chromaRaw.fill(0);
+  for (let i = 1; i < binPc.length; i++) {
+    const pc = binPc[i];
+    if (pc < 0) continue;
+    const v = specPitch[i] / 255;
+    chromaRaw[pc] += v * v;
+  }
+  let top = 0;
+  for (let k = 0; k < 12; k++) top = Math.max(top, chromaRaw[k]);
+  chromaHeard = top > 0.05;
+  const k = 1 - Math.exp(-dt / 0.15);
+  for (let i = 0; i < 12; i++) chroma[i] += ((chromaHeard ? chromaRaw[i] / top : 0) - chroma[i]) * k;
 }
 
 function bandAvg(lo, hi) {
@@ -188,9 +234,11 @@ function analyze(dt) {
     a.level = sm.level; a.bass = sm.bass; a.mid = sm.mid; a.treb = sm.treb;
     a.hit *= Math.exp(-dt / 0.14);
     a.struck = false;
+    chromaHeard = false;
     return;
   }
   anSlow.getByteFrequencyData(specSlow);
+  chromaTick(dt);
   a.bass = score('bass', bandAvg(bandBins[0], bandBins[1]), dt);
   a.mid = score('mid', bandAvg(bandBins[1], bandBins[2]), dt);
   a.treb = score('treb', bandAvg(bandBins[2], bandBins[3]), dt);
@@ -224,15 +272,43 @@ function analyze(dt) {
   }
 }
 
+// The Chromatic palette's three hues. They glide toward the three loudest
+// pitch classes rather than snapping, so a chord change is a color change you
+// can watch, and a note that comes and goes at the edge of hearing does not
+// flicker the whole picture. With nothing heard they turn slowly, as Drift
+// does, as a triad.
+const hues = [0, 210, 120];
+let idleHue = Math.random() * 360;
+const PC_HUE = (pc) => pc * 30;   // C red, then thirty degrees a semitone
+function huesTick(dt) {
+  let want;
+  if (live && chromaHeard) {
+    const order = [...Array(12).keys()].sort((p, q) => chroma[q] - chroma[p]);
+    want = [PC_HUE(order[0]), PC_HUE(order[1]), PC_HUE(order[2])];
+  } else {
+    idleHue = (idleHue + dt * 4) % 360;
+    want = [idleHue, idleHue + 210, idleHue + 120];
+  }
+  const k = 1 - Math.exp(-dt / 0.35);
+  for (let i = 0; i < 3; i++) {
+    const d = ((want[i] - hues[i] + 540) % 360) - 180;
+    hues[i] = (hues[i] + d * k + 360) % 360;
+  }
+}
+
 /** Nothing is being heard: give the scene a room to draw anyway, built from
  *  the free-running clock, so the piece is alive before the microphone is
  *  allowed and goes on being alive between tracks. */
 function pretend() {
   const off = Math.exp(-(((a.phase - 0.5 + 1) % 1) ** 2) * 60);   // an off-beat hat
-  a.bass = 0.05 + 0.9 * a.pulse;
-  a.mid = 0.35 + 0.2 * Math.sin(a.t * 0.7) + 0.2 * a.pulse;
-  a.treb = 0.15 + 0.55 * off;
-  a.level = 0.45 + 0.3 * a.pulse;
+  // A track has phrases: it builds, breaks down, builds again. Two slow
+  // swells that never quite line up, so the room on its own is not a loop.
+  const swell = 0.5 + 0.3 * Math.sin(a.t / 6.1) + 0.2 * Math.sin(a.t / 15.7 + 1);
+  const energy = 0.45 + 0.55 * swell;
+  a.bass = (0.05 + 0.9 * a.pulse) * (0.55 + 0.45 * energy);
+  a.mid = (0.35 + 0.2 * Math.sin(a.t * 0.7) + 0.2 * a.pulse) * (0.6 + 0.4 * energy);
+  a.treb = (0.15 + 0.55 * off) * (0.3 + 0.7 * energy);
+  a.level = (0.45 + 0.3 * a.pulse) * (0.5 + 0.5 * energy);
   a.hit *= Math.exp(-a.dt / 0.14);
   a.struck = false;
   if (a.beat) { a.hit = 0.85; a.struck = true; }
@@ -300,26 +376,38 @@ function clockTick(now) {
 const made = {};
 let scene = null;
 let sceneDef = null;
+let fade = null;         // { from, t }: the scene going out, and how long it has been going
+const FADE = 1.4;        // seconds; a change of scene is a dissolve, not a cut
+let barsInScene = 0;     // for the auto change while the microphone is off
 
 function setScene(key, { quiet = false } = {}) {
   const def = SCENES.find((d) => d.key === key) || SCENES[0];
   cfg.scene = def.key;
   sceneDef = def;
-  scene = made[def.key] || (made[def.key] = def.make());
+  const next = made[def.key] || (made[def.key] = def.make());
+  if (scene && next !== scene && W) {
+    // Hand the outgoing scene its own canvas, with the picture it was drawing
+    // still on it, so trails and accumulations carry on through the dissolve.
+    g2.drawImage(work, 0, 0);
+    fade = { from: scene, t: 0 };
+  }
+  scene = next;
+  barsInScene = 0;
   if (W) scene.enter(g, frame);
   for (const b of els.scene.querySelectorAll('button')) b.setAttribute('aria-checked', String(b.dataset.v === def.key));
   els.sceneNote.textContent = def.note;
   els.resCtl.classList.toggle('disabled', def.key !== 'pixels');
   if (!quiet) toast(def.name);
 }
-function stepScene(dir) {
+function stepScene(dir, opts) {
   const i = SCENES.findIndex((d) => d.key === cfg.scene);
-  setScene(SCENES[(i + dir + SCENES.length) % SCENES.length].key);
+  setScene(SCENES[(i + dir + SCENES.length) % SCENES.length].key, opts);
 }
 
-function present() {
+function present(src, alpha) {
   const n = cfg.tiles;
-  if (n <= 1) { vctx.drawImage(work, 0, 0); return; }
+  vctx.globalAlpha = alpha;
+  if (n <= 1) { vctx.drawImage(src, 0, 0); vctx.globalAlpha = 1; return; }
   // The middle of the picture, repeated, with every other tile mirrored so
   // the seams meet themselves.
   const tw = W / n, th = H / n;
@@ -329,10 +417,11 @@ function present() {
       vctx.save();
       vctx.translate(i * tw + (i % 2 ? tw : 0), j * th + (j % 2 ? th : 0));
       vctx.scale(i % 2 ? -1 : 1, j % 2 ? -1 : 1);
-      vctx.drawImage(work, sx, sy, tw, th, 0, 0, tw, th);
+      vctx.drawImage(src, sx, sy, tw, th, 0, 0, tw, th);
       vctx.restore();
     }
   }
+  vctx.globalAlpha = 1;
 }
 
 let lastT = 0;
@@ -348,15 +437,29 @@ function loop(ms) {
   a.live = live;
   clockTick(now);
   if (live) analyze(dt); else pretend();
-  if (pal.def.stops === null) pal.drift(dt * 4 + (a.bar ? 25 : 0));
+  if (pal.def.mode === 'drift') pal.drift(dt * 4 + (a.bar ? 25 : 0));
+  else if (pal.def.mode === 'chroma') { huesTick(dt); pal.tune(hues); }
   frame.t = now;
   frame.res = cfg.res;
 
   if (a.beat) { scene.beat(a, frame); beatLog.push(+now.toFixed(3)); if (beatLog.length > 12) beatLog.shift(); }
-  if (a.bar) scene.bar(a, frame);
+  if (a.bar) {
+    scene.bar(a, frame);
+    // On its own, the piece changes scene for itself. With a room to follow
+    // it stays where it was put.
+    if (!live && cfg.autoScene && ++barsInScene >= cfg.autoScene) stepScene(1, { quiet: true });
+  }
   if (a.struck) scene.hit(a, frame);
   scene.draw(g, frame, a);
-  present();
+  present(work, 1);
+  if (fade) {
+    fade.t += dt;
+    if (fade.t >= FADE) fade = null;
+    else {
+      fade.from.draw(g2, frame, a);
+      present(work2, 1 - fade.t / FADE);
+    }
+  }
 
   if (live && cfg.meter) els.dot.style.opacity = (0.3 + 0.7 * a.pulse).toFixed(2);
 }
@@ -509,7 +612,7 @@ function endListening() {
   live = false;
   grid = null;
   tapSrc = null;
-  anSlow = anFast = null;
+  anSlow = anFast = anPitch = null;
   setListenUI(false);
   els.meter.hidden = true;
   els.listenStatus.hidden = true;
@@ -519,6 +622,8 @@ function endListening() {
 function setListenUI(on) {
   els.listenBtn.setAttribute('aria-pressed', String(on));
   els.listenBtn.textContent = on ? 'Listening' : 'Listen';
+  els.listenBtn.title = on ? 'Turn the microphone off; it carries on by itself' : 'Follow whatever is playing in the room';
+  barsInScene = 0;
 }
 
 els.listenBtn.addEventListener('click', () => { if (live || asking) endListening(); else beginListening(); });
@@ -543,6 +648,7 @@ els.res.addEventListener('input', () => { cfg.res = +els.res.value; paintUI(); }
 els.tiles.addEventListener('input', () => { cfg.tiles = +els.tiles.value; paintUI(); });
 els.sens.addEventListener('input', () => { cfg.sens = sensFromPos(+els.sens.value); paintUI(); });
 els.freeBpm.addEventListener('input', () => { cfg.freeBpm = +els.freeBpm.value; paintUI(); });
+els.autoScene.addEventListener('change', () => { cfg.autoScene = +els.autoScene.value; barsInScene = 0; });
 els.meterToggle.addEventListener('change', () => {
   cfg.meter = els.meterToggle.checked;
   els.meter.hidden = !(cfg.meter && (live || asking));
@@ -562,6 +668,8 @@ function setPalette(name) {
   cfg.palette = def.name;
   pal.use(def);
   for (const b of els.palettes.children) b.setAttribute('aria-pressed', String(b.dataset.v === def.name));
+  els.paletteNote.textContent = def.note || '';
+  els.paletteNote.hidden = !def.note;
 }
 
 function paintUI() {
@@ -573,6 +681,7 @@ function paintUI() {
   els.sensVal.textContent = cfg.sens.toFixed(2) + '×';
   els.freeBpm.value = cfg.freeBpm;
   els.freeBpmVal.textContent = cfg.freeBpm + ' BPM';
+  els.autoScene.value = String(cfg.autoScene);
   els.meterToggle.checked = cfg.meter;
   for (const el of [els.res, els.tiles, els.sens, els.freeBpm]) fillRange(el);
 }
@@ -584,6 +693,8 @@ function applyCfg(src) {
   num('tiles', 1, 6);
   num('sens', SENS_LO, SENS_HI);
   num('freeBpm', +els.freeBpm.min, +els.freeBpm.max);
+  num('autoScene', 0, 64);
+  if (![0, 8, 16, 32].includes(cfg.autoScene)) cfg.autoScene = DEFAULTS.autoScene;
   cfg.res = Math.round(cfg.res);
   cfg.tiles = Math.round(cfg.tiles);
   cfg.freeBpm = Math.round(cfg.freeBpm);
@@ -683,7 +794,7 @@ document.addEventListener('keydown', (e) => {
 // from, read through the same module scope a visitor's clicks reach.
 window.a2vState = () => {
   const s = listenState();
-  return { ...a, scene: cfg.scene, beats: beatLog.slice(), room: { status: s.status, heard: s.heard, conf: s.conf, level: s.level } };
+  return { ...a, scene: cfg.scene, fading: !!fade, bars: barsInScene, beats: beatLog.slice(), chroma: Array.from(chroma, (v) => +v.toFixed(3)), hues: hues.map(Math.round), room: { status: s.status, heard: s.heard, conf: s.conf, level: s.level } };
 };
 
 // ---------------------------------------------------------------------------
