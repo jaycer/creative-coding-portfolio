@@ -213,6 +213,7 @@
       .seg button[aria-checked="true"] { color: var(--accent-ink); background: var(--accent); font-weight: 600; }
       .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
       .seg__note, .desc { margin: 7px 0 0; font-size: .74rem; line-height: 1.45; color: var(--ink-faint); }
+      .desc[hidden] { display: none; }
 
       .chips { display: flex; flex-wrap: wrap; gap: 6px; }
       .chip {
@@ -376,6 +377,7 @@
       <section class="group">
         <h2 class="group__name">Look</h2>
         <div class="chips" id="palettes" style="margin-bottom:12px"></div>
+        <p class="desc" id="paletteNote" hidden style="margin:-5px 0 12px"></p>
         <div class="ctl">
           <div class="ctl__top"><label for="tiles">Tiles</label><span class="ctl__val" id="tilesVal">Off</span></div>
           <input type="range" id="tiles" min="1" max="6" step="1" value="1" />
@@ -393,7 +395,16 @@
           <div class="ctl__top"><label for="freeBpm">Free run</label><span class="ctl__val" id="freeBpmVal">110 BPM</span></div>
           <input type="range" id="freeBpm" min="60" max="160" step="1" value="110" />
         </div>
-        <p class="desc">The pace it keeps on its own, before the microphone is allowed and whenever nothing out there has a beat.</p>
+        <div class="field">
+          <label for="autoScene">Change scene</label>
+          <select id="autoScene">
+            <option value="0">Never</option>
+            <option value="8">Every 8 bars</option>
+            <option value="16" selected>Every 16 bars</option>
+            <option value="32">Every 32 bars</option>
+          </select>
+        </div>
+        <p class="desc">How it runs on its own, with the microphone off. With a room to follow it keeps the room's pace and stays on the scene you chose.</p>
         <div class="switches" style="margin-top:12px">
           <label class="sw"><input type="checkbox" id="meterToggle" checked /><span class="sw__box"></span><span class="sw__text">Show the tempo</span></label>
         </div>
@@ -406,7 +417,7 @@
 
       <section class="group">
         <h2 class="group__name">Keys</h2>
-        <p class="desc">Tap the picture or press the right arrow for the next scene, 1 to 5 for one in particular. L listens, C opens this, F goes full screen.</p>
+        <p class="desc">Tap the picture or press the right arrow for the next scene, 1 to 5 for one in particular. L turns the microphone on and off, C opens this, F goes full screen.</p>
       </section>
     </aside>
 
