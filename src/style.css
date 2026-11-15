@@ -158,5 +158,16 @@ body {
   align-items: center;
   gap: 16px;
 }
+.site-footer__build {
+  margin-left: 10px;
+  white-space: nowrap;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+  opacity: 0.75;
+}
+@media (max-width: 600px) {
+  .site-footer__build { display: block; margin: 4px 0 0; font-size: 0.66rem; }
+}
 .site-footer a { color: rgba(255, 255, 255, 0.82); text-decoration: none; border-bottom: 1px solid rgba(255,255,255,0.32); }
 .site-footer a:hover { color: #fff; border-bottom-color: rgba(255,255,255,0.7); }
