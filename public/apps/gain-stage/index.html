@@ -168,6 +168,36 @@
       .toggle-chip:hover { color: var(--ink); border-color: var(--ink-faint); }
       .toggle-chip.on { color: var(--accent); border-color: var(--accent-dim); background: rgba(111,211,164,.1); }
 
+      /* ---- marks ---- */
+      #markBtn { touch-action: none; user-select: none; -webkit-user-select: none; }
+      .marks { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+      .marks__head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+      .mark {
+        display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: 8px; align-items: center; padding: 3px 0;
+      }
+      .mark__time {
+        font-family: var(--mono); font-size: .76rem; font-variant-numeric: tabular-nums;
+        color: var(--ink); background: var(--panel-2); border: 1px solid var(--line);
+        border-radius: 7px; padding: 6px 9px; cursor: pointer; white-space: nowrap;
+        transition: border-color .15s ease, color .15s ease;
+      }
+      .mark__time:hover { border-color: var(--ink-faint); color: var(--accent); }
+      .mark__note {
+        width: 100%; min-width: 0; font-family: var(--sans); font-size: .8rem; color: var(--ink);
+        background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px;
+      }
+      .mark__note::placeholder { color: var(--ink-faint); }
+      .mark__note:focus { outline: none; border-color: var(--accent-dim); }
+      /* iOS zooms the page when a focused field is under 16px. */
+      @media (pointer: coarse) { .mark__note { font-size: 16px; } }
+      .mark__del {
+        font-size: 1rem; line-height: 1; color: var(--ink-faint); background: none; border: none;
+        padding: 6px 8px; border-radius: 7px; cursor: pointer;
+      }
+      .mark__del:hover { color: var(--hot); }
+      .mark__time:focus-visible, .mark__del:focus-visible, .toggle-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
       /* ---- EQ display ---- */
       #eqWrap { position: relative; }
       #eq { display: block; width: 100%; height: 240px; border-radius: 10px; background: var(--panel-2); touch-action: none; cursor: crosshair; }
@@ -392,7 +422,16 @@
           </button>
           <span class="time" id="time">0:00.0 / 0:00.0</span>
           <button class="toggle-chip" id="loopBtn" type="button" aria-pressed="true">Loop</button>
-          <span class="hint" id="transportHint">Space plays · B compares</span>
+          <button class="toggle-chip" id="markBtn" type="button" title="Tap for a point, hold for a section (M)">Mark</button>
+          <span class="hint" id="transportHint">Space plays · B compares · M marks</span>
+        </div>
+        <div class="marks" id="marks" hidden>
+          <div class="marks__head">
+            <span class="panel__name">Marks</span>
+            <span class="panel__note">Tap for a point · hold for a section</span>
+            <button class="toggle-chip" id="copyMarks" type="button">Copy</button>
+          </div>
+          <div id="markList"></div>
         </div>
       </section>
 
