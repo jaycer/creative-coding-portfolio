@@ -9,7 +9,7 @@
 //   1. state + formatting
 //   2. audio graph lifecycle (create, tear down, A/B)
 //   3. file / microphone input
-//   4. transport + waveform
+//   4. transport + waveform + marks
 //   5. the EQ display
 //   6. controls, modules, presets
 //   7. meters
@@ -231,6 +231,7 @@ async function loadFile(file) {
     region = { start: 0, end: buffer.duration };
     pausedAt = 0;
     computePeaks();
+    loadMarks();
     drawWave();
     resetMeters();
 
@@ -252,6 +253,7 @@ async function loadFile(file) {
       buffer = null;
       peaks = null;
       waveImage = null;
+      loadMarks();
       $('play').disabled = true;
       $('exportBtn').disabled = true;
       $('trackName').textContent = 'No file loaded';
@@ -462,6 +464,26 @@ function drawWave() {
     g.stroke();
   }
 
+  if (buffer && (marks.length || openMark !== null)) {
+    const tx = (t) => (t / buffer.duration) * W;
+    const lw = Math.max(2, Math.round(W / 600));
+    const paint = (a, b) => {
+      const x0 = tx(a), x1 = tx(b);
+      if (x1 - x0 > lw) {
+        g.fillStyle = 'rgba(216,221,229,.16)';
+        g.fillRect(x0, 0, x1 - x0, H);
+        g.fillStyle = 'rgba(216,221,229,.55)';
+        g.fillRect(x1 - lw / 2, 0, lw / 2, H);
+      }
+      // A flag at the top, so a point is findable on a dense waveform.
+      g.fillStyle = '#d8dde5';
+      g.fillRect(x0 - lw / 2, 0, lw, H);
+      g.fillRect(x0 - lw / 2, 0, lw * 3.5, H * 0.09);
+    };
+    for (const m of marks) paint(m.start, m.end);
+    if (openMark !== null) paint(openMark, Math.max(openMark, heardPosition()));
+  }
+
   const pos = currentPosition();
   if (buffer) {
     const x = (pos / buffer.duration) * W;
@@ -518,6 +540,170 @@ function setupWaveInteraction() {
     drawWave();
     toast('Loop region cleared');
   });
+}
+
+// --------------------------------------------------------- 4c. marks
+//
+// Flag moments while listening: tap for a point, hold for a section. The list
+// copies out as plain text, one mark per line, to hand to whoever is editing.
+
+let marks = [];         // { start, end, note } in seconds; end === start is a point
+let openMark = null;    // start of a section that is still being held
+const MARK_MIN_HOLD = 0.25;   // shorter than this is a tap, so a point
+let marksTimer = null;
+
+const fmtMark = (t) => {
+  if (!Number.isFinite(t)) t = 0;
+  // Round first, or 59.996 prints as 0:60.00.
+  const c = Math.round(t * 100);
+  const m = Math.floor(c / 6000);
+  return `${m}:${((c - m * 6000) / 100).toFixed(2).padStart(5, '0')}`;
+};
+const markLabel = (m) => (m.end > m.start ? `${fmtMark(m.start)}-${fmtMark(m.end)}` : fmtMark(m.start));
+
+/**
+ * Where the listener is, not where the scheduler is. What is audible now left
+ * the buffer one limiter look-ahead plus one output latency ago, and a mark
+ * should land on what was heard.
+ */
+function heardPosition() {
+  const pos = currentPosition();
+  if (!playing || !ctx || !buffer) return pos;
+  const lag = (chain ? chain.lookaheadSamples / ctx.sampleRate : 0) + (ctx.outputLatency || ctx.baseLatency || 0);
+  return clamp(pos - lag, 0, buffer.duration);
+}
+
+// Marks belong to a file, so they are kept per file name and length.
+const marksKey = () => `gain-stage:marks:${trackLabel}:${buffer ? buffer.duration.toFixed(2) : '0'}`;
+
+function saveMarks(soon) {
+  clearTimeout(marksTimer);
+  const write = () => {
+    try {
+      if (marks.length) localStorage.setItem(marksKey(), JSON.stringify(marks));
+      else localStorage.removeItem(marksKey());
+    } catch { /* private mode */ }
+  };
+  if (soon) marksTimer = setTimeout(write, 300); else write();
+}
+
+function loadMarks() {
+  openMark = null;
+  $('markBtn').classList.remove('on');
+  marks = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(marksKey()) || '[]');
+    if (Array.isArray(raw) && buffer) {
+      marks = raw
+        .filter((m) => m && Number.isFinite(m.start) && Number.isFinite(m.end))
+        .map((m) => ({
+          start: clamp(m.start, 0, buffer.duration),
+          end: clamp(Math.max(m.start, m.end), 0, buffer.duration),
+          note: typeof m.note === 'string' ? m.note.slice(0, 200) : '',
+        }));
+    }
+  } catch { /* stale or corrupt, start clean */ }
+  renderMarks();
+}
+
+function addMark(start, end) {
+  marks.push({ start, end: Math.max(start, end), note: '' });
+  marks.sort((a, b) => a.start - b.start || a.end - b.end);
+  renderMarks();
+  saveMarks();
+}
+
+function markDown() {
+  if (!buffer || openMark !== null) return;
+  if (!playing) {
+    // Paused: mark the loop region if one is set, otherwise the playhead.
+    const whole = region.start <= 0.001 && region.end >= buffer.duration - 0.001;
+    if (whole) addMark(pausedAt, pausedAt); else addMark(region.start, region.end);
+    return;
+  }
+  openMark = heardPosition();
+  $('markBtn').classList.add('on');
+}
+
+function markUp() {
+  if (openMark === null) return;
+  const start = openMark;
+  openMark = null;
+  $('markBtn').classList.remove('on');
+  if (!buffer) return;
+  let end = heardPosition();
+  // Behind the start means the loop wrapped or the file ran out mid-hold.
+  if (end < start) end = playing ? Math.max(start, region.end) : buffer.duration;
+  addMark(start, end - start < MARK_MIN_HOLD ? start : end);
+}
+
+function renderMarks() {
+  const list = $('markList');
+  $('marks').hidden = marks.length === 0;
+  list.replaceChildren();
+  for (const m of marks) {
+    const row = document.createElement('div');
+    row.className = 'mark';
+
+    const time = document.createElement('button');
+    time.type = 'button';
+    time.className = 'mark__time';
+    time.textContent = markLabel(m);
+    time.title = 'Play from here';
+    time.addEventListener('click', (e) => {
+      if (e.detail > 0) e.currentTarget.blur();   // hand Space back to the transport
+      startPlayback(m.start);
+    });
+
+    const note = document.createElement('input');
+    note.type = 'text';
+    note.className = 'mark__note';
+    note.placeholder = 'Note';
+    note.maxLength = 200;
+    note.value = m.note;
+    note.setAttribute('aria-label', `Note for ${markLabel(m)}`);
+    note.addEventListener('input', () => { m.note = note.value; saveMarks(true); });
+    note.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === 'Escape') note.blur(); });
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'mark__del';
+    del.textContent = '×';
+    del.setAttribute('aria-label', `Delete mark at ${markLabel(m)}`);
+    del.addEventListener('click', () => {
+      marks = marks.filter((x) => x !== m);
+      renderMarks();
+      saveMarks();
+    });
+
+    row.append(time, note, del);
+    list.append(row);
+  }
+}
+
+function marksText() {
+  const head = `${$('trackName').textContent} (${fmtMark(buffer ? buffer.duration : 0)})`;
+  return [head, ...marks.map((m) => `${markLabel(m)}  ${m.note}`.trimEnd())].join('\n');
+}
+
+async function copyMarks() {
+  const text = marksText();
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // No clipboard permission (or not a secure context): the old way still works.
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.append(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { /* refused */ }
+    ta.remove();
+    if (!ok) { toast('Could not copy'); return; }
+  }
+  toast(`${marks.length} ${marks.length === 1 ? 'mark' : 'marks'} copied`);
 }
 
 // --------------------------------------------------------- 5. EQ display
@@ -1409,6 +1595,24 @@ function wireUp() {
   });
   $('loopBtn').classList.toggle('on', loopOn);
 
+  // Mark: press starts it, release ends it. preventDefault keeps focus off the
+  // button so Space and M stay with the transport.
+  const markBtn = $('markBtn');
+  markBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    try { markBtn.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+    markDown();
+  });
+  markBtn.addEventListener('pointerup', markUp);
+  markBtn.addEventListener('pointercancel', markUp);
+  markBtn.addEventListener('contextmenu', (e) => e.preventDefault());   // long press on touch
+  // A click with no pointer behind it came from the keyboard: drop a point.
+  markBtn.addEventListener('click', (e) => { if (e.detail === 0) { markDown(); markUp(); } });
+  $('copyMarks').addEventListener('click', (e) => {
+    if (e.detail > 0) e.currentTarget.blur();
+    copyMarks();
+  });
+
   $('abBtn').addEventListener('click', (e) => {
     if (e.detail > 0) e.currentTarget.blur();
     setBypass(!bypassed);
@@ -1475,8 +1679,12 @@ function wireUp() {
     if (t && t.closest && t.closest('input, textarea, select, button, a, [contenteditable]')) return;
     if (e.key === ' ') { e.preventDefault(); togglePlay(); }
     else if (e.key === 'b' || e.key === 'B') { e.preventDefault(); setBypass(!bypassed); }
+    else if ((e.key === 'm' || e.key === 'M') && !e.repeat) { e.preventDefault(); markDown(); }
     else if (e.key === 'Escape') closeExport();
   });
+  // Releasing M closes the section wherever focus has gone in the meantime.
+  window.addEventListener('keyup', (e) => { if (e.key === 'm' || e.key === 'M') markUp(); });
+  window.addEventListener('blur', markUp);
 
   window.addEventListener('resize', () => { waveImage = null; });
 }
