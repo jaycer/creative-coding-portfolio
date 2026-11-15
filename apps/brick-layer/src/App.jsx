@@ -1001,6 +1001,7 @@ export default function ShaderCompositor() {
             >✕</button>
           </div>
           {layerPanel}
+          <p className="build-line">{window.buildLine || ""}</p>
         </div>
       )}
     </div>

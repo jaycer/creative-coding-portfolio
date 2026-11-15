@@ -102,6 +102,22 @@ async function teardownAudio() {
   ctx = chain = inputBus = dryDelay = dryGain = wetGain = master = outMeter = analyser = null;
 }
 
+// A context the phone will not start again. iOS leaves one behind after an
+// interruption (the file picker, a call, a trip to another app): resume() is
+// accepted on a tap and the context still never runs. The decoded buffer does
+// not belong to a context, so the cure is a new one, and it has to be made
+// inside the tap for iOS to let it run. Hence no await anywhere in here.
+let ctxStale = false;
+function discardAudio() {
+  stopSource();
+  stopMic();
+  const old = ctx;
+  ctx = chain = inputBus = dryDelay = dryGain = wetGain = master = outMeter = analyser = null;
+  ctxStale = false;
+  if (old) { try { old.close().catch(() => {}); } catch { /* already gone */ } }
+}
+const ctxNeedsReplacing = () => !!ctx && (ctxStale || ctx.state === 'closed' || ctx.state === 'interrupted');
+
 /**
  * Bring up the graph, optionally at a specific sample rate.
  *
@@ -229,6 +245,7 @@ async function loadFile(file) {
     const rate = sniffWavSampleRate(arr);
     stopMic();
     inputMode = 'file';
+    if (ctxNeedsReplacing()) discardAudio();
     await ensureAudio(rate, { running: false });
     // decodeAudioData detaches the ArrayBuffer; nothing reads it afterwards.
     const decoded = await ctx.decodeAudioData(arr);
@@ -282,6 +299,7 @@ async function toggleMic() {
   try {
     stopSource();
     inputMode = 'mic';
+    if (ctxNeedsReplacing()) discardAudio();
     await ensureAudio();
     // Every browser "helpfulness" feature off — they are compressors and
     // filters of their own, and they would fight this chain.
@@ -336,7 +354,18 @@ function currentPosition() {
 
 async function startPlayback(from) {
   if (!buffer) return;
-  await ensureAudio();
+  // Still in the tap at this point, which is the only place a replacement
+  // context can be made (see discardAudio).
+  if (ctxNeedsReplacing()) discardAudio();
+  await ensureAudio(ctx ? undefined : buffer.sampleRate);
+  if (ctx.state !== 'running') {
+    // Do not start a source on a clock that is not moving: it shows Pause and
+    // sits at 0:00 with no sound. Say so, and build a fresh context next tap.
+    ctxStale = true;
+    stopSource();
+    toast('Audio did not start. Tap Play again.');
+    return;
+  }
   stopSource();
   const at = clamp(from, 0, Math.max(0, buffer.duration - 0.01));
   source = ctx.createBufferSource();
