@@ -84,7 +84,12 @@ function toast(msg) {
 async function resumeCtx() {
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* < iOS 16.4 */ }
   for (let i = 0; i < 6 && ctx.state !== 'running'; i++) {
-    try { await ctx.resume(); } catch { /* keep trying */ }
+    // Outside a gesture WebKit leaves resume() pending rather than rejecting
+    // it, so never wait on it alone: a file chosen from the picker is not a
+    // gesture, and the load sat on "Decoding…" for good.
+    try {
+      await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 150))]);
+    } catch { /* keep trying */ }
     if (ctx.state !== 'running') await new Promise((r) => setTimeout(r, 60));
   }
   return ctx.state === 'running';
@@ -105,11 +110,13 @@ async function teardownAudio() {
  * back resampled and exports at the wrong rate. When we can read the rate off
  * the file we build the context to match instead.
  */
-async function ensureAudio(preferredRate) {
+async function ensureAudio(preferredRate, { running = true } = {}) {
   if (ctx && preferredRate && Math.abs(ctx.sampleRate - preferredRate) > 1 && inputMode === 'file') {
     await teardownAudio();
   }
-  if (ctx) { await resumeCtx(); return; }
+  // Decoding needs a context but not a running one; only playback and the
+  // microphone do, and those arrive on a gesture that is allowed to start it.
+  if (ctx) { if (running) await resumeCtx(); return; }
 
   const Ctx = window.AudioContext || window.webkitAudioContext;
   try {
@@ -164,7 +171,7 @@ async function ensureAudio(preferredRate) {
   };
 
   chain.apply(state, ctx.currentTime, 0);
-  await resumeCtx();
+  if (running) await resumeCtx();
   updateLatencyNote();
 }
 
@@ -222,7 +229,7 @@ async function loadFile(file) {
     const rate = sniffWavSampleRate(arr);
     stopMic();
     inputMode = 'file';
-    await ensureAudio(rate);
+    await ensureAudio(rate, { running: false });
     // decodeAudioData detaches the ArrayBuffer; nothing reads it afterwards.
     const decoded = await ctx.decodeAudioData(arr);
     stopSource();
