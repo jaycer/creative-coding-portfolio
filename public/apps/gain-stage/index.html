@@ -343,6 +343,7 @@
       .sheet p { margin: 0 0 18px; font-size: .8rem; color: var(--ink-faint); line-height: 1.5; }
       .sheet .field { margin-bottom: 16px; }
       .sheet .field > .ctl__label { display: block; margin-bottom: 7px; }
+      .sheet .field__note { margin: 9px 0 0; font-size: .74rem; }
       .sheet__actions { display: flex; gap: 9px; justify-content: flex-end; margin-top: 20px; }
       .progress { height: 4px; border-radius: 2px; background: var(--panel-2); overflow: hidden; margin-top: 14px; display: none; }
       .progress.on { display: block; }
@@ -520,7 +521,7 @@
 
     <div class="sheet-back" id="exportSheet" role="dialog" aria-modal="true" aria-labelledby="exportTitle">
       <div class="sheet">
-        <h2 id="exportTitle">Export WAV</h2>
+        <h2 id="exportTitle">Export</h2>
         <p>Rendered offline at full quality. Audio stays local.</p>
         <div class="field">
           <span class="ctl__label">Bit depth</span>
@@ -536,6 +537,14 @@
             <button type="button" data-range="full" aria-pressed="true">Whole file</button>
             <button type="button" data-range="loop" aria-pressed="false">Loop region</button>
           </div>
+        </div>
+        <div class="field">
+          <span class="ctl__label">Save as</span>
+          <div class="seg" id="kindSeg">
+            <button type="button" data-kind="wav" aria-pressed="true">WAV</button>
+            <button type="button" data-kind="project" aria-pressed="false">Project zip</button>
+          </div>
+          <p class="field__note" id="kindNote" hidden>Original file, settings, marks and this render, stamped with version and time. Load opens it again.</p>
         </div>
         <div class="progress" id="exportProgress"><i></i></div>
         <div class="sheet__actions">
