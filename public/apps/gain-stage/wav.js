@@ -6,7 +6,9 @@
 //
 // Three depths, because they are for different jobs:
 //   16-bit  the universally playable one, with TPDF dither so quiet fades do
-//           not turn into gritty quantization steps.
+//           not turn into gritty quantization steps. The dither noise comes
+//           from a fixed seed, so the same audio always encodes to the same
+//           bytes and a render can be checked against an earlier one.
 //   24-bit  the archival/hand-off depth; dither is pointless this far down.
 //   32-bit float  no clipping, no rounding — for round-tripping into a DAW.
 
@@ -59,6 +61,14 @@ export function encodeWav(buffer, options = {}) {
   for (let c = 0; c < channels; c++) data.push(buffer.getChannelData(c));
 
   const scale = depth === 16 ? 32767 : 8388607;
+  // mulberry32: small, fast, and plenty random for dither.
+  let seed = 0x6a09e667;
+  const rand = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
   let offset = 44;
 
   for (let i = 0; i < frames; i++) {
@@ -72,7 +82,7 @@ export function encodeWav(buffer, options = {}) {
       if (dither) {
         // TPDF (triangular) dither at ±1 LSB — the difference between a fade
         // that dissolves and one that crunches.
-        v += (Math.random() + Math.random() - 1) / scale;
+        v += (rand() + rand() - 1) / scale;
       }
       // Clamp before rounding: a sample at exactly 1.0 would wrap to -32768.
       v = v > 1 ? 1 : v < -1 ? -1 : v;

@@ -13,7 +13,7 @@
 //   5. the EQ display
 //   6. controls, modules, presets
 //   7. meters
-//   8. export
+//   8. export, and the project zip
 //   9. save / load / keyboard
 
 import {
@@ -22,6 +22,7 @@ import {
 } from './chain.js';
 import { PRESETS } from './presets.js';
 import { encodeWav, downloadBlob } from './wav.js';
+import { makeZip, readZip } from './zip.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
@@ -54,6 +55,7 @@ let inputMode = 'file';
 let micStream = null;
 let micNode = null;
 let trackLabel = '';
+let sourceFile = null;  // the file as it was chosen, kept for the project zip
 
 const fmtDb = (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)} dB`;
 const fmtDbf = (v) => (Number.isFinite(v) ? `${v > 0 ? '+' : ''}${v.toFixed(1)}` : '-inf');
@@ -252,6 +254,7 @@ async function loadFile(file) {
     stopSource();
     buffer = decoded;
     trackLabel = file.name.replace(/\.[^.]+$/, '');
+    sourceFile = file;
     region = { start: 0, end: buffer.duration };
     pausedAt = 0;
     computePeaks();
@@ -268,6 +271,7 @@ async function loadFile(file) {
     $('micBtn').classList.remove('live');
     $('micBtn').textContent = 'Use microphone';
     updateLatencyNote();
+    return true;
   } catch (err) {
     note.textContent = 'Drop a file anywhere on this page';
     // Matching the file's sample rate can mean the context was torn down and
@@ -275,6 +279,7 @@ async function loadFile(file) {
     // is now attached to a closed one, so let it go rather than let Play throw.
     if (buffer && ctx && buffer.sampleRate !== ctx.sampleRate) {
       buffer = null;
+      sourceFile = null;
       peaks = null;
       waveImage = null;
       loadMarks();
@@ -285,6 +290,7 @@ async function loadFile(file) {
       drawWave();
     }
     toast(`Could not decode that file (${err && err.name ? err.name : 'error'})`);
+    return false;
   }
 }
 
@@ -1485,6 +1491,7 @@ function drawMeters(now) {
 
 let exportDepth = 24;
 let exportRange = 'full';
+let exportKind = 'wav';   // 'wav', or 'project' for the zip
 
 function openExport() {
   if (!buffer) { toast('Load a file first'); return; }
@@ -1496,61 +1503,205 @@ function closeExport() {
   $('exportProgress').classList.remove('on');
 }
 
+/** Render the file through the current settings. Resolves to the WAV and what it covers. */
+async function renderMaster() {
+  const sr = buffer.sampleRate;
+  const useLoop = exportRange === 'loop' && region.end - region.start > 0.05;
+  const start = useLoop ? region.start : 0;
+  const dur = (useLoop ? region.end : buffer.duration) - start;
+
+  // Render a little past the end so the limiter's look-ahead delay has
+  // somewhere to land, then drop exactly that many samples off the front.
+  const tail = 0.3;
+  const channels = Math.min(2, Math.max(1, buffer.numberOfChannels));
+  const off = new OfflineAudioContext(channels, Math.ceil((dur + tail) * sr), sr);
+  await loadWorklets(off);
+  const c = buildChain(off, { meters: false });
+  const src = off.createBufferSource();
+  src.buffer = buffer;
+  src.connect(c.input);
+  c.output.connect(off.destination);
+  c.apply(state, 0, 0);   // no ramps offline — the settings are already final
+  src.start(0, start, dur);
+
+  const rendered = await off.startRendering();
+
+  const skip = c.lookaheadSamples;
+  const outLen = Math.min(Math.ceil(dur * sr), Math.max(0, rendered.length - skip));
+  const outBuf = off.createBuffer(channels, outLen, sr);
+  for (let ch = 0; ch < channels; ch++) {
+    outBuf.copyToChannel(rendered.getChannelData(ch).subarray(skip, skip + outLen), ch);
+  }
+
+  const blob = encodeWav(outBuf, { depth: exportDepth });
+  const suffix = exportDepth === 32 ? '32f' : `${exportDepth}`;
+  return {
+    blob,
+    name: `${trackLabel || 'gain-stage'}-master-${suffix}.wav`,
+    range: useLoop ? 'loop' : 'full',
+    start,
+    end: start + dur,
+  };
+}
+
+// What goes in a saved settings file, and in a project.
+// `build` is the codebase that wrote the file, so a settings file made before
+// a breaking change can still be traced back to the app that can read it.
+// normalizeState() picks the keys it knows, so the extra one is harmless.
+const settingsDoc = () => ({ ...state, build: window.buildVersion?.() ?? 'unknown' });
+
+// A name that is safe as a path inside the archive on any system.
+const zipSafe = (name) => name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_');
+const fileStamp = (d) => {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+};
+
+/**
+ * The project zip: everything needed to get back to this master, or to redo it.
+ *   project.json     what is in here, which build wrote it, and when
+ *   settings.json    the same file Save writes; Load reads it on its own
+ *   original/<file>  the audio as it was chosen, byte for byte
+ *   export/<wav>     the render
+ */
+async function sha256(blob) {
+  // Needs a secure context; without one the project just goes without.
+  if (!globalThis.crypto || !crypto.subtle) return null;
+  const hash = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+  return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function buildProject(master) {
+  const now = new Date();
+  const original = `original/${zipSafe(sourceFile.name)}`;
+  const exported = `export/${zipSafe(master.name)}`;
+  const project = {
+    app: 'gain-stage',
+    format: 1,
+    build: window.buildVersion?.() ?? 'unknown',
+    saved: now.toISOString(),
+    original: {
+      path: original,
+      name: sourceFile.name,
+      bytes: sourceFile.size,
+      sha256: await sha256(sourceFile),
+      type: sourceFile.type || '',
+      sampleRate: buffer.sampleRate,
+      channels: buffer.numberOfChannels,
+      seconds: Number(buffer.duration.toFixed(6)),
+    },
+    settings: 'settings.json',
+    export: {
+      path: exported,
+      bytes: master.blob.size,
+      // The same original and settings in the same build render to these bytes.
+      sha256: await sha256(master.blob),
+      bitDepth: exportDepth,
+      float: exportDepth === 32,
+      range: master.range,
+      start: Number(master.start.toFixed(6)),
+      end: Number(master.end.toFixed(6)),
+    },
+    loop: { on: loopOn, start: Number(region.start.toFixed(6)), end: Number(region.end.toFixed(6)) },
+    marks,
+  };
+  const blob = await makeZip([
+    { name: 'project.json', data: JSON.stringify(project, null, 2) },
+    { name: 'settings.json', data: JSON.stringify(settingsDoc(), null, 2) },
+    { name: original, data: sourceFile },
+    { name: exported, data: master.blob },
+  ], now);
+  return { blob, name: `${trackLabel || 'gain-stage'}-project-${fileStamp(now)}.zip` };
+}
+
 async function runExport() {
   if (!buffer) return;
+  const asProject = exportKind === 'project';
+  if (asProject && !sourceFile) { toast('Load a file first'); return; }
   const go = $('exportGo');
   go.disabled = true;
   $('exportProgress').classList.add('on');
   try {
-    const sr = buffer.sampleRate;
-    const useLoop = exportRange === 'loop' && region.end - region.start > 0.05;
-    const start = useLoop ? region.start : 0;
-    const dur = (useLoop ? region.end : buffer.duration) - start;
-
-    // Render a little past the end so the limiter's look-ahead delay has
-    // somewhere to land, then drop exactly that many samples off the front.
-    const tail = 0.3;
-    const channels = Math.min(2, Math.max(1, buffer.numberOfChannels));
-    const off = new OfflineAudioContext(channels, Math.ceil((dur + tail) * sr), sr);
-    await loadWorklets(off);
-    const c = buildChain(off, { meters: false });
-    const src = off.createBufferSource();
-    src.buffer = buffer;
-    src.connect(c.input);
-    c.output.connect(off.destination);
-    c.apply(state, 0, 0);   // no ramps offline — the settings are already final
-    src.start(0, start, dur);
-
-    const rendered = await off.startRendering();
-
-    const skip = c.lookaheadSamples;
-    const outLen = Math.min(Math.ceil(dur * sr), Math.max(0, rendered.length - skip));
-    const outBuf = off.createBuffer(channels, outLen, sr);
-    for (let ch = 0; ch < channels; ch++) {
-      outBuf.copyToChannel(rendered.getChannelData(ch).subarray(skip, skip + outLen), ch);
-    }
-
-    const blob = encodeWav(outBuf, { depth: exportDepth });
-    const suffix = exportDepth === 32 ? '32f' : `${exportDepth}`;
-    downloadBlob(blob, `${trackLabel || 'gain-stage'}-master-${suffix}.wav`);
+    const master = await renderMaster();
+    const out = asProject ? await buildProject(master) : master;
+    downloadBlob(out.blob, out.name);
     closeExport();
-    toast(`Exported ${(blob.size / 1048576).toFixed(1)} MB · ${exportDepth}-bit`);
+    const mb = `${(out.blob.size / 1048576).toFixed(1)} MB`;
+    toast(asProject ? `Project saved · ${mb}` : `Exported ${mb} · ${exportDepth}-bit`);
   } catch (err) {
-    toast(`Export failed: ${err && err.message ? err.message : 'unknown error'}`);
+    toast(`${asProject ? 'Project' : 'Export'} failed: ${err && err.message ? err.message : 'unknown error'}`);
   } finally {
     go.disabled = false;
     $('exportProgress').classList.remove('on');
   }
 }
 
+/** Open a project zip: the original audio, its settings, marks and loop. */
+async function loadProject(file) {
+  let entries, project;
+  try {
+    entries = await readZip(file);
+    const doc = entries.get('project.json');
+    project = doc ? JSON.parse(await (await doc.blob()).text()) : null;
+  } catch (err) {
+    toast(`Could not open that zip (${err && err.message ? err.message : 'error'})`);
+    return;
+  }
+  if (!project || project.app !== 'gain-stage' || !project.original || !entries.has(project.original.path)) {
+    toast('Not a Gain Stage project');
+    return;
+  }
+  try {
+    const o = project.original;
+    const audio = await entries.get(o.path).blob(typeof o.type === 'string' ? o.type : '');
+    const name = typeof o.name === 'string' && o.name ? o.name : o.path.split('/').pop();
+    if (!(await loadFile(new File([audio], name, { type: audio.type })))) return;
+
+    const settings = entries.get(typeof project.settings === 'string' ? project.settings : 'settings.json');
+    if (settings) {
+      state = normalizeState(JSON.parse(await (await settings.blob()).text()));
+      syncAll();
+      pushAudio();
+      persist();
+    }
+    // The project's marks win over whatever this browser remembered for the name.
+    if (Array.isArray(project.marks)) {
+      try { localStorage.setItem(marksKey(), JSON.stringify(project.marks)); } catch { /* private mode */ }
+      loadMarks();
+    }
+    const l = project.loop;
+    if (l && Number.isFinite(l.start) && Number.isFinite(l.end) && l.end > l.start) {
+      region = { start: clamp(l.start, 0, buffer.duration), end: clamp(l.end, 0, buffer.duration) };
+      loopOn = l.on !== false;
+      $('loopBtn').setAttribute('aria-pressed', String(loopOn));
+      $('loopBtn').classList.toggle('on', loopOn);
+    }
+    drawWave();
+    toast('Project loaded');
+  } catch (err) {
+    toast(`Could not load that project (${err && err.message ? err.message : 'error'})`);
+  }
+}
+
+/** Settings JSON or a project zip, from the Load button or a drop. */
+const isZip = (f) => /\.zip$/i.test(f.name) || /zip/.test(f.type);
+const isJson = (f) => /\.json$/i.test(f.name);
+async function loadSettingsFile(f) {
+  try {
+    state = normalizeState(JSON.parse(await f.text()));
+    syncAll();
+    pushAudio();
+    persist();
+    toast('Settings loaded');
+  } catch {
+    toast('Invalid settings file');
+  }
+}
+
 // ----------------------------------------------- 9. save / load / keyboard
 
 function saveSettings() {
-  // `build` is the codebase that wrote the file, so a settings file made before
-  // a breaking change can still be traced back to the app that can read it.
-  // normalizeState() picks the keys it knows, so the extra one is harmless.
-  const doc = { ...state, build: window.buildVersion?.() ?? 'unknown' };
-  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify(settingsDoc(), null, 2)], { type: 'application/json' });
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   downloadBlob(blob, `gain-stage-${stamp}.json`);
   toast('Settings saved');
@@ -1558,26 +1709,14 @@ function saveSettings() {
 
 const settingsInput = document.createElement('input');
 settingsInput.type = 'file';
-settingsInput.accept = 'application/json,.json';
+settingsInput.accept = 'application/json,.json,application/zip,.zip';
 settingsInput.style.display = 'none';
 document.body.append(settingsInput);
 settingsInput.addEventListener('change', (e) => {
   const f = e.target.files && e.target.files[0];
   e.target.value = '';
   if (!f) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      state = normalizeState(JSON.parse(reader.result));
-      syncAll();
-      pushAudio();
-      persist();
-      toast('Settings loaded');
-    } catch {
-      toast('Invalid settings file');
-    }
-  };
-  reader.readAsText(f);
+  if (isZip(f)) loadProject(f); else loadSettingsFile(f);
 });
 
 const audioInput = document.createElement('input');
@@ -1675,6 +1814,10 @@ function wireUp() {
   };
   segPick($('depthSeg'), 'depth', (v) => { exportDepth = Number(v); });
   segPick($('rangeSeg'), 'range', (v) => { exportRange = v; });
+  segPick($('kindSeg'), 'kind', (v) => {
+    exportKind = v;
+    $('kindNote').hidden = v !== 'project';
+  });
 
   // Drag and drop, anywhere on the page.
   let dragDepth = 0;
@@ -1692,18 +1835,8 @@ function wireUp() {
     $('drop').classList.remove('hot');
     const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (!f) return;
-    if (f.name.toLowerCase().endsWith('.json')) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          state = normalizeState(JSON.parse(reader.result));
-          syncAll(); pushAudio(); persist();
-          toast('Settings loaded');
-        } catch { toast('Invalid settings file'); }
-      };
-      reader.readAsText(f);
-      return;
-    }
+    if (isJson(f)) { loadSettingsFile(f); return; }
+    if (isZip(f)) { loadProject(f); return; }
     loadFile(f);
   });
 
