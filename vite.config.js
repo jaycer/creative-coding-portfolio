@@ -163,6 +163,79 @@ function siteUrls() {
 }
 
 /**
+ * Stamp the build version onto every address a static app loads code from.
+ *
+ *   <script src="./a2v.js">            ->  ./a2v.js?v=0.10.0-7-g9a49fe1
+ *   import { x } from './chain.js'     ->  './chain.js?v=0.10.0-7-g9a49fe1'
+ *
+ * Vite gives what it bundles a hashed file name, so a new build is a new URL
+ * and no cache can hold it back. The pages under /public ship verbatim and
+ * keep the same names forever. Whether a browser then sees a fix is up to the
+ * host's cache header: GitHub Pages says ten minutes, but a second deployment
+ * of this site serves scripts with a year, and a laptop there kept running a
+ * script weeks after it was fixed. With the version in the address, every
+ * release is a set of URLs nothing has cached, on any host.
+ *
+ * It is one rule, applied to the HTML and JS that came from /public: a quoted
+ * path that starts ./ or ../, ends in a code extension, and names a file that
+ * exists in the build. The existence test is what keeps it off strings that
+ * only look like paths. It has to reach inside the scripts and not stop at
+ * the page, for two reasons: a fresh page would otherwise import stale
+ * modules, and a module loaded as both ./x.js and ./x.js?v= is two modules.
+ *
+ * Shaders and JSON data are stamped along with scripts, since a new script
+ * with an old shader is its own kind of broken. Pictures and models are not.
+ * version.json is left bare; it is the one file that must never be pinned,
+ * and the scripts that read it ask for it uncached.
+ *
+ * Build only. The dev server already sends no-store.
+ */
+function cacheStamp() {
+  const CODE = /(['"`])(\.{1,2}\/[^'"`?#$\s]+\.(?:js|mjs|css|glsl|json))\1/g;
+  const query = `?v=${encodeURIComponent(appVersion)}`;
+
+  const stampFile = (path) => {
+    const here = dirname(path);
+    const source = readFileSync(path, 'utf-8');
+    let n = 0;
+    const out = source.replace(CODE, (whole, quote, ref) => {
+      if (ref.endsWith('/version.json')) return whole;
+      const target = resolve(here, ref);
+      if (!existsSync(target) || !statSync(target).isFile()) return whole;
+      n++;
+      return quote + ref + query + quote;
+    });
+    if (n) writeFileSync(path, out);
+    return n;
+  };
+
+  const sweep = (dir, root) => {
+    let n = 0;
+    for (const name of readdirSync(dir)) {
+      const path = resolve(dir, name);
+      // Everything in assets/ is the bundler's and is already hashed.
+      if (path === resolve(root, 'assets')) continue;
+      if (statSync(path).isDirectory()) { n += sweep(path, root); continue; }
+      if (/\.(html|js|mjs)$/.test(name)) n += stampFile(path);
+    }
+    return n;
+  };
+
+  let outDir = 'dist';
+  return {
+    name: 'cache-stamp',
+    apply: 'build',
+    configResolved(config) { outDir = config.build.outDir; },
+    closeBundle() {
+      const root = resolve(__dirname, outDir);
+      if (!existsSync(root)) return;
+      const n = sweep(root, root);
+      console.log(`[cache-stamp] ${n} script addresses stamped ${query}`);
+    },
+  };
+}
+
+/**
  * Publish the app list at /apps.manifest.json.
  *
  * src/apps.js is the one place the gallery is edited, but it is JavaScript, and
@@ -293,7 +366,7 @@ export default defineConfig({
   // live under a different repo/subpath, so BASE_PATH overrides it when set
   // (the preview workflow passes e.g. /creative-coding-portfolio-preview/<branch>/).
   base: process.env.BASE_PATH || '/creative-coding-portfolio/',
-  plugins: [react(), versionJson(), appsManifest(), siteUrls(), touchIcons()],
+  plugins: [react(), versionJson(), appsManifest(), siteUrls(), touchIcons(), cacheStamp()],
   // This is a true multi-page site: the gallery links to real sub-app pages.
   // 'mpa' disables Vite's SPA index.html fallback so a directory request like
   // /apps/<slug>/ resolves to that folder's index.html (including the static

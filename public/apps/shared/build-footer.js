@@ -77,7 +77,8 @@
     else document.addEventListener('DOMContentLoaded', fn);
   }
 
-  fetch(url)
+  // Never from the cache: a pinned copy of this file would name an old build.
+  fetch(url, { cache: 'no-store' })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(function (v) {
       if (!v || !v.version) return;
