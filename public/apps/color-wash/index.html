@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Color Wash — Jayce Renner</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Color Wash" />
+    <meta name="description" content="A slow wash of color across the whole screen, drawn in WebGL. Choose the colors, the direction they travel and how fast." />
+    <meta name="theme-color" content="#0b0d12" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="Color Wash" />
+    <meta property="og:description" content="A slow wash of color across the whole screen, drawn in WebGL. Choose the colors, the direction they travel and how fast." />
+    <meta property="og:url" content="%SITE_URL%/apps/color-wash/" />
+    <meta property="og:image" content="%SITE_URL%/og/color-wash.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Color Wash" />
+    <meta name="twitter:description" content="A slow wash of color across the whole screen, drawn in WebGL. Choose the colors, the direction they travel and how fast." />
+    <meta name="twitter:image" content="%SITE_URL%/og/color-wash.jpg" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; }
+      #field {
+        position: fixed;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        display: block;
+      }
+
+      .bar {
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 12px 18px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        /* The one thing in here that has to work over ANY color the picker can
+           reach. A scrim rather than a color chosen to contrast: white on a dark
+           fade is legible over a pure yellow and over a pure black alike, and
+           does not have to be recalculated every time the field changes. */
+        background: linear-gradient(180deg, rgba(0,0,0,0.5), rgba(0,0,0,0));
+        pointer-events: none;
+      }
+      .bar h1 { margin: 0; font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+      .bar .back {
+        pointer-events: auto;
+        color: #fff;
+        text-decoration: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        padding: 6px 12px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        white-space: nowrap;
+        transition: background 0.15s ease;
+      }
+      .bar .back:hover { background: rgba(255,255,255,0.15); }
+      .bar .bar-btn {
+        pointer-events: auto;
+        font: inherit;
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: #fff;
+        background: none;
+        height: 30px;
+        padding: 0 12px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .bar .bar-btn:hover { background: rgba(255,255,255,0.15); }
+      .bar .push { margin-left: auto; }
+      .toast {
+        position: fixed;
+        left: 50%; bottom: 24px;
+        z-index: 30;
+        padding: 9px 16px;
+        font: 500 0.85rem -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: rgba(0,0,0,0.78);
+        border: 1px solid rgba(255,255,255,0.3);
+        border-radius: 999px;
+        opacity: 0;
+        transform: translate(-50%, 8px);
+        transition: opacity 0.2s ease, transform 0.2s ease;
+        pointer-events: none;
+      }
+      .toast.show { opacity: 1; transform: translate(-50%, 0); }
+      .bar .menu {
+        pointer-events: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        background: none;
+        height: 30px;
+        padding: 0 13px;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .bar .menu:hover { background: rgba(255,255,255,0.15); }
+
+      @media (max-width: 700px) {
+        .back-label { display: none; }
+        .bar { gap: 9px; padding: 12px 14px; }
+        .bar h1 { display: none; }
+      }
+      body.idle.menu-open .bar { opacity: 1; pointer-events: auto; }
+
+      .scrim {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 18px;
+        /* Undimmed, so the wash can be watched while it is being changed. */
+        background: transparent;
+        animation: scrim-in 0.18s ease;
+      }
+      .scrim[hidden] { display: none; }
+
+      .sheet {
+        position: relative;
+        opacity: 0.92;
+        width: 100%;
+        max-width: 320px;
+        max-height: 100%;
+        overflow-y: auto;
+        padding: 18px 20px 20px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        color: #fff;
+        background: rgba(0,0,0,0.72);
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 16px;
+        animation: sheet-in 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.15);
+      }
+      .sheet-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 0 0 6px;
+      }
+      .sheet h2 { margin: 0 auto 0 0; font-size: 1.05rem; font-weight: 650; letter-spacing: -0.01em; }
+      .sheet .intro {
+        margin: 0 0 16px;
+        font-size: 0.82rem;
+        line-height: 1.45;
+        opacity: 0.72;
+      }
+      .sheet .close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px; height: 26px;
+        font-size: 0.85rem;
+        color: #fff;
+        background: none;
+        border: 1px solid rgba(255,255,255,0.3);
+        border-radius: 999px;
+        cursor: pointer;
+        opacity: 0.75;
+        transition: background 0.15s ease, opacity 0.15s ease;
+      }
+      .sheet .close:hover { background: rgba(255,255,255,0.14); opacity: 1; }
+      .sheet .close:focus-visible { border-color: rgba(255,255,255,0.55); opacity: 1; }
+
+      .sheet .row { margin: 0 0 16px; }
+      .sheet .row-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin: 0 0 6px;
+        font-size: 0.9rem;
+        font-weight: 500;
+      }
+      .sheet .row-head output { font-variant-numeric: tabular-nums; opacity: 0.7; font-weight: 400; }
+      .sheet .colors { display: flex; flex-wrap: wrap; gap: 8px; }
+      .sheet .swatch { position: relative; }
+      /* The native swatch, with the browser's own chrome taken off it. */
+      .sheet input[type="color"] {
+        appearance: none;
+        -webkit-appearance: none;
+        display: block;
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        background: none;
+        border: 1px solid rgba(255,255,255,0.35);
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      .sheet input[type="color"]::-webkit-color-swatch-wrapper { padding: 3px; }
+      .sheet input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
+      .sheet input[type="color"]::-moz-color-swatch { border: none; border-radius: 7px; }
+      .sheet input[type="color"]:focus-visible { border-color: rgba(255,255,255,0.7); }
+      .sheet .remove {
+        position: absolute;
+        top: -7px; right: -7px;
+        width: 18px; height: 18px;
+        padding: 0;
+        font-size: 0.6rem;
+        line-height: 1;
+        color: #fff;
+        background: #000;
+        border: 1px solid rgba(255,255,255,0.45);
+        border-radius: 999px;
+        cursor: pointer;
+      }
+      .sheet .add {
+        width: 40px; height: 40px;
+        font-size: 1.2rem;
+        color: #fff;
+        background: none;
+        border: 1px dashed rgba(255,255,255,0.4);
+        border-radius: 10px;
+        cursor: pointer;
+      }
+      .sheet .add:hover { background: rgba(255,255,255,0.12); }
+      .sheet input[type="range"] { display: block; width: 100%; margin: 0; accent-color: #7fe8c0; }
+      .sheet .reset {
+        font: inherit;
+        font-size: 0.8rem;
+        color: #fff;
+        background: none;
+        border: 1px solid rgba(255,255,255,0.3);
+        border-radius: 999px;
+        padding: 4px 12px;
+        cursor: pointer;
+        opacity: 0.8;
+      }
+      .sheet .reset:hover { background: rgba(255,255,255,0.14); opacity: 1; }
+      .sheet .profile { display: flex; align-items: stretch; gap: 6px; }
+      .sheet .profile[hidden] { display: none; }
+      .sheet .profile + .profile { margin-top: 8px; }
+      .sheet select {
+        flex: 1;
+        min-width: 0;
+        height: 34px;
+        padding: 0 8px;
+        font: inherit;
+        font-size: 0.9rem;
+        color: #fff;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.28);
+        border-radius: 10px;
+      }
+      .sheet select option, .sheet select optgroup { color: #000; }
+      .sheet .profile input[type="text"] {
+        flex: 1;
+        min-width: 0;
+        width: 0;
+        height: 34px;
+        padding: 0 10px;
+        font: inherit;
+        font-size: 0.9rem;
+        color: #fff;
+        background: rgba(255,255,255,0.1);
+        border: 1px solid rgba(255,255,255,0.28);
+        border-radius: 10px;
+      }
+      .sheet .profile input[type="text"]:focus-visible { outline: none; border-color: rgba(255,255,255,0.7); }
+      .sheet .profile input[type="text"][aria-invalid="true"] { border-color: #ffb4a8; }
+      .sheet .profile .reset { flex: none; }
+      .sheet .row .desc { margin-top: 6px; }
+      .sheet .nogl { margin: 0 0 12px; font-size: 0.82rem; color: #ffb4a8; }
+
+      .sheet .desc {
+        margin: 10px 0 0;
+        font-size: 0.76rem;
+        line-height: 1.4;
+        opacity: 0.62;
+      }
+      .sheet .action {
+        display: block;
+        width: 100%;
+        margin-top: 18px;
+        padding: 12px 0;
+        font: inherit;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: #10231d;
+        background: #7fe8c0;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: background 0.15s ease;
+      }
+      .sheet .action:hover { background: #fff; }
+
+      @keyframes scrim-in { from { opacity: 0; } }
+      @keyframes sheet-in { from { opacity: 0; transform: translateY(8px) scale(0.97); } }
+      @media (prefers-reduced-motion: reduce) {
+        .scrim, .sheet { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="field"></canvas>
+
+    <header class="bar">
+      <a class="back" href="../../">← <span class="back-label">Gallery</span></a>
+      <h1>Color Wash</h1>
+      <button class="bar-btn push" id="saveState" type="button">Save</button>
+      <button class="bar-btn" id="loadState" type="button">Load</button>
+      <button class="menu" id="menu-btn" type="button" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false"></button>
+    </header>
+
+    <div class="scrim" id="scrim" hidden>
+      <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+        <div class="sheet-head">
+          <h2 id="sheet-title">Color Wash</h2>
+          <button class="reset" id="reset-btn" type="button">Reset</button>
+          <button class="close" id="close-btn" type="button" aria-label="Close settings">✕</button>
+        </div>
+
+        <p class="nogl" id="nogl" hidden>WebGL is not available in this browser.</p>
+
+        <div class="row">
+          <div class="row-head"><label for="profile">Profile</label><output id="profile-out" for="profile"></output></div>
+          <div class="profile">
+            <select id="profile"></select>
+            <button class="reset" id="save-btn" type="button">Save as</button>
+            <button class="reset" id="delete-btn" type="button" hidden>Delete</button>
+          </div>
+          <form class="profile" id="name-form" hidden>
+            <input type="text" id="name" maxlength="40" placeholder="Name" autocomplete="off" spellcheck="false" aria-label="Profile name" />
+            <button class="reset" type="submit">Save</button>
+            <button class="reset" id="name-cancel" type="button">Cancel</button>
+          </form>
+          <p class="desc" id="name-note" hidden></p>
+        </div>
+
+        <div class="row">
+          <div class="row-head"><span id="colors-label">Colors</span></div>
+          <div class="colors" id="colors" role="group" aria-labelledby="colors-label"></div>
+        </div>
+
+        <div class="row">
+          <div class="row-head"><label for="direction">Direction</label><output id="direction-out" for="direction"></output></div>
+          <input type="range" id="direction" min="0" max="360" step="1" value="270" />
+        </div>
+
+        <div class="row">
+          <div class="row-head"><label for="speed">Speed</label><output id="speed-out" for="speed"></output></div>
+          <input type="range" id="speed" min="0" max="4" step="0.05" value="1" />
+        </div>
+
+        <div class="row">
+          <div class="row-head"><label for="fade">Fade</label><output id="fade-out" for="fade"></output></div>
+          <input type="range" id="fade" min="0" max="100" step="1" value="0" />
+        </div>
+
+        <button class="action" id="done-btn" type="button">Look</button>
+        <p class="build-line" data-build-info></p>
+      </div>
+    </div>
+
+    <script src="../shared/autohide.js"></script>
+    <script src="../shared/menu-icon.js"></script>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="../shared/build-version.js"></script>
+    <script type="module" src="./color-wash.js"></script>
+    <script src="../shared/build-footer.js"></script>
+  </body>
+</html>
