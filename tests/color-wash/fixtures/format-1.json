@@ -1,0 +1,17 @@
+{
+  "app": "color-wash",
+  "format": 1,
+  "build": "0.10.0-9-g21213db",
+  "saved": "2026-11-24T18:30:00.000Z",
+  "profile": "Kitchen Window",
+  "settings": {
+    "colors": ["#ffcc00", "#ff6600", "#aa0044", "#220066"],
+    "direction": 315,
+    "speed": 1.25,
+    "fade": 12
+  },
+  "profiles": [
+    { "name": "Kitchen Window", "colors": ["#ffcc00", "#ff6600", "#aa0044"], "direction": 300, "speed": 1.25, "fade": 0 },
+    { "name": "Slow Tide", "colors": ["#003355", "#0088aa"], "direction": 180, "speed": 0.15, "fade": 40 }
+  ]
+}

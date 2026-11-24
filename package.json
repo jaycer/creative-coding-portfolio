@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "node --test \"tests/**/*.test.mjs\"",
     "shoot": "node tools/shoot.mjs",
     "icons": "node tools/make-touch-icons.mjs"
   },
