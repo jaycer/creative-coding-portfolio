@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fried Mango Sonification — Jayce Renner</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Sonification" />
+    <meta name="description" content="Hear a job search. Each day is a beat and each layer of the search has its own 8-bit voice. Mix the tracks, then export MIDI or a WAV. Data stays local." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Jayce Renner — Creative Coding" />
+    <meta property="og:title" content="Fried Mango Sonification" />
+    <meta property="og:description" content="Hear a job search. Each day is a beat and each layer of the search has its own 8-bit voice. Mix the tracks, then export MIDI or a WAV. Data stays local." />
+    <meta property="og:url" content="%SITE_URL%/apps/fried-mango-sonification/" />
+    <meta property="og:image" content="%SITE_URL%/og/fried-mango-sonification.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Fried Mango Sonification" />
+    <meta name="twitter:description" content="Hear a job search. Each day is a beat and each layer of the search has its own 8-bit voice." />
+    <meta name="twitter:image" content="%SITE_URL%/og/fried-mango-sonification.jpg" />
+    <style>
+      /* The journey film's dark world, with mango for the things you press.
+         Track colors are the film's own: blue applications, orange
+         interviews, green offers. */
+      :root {
+        --bg:        #0b0d11;
+        --panel:     #14171d;
+        --panel-2:   #1b1f27;
+        --line:      #272c36;
+        --line-soft: #1e222a;
+        --ink:       #dde1e8;
+        --ink-dim:   #949cab;
+        --ink-faint: #666e7c;
+        --accent:    #f6a821;
+        --accent-dim:#8a5f17;
+        --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body { background: var(--bg); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+
+      .bar {
+        position: sticky; top: 0; z-index: 30; display: flex; align-items: center; gap: 10px;
+        padding: 11px 16px; background: rgba(11, 13, 17, 0.78);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .bar .back, .bar-btn, .btn {
+        font: inherit; font-size: 0.8rem; text-decoration: none; color: var(--ink-dim); background: none;
+        padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px;
+        white-space: nowrap; cursor: pointer; -webkit-tap-highlight-color: transparent;
+        transition: color .15s ease, border-color .15s ease, background .15s ease;
+      }
+      .bar .back:hover, .bar-btn:hover, .btn:hover { color: var(--ink); border-color: var(--ink-faint); }
+      .bar-btn:focus-visible, .back:focus-visible, .btn:focus-visible, .seg button:focus-visible, .chip:focus-visible {
+        outline: 2px solid var(--accent); outline-offset: 2px;
+      }
+      .bar-btn.primary { color: #1a1204; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+      .bar-btn.primary:hover { background: #ffbe4a; border-color: #ffbe4a; color: #1a1204; }
+      .bar-btn[disabled] { opacity: .45; cursor: progress; }
+      .bar .crumb { font-size: 0.66rem; letter-spacing: 0.26em; text-transform: uppercase; color: var(--ink-faint); }
+      .bar .push { margin-left: auto; }
+      @media (max-width: 720px) { .bar .back-label, .bar .crumb { display: none; } }
+
+      .toast {
+        position: fixed; bottom: 24px; left: 50%; z-index: 60; transform: translateX(-50%) translateY(10px);
+        padding: 10px 18px; border-radius: 999px; background: rgba(8,10,13,.96); border: 1px solid var(--line);
+        font-size: .88rem; opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease;
+        max-width: min(90vw, 460px); text-align: center;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      .stage { max-width: 980px; margin: 0 auto; padding: 20px 16px 80px; }
+      header.hero { padding: 22px 0 24px; max-width: 640px; }
+      header.hero h1 { margin: 0 0 8px; font-weight: 600; letter-spacing: -0.02em; font-size: clamp(1.8rem, 5vw, 2.5rem); }
+      header.hero p { margin: 0; color: var(--ink-dim); font-size: .95rem; line-height: 1.55; }
+      header.hero .local {
+        display: inline-block; margin-top: 14px; font-size: .76rem; color: var(--accent);
+        border: 1px solid var(--accent-dim); border-radius: 999px; padding: 5px 12px; background: rgba(246,168,33,.07);
+      }
+
+      .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 14px; }
+      .panel.hot { border-color: var(--accent); }
+      .panel__head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+      .panel__name { font-size: .7rem; letter-spacing: .2em; text-transform: uppercase; color: var(--ink-dim); }
+      .panel__note { font-size: .76rem; color: var(--ink-faint); margin-left: auto; }
+
+      .source-row { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; }
+      .source-row .title { font-size: 1rem; font-weight: 600; margin-right: auto; }
+      .stats { display: flex; flex-wrap: wrap; gap: 6px 22px; margin: 14px 0 0; padding: 0; list-style: none; }
+      .stats li { font-size: .74rem; color: var(--ink-faint); }
+      .stats b { display: block; font: 600 1.15rem var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); }
+
+      #roll { display: block; width: 100%; height: 330px; border-radius: 8px; background: #0a0c0f; cursor: pointer; touch-action: none; }
+      .now { min-height: 2.6em; margin: 10px 0 0; font-size: .84rem; color: var(--ink-dim); line-height: 1.3; }
+      .now b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+      .transport { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
+      #play {
+        width: 46px; height: 46px; border-radius: 50%; border: 0; background: var(--accent); color: #1a1204;
+        cursor: pointer; display: grid; place-items: center; flex: none; -webkit-tap-highlight-color: transparent;
+      }
+      #play:hover { background: #ffbe4a; }
+      #play:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+      #play .pause { display: none; }
+      #play.playing .play { display: none; }
+      #play.playing .pause { display: block; }
+      #time { font: .9rem var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); min-width: 9.5em; }
+      .field { display: flex; align-items: center; gap: 8px; }
+      .field > span { font-size: .68rem; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); }
+      .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+      .seg button {
+        font: inherit; font-size: .78rem; color: var(--ink-dim); background: none; border: 0; padding: 6px 11px; cursor: pointer;
+        font-variant-numeric: tabular-nums;
+      }
+      .seg button + button { border-left: 1px solid var(--line); }
+      .seg button[aria-pressed="true"] { background: rgba(246,168,33,.14); color: var(--accent); }
+      .num {
+        font: .82rem var(--mono); font-variant-numeric: tabular-nums; color: var(--ink); background: none;
+        border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 5.2em;
+      }
+      .num:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+      #tempo { font: .78rem var(--mono); color: var(--ink-faint); margin-left: auto; font-variant-numeric: tabular-nums; }
+
+      .mix { display: grid; gap: 2px; }
+      .strip {
+        display: grid; grid-template-columns: 12px minmax(0, 1.5fr) auto auto minmax(90px, 1.2fr) 3.2em;
+        align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line-soft);
+      }
+      .strip:first-child { border-top: 0; }
+      .strip.master { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 11px; }
+      .strip.quiet .strip__name, .strip.quiet .swatch { opacity: .4; }
+      .swatch { width: 10px; height: 10px; border-radius: 2px; }
+      .strip__name { font-size: .86rem; min-width: 0; }
+      .strip__name small { display: block; font-size: .7rem; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .chip {
+        font: 600 .7rem var(--mono); width: 26px; height: 24px; border-radius: 6px; border: 1px solid var(--line);
+        background: none; color: var(--ink-faint); cursor: pointer; padding: 0;
+      }
+      .chip[aria-pressed="true"].mute { background: #e2695a; border-color: #e2695a; color: #1a0705; }
+      .chip[aria-pressed="true"].solo { background: var(--accent); border-color: var(--accent); color: #1a1204; }
+      .strip input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
+      .strip output { font: .74rem var(--mono); color: var(--ink-faint); text-align: right; font-variant-numeric: tabular-nums; }
+      /* On a phone the fader gets a row of its own, so the name has room
+         and the fader is long enough to set with a thumb. */
+      @media (max-width: 620px) {
+        .strip { grid-template-columns: 12px minmax(0, 1fr) auto auto 3.2em; row-gap: 6px; }
+        .strip input[type="range"] { grid-column: 1 / -1; grid-row: 2; height: 28px; }
+        .strip output { grid-column: 5; grid-row: 1; }
+      }
+
+      footer { margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line-soft); font-size: .78rem; color: var(--ink-faint); line-height: 1.65; max-width: 680px; }
+      footer h2 { font-size: .7rem; letter-spacing: .2em; text-transform: uppercase; color: var(--ink-dim); font-weight: 500; margin: 22px 0 8px; }
+      footer code, footer pre { font-family: var(--mono); font-size: .95em; color: var(--ink-dim); }
+      footer pre { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; overflow-x: auto; line-height: 1.5; }
+      footer dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; margin: 0; }
+      footer dt { color: var(--ink-dim); }
+      footer dd { margin: 0; }
+      @media (prefers-reduced-motion: reduce) { * { transition-duration: .01ms !important; } }
+    </style>
+  </head>
+  <body>
+    <nav class="bar">
+      <a class="back" href="../../" aria-label="Back to gallery">←<span class="back-label"> Gallery</span></a>
+      <span class="crumb">Sonification</span>
+      <button class="bar-btn push" id="midiBtn" type="button">MIDI</button>
+      <button class="bar-btn" id="dawBtn" type="button" title="A DAWproject session: opens in Bitwig, Studio One and Cubase">DAW</button>
+      <button class="bar-btn primary" id="wavBtn" type="button">WAV</button>
+    </nav>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <main class="stage">
+      <header class="hero">
+        <h1>Fried Mango Sonification</h1>
+        <p>
+          The sound of a job search. Each day is a beat, and each layer of the search has
+          its own 8-bit voice. Mix the tracks, then take the notes into a DAW as MIDI or as a
+          ready-made session, or export the chip version as it stands.
+        </p>
+        <span class="local">Search data stays local</span>
+      </header>
+
+      <section class="panel" id="drop">
+        <div class="panel__head">
+          <span class="panel__name">Search</span>
+          <span class="panel__note" id="srcNote">Drop a search file anywhere on this page</span>
+        </div>
+        <div class="source-row">
+          <span class="title" id="title">A job search</span>
+          <button class="btn" id="pickBtn" type="button">Choose file</button>
+          <button class="btn" id="demoBtn" type="button">Demo</button>
+        </div>
+        <ul class="stats" id="stats"></ul>
+      </section>
+
+      <section class="panel">
+        <div class="panel__head">
+          <span class="panel__name">Score</span>
+          <span class="panel__note">Space plays · tap the score to jump</span>
+        </div>
+        <canvas id="roll" aria-label="The score: one lane per track, days left to right"></canvas>
+        <p class="now" id="now"></p>
+        <div class="transport">
+          <button id="play" type="button" aria-label="Play">
+            <svg class="play" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z" /></svg>
+            <svg class="pause" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z" /></svg>
+          </button>
+          <span id="time">0:00.0 / 0:00.0</span>
+          <div class="field">
+            <span>Days per second</span>
+            <div class="seg" id="speedSeg">
+              <button type="button" data-speed="1" aria-pressed="false">1</button>
+              <button type="button" data-speed="2" aria-pressed="true">2</button>
+              <button type="button" data-speed="3" aria-pressed="false">3</button>
+              <button type="button" data-speed="4" aria-pressed="false">4</button>
+            </div>
+          </div>
+          <label class="field">
+            <span>Length, seconds</span>
+            <input class="num" id="lengthIn" type="number" inputmode="decimal" min="1" step="1" />
+          </label>
+          <span id="tempo"></span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel__head">
+          <span class="panel__name">Mixer</span>
+          <button class="btn panel__note" id="resetMix" type="button">Reset</button>
+        </div>
+        <div class="mix" id="mix"></div>
+      </section>
+
+      <footer>
+        <h2>What you are hearing</h2>
+        <dl>
+          <dt>Beat</dt><dd>Four on the floor: a kick on every day, a clap on two and four. Not data, the floor under it.</dd>
+          <dt>Days</dt><dd>A tick each day, with more of them as the search goes on.</dd>
+          <dt>Postings captured</dt><dd>A bass note, louder the more postings came in that day.</dd>
+          <dt>Jobs pursued</dt><dd>Thin high blips, one per job picked out, up to four.</dd>
+          <dt>Applications sent</dt><dd>An arpeggio, one note per application. A busy day plays faster.</dd>
+          <dt>Interviews</dt><dd>A rising two-note call.</dd>
+          <dt>Offers</dt><dd>The fanfare, with an echo.</dd>
+          <dt>Milestones</dt><dd>A crash on each captioned moment.</dd>
+        </dl>
+        <p>
+          Every pitched track plays notes from the same four-bar chord loop, so the layers stay in
+          tune with each other. Nothing is random: one search always makes the same piece. At 2 days
+          per second the tempo is 120 BPM, at 3 it is 180. Length is the whole piece: the days, then
+          an outro and a last chord to cover a film that holds on its final frame.
+        </p>
+        <h2>The exports</h2>
+        <dl>
+          <dt>MIDI</dt><dd>One named track per layer, the tempo, and the captions as markers.</dd>
+          <dt>DAW</dt><dd>A DAWproject session for Bitwig, Studio One or Cubase: the same tracks with their colors and this mixer. Tracks arrive empty, so give each an instrument. Beat, Days and Milestones are drum notes, placed on the pads of a Bitwig Drum Machine kit.</dd>
+          <dt>WAV</dt><dd>The chip version, mixed as it stands, at exactly the length shown.</dd>
+        </dl>
+        <h2>The search file</h2>
+        <p>
+          JSON. Days are counted from 0. Each job is five day numbers: found, applied, interview,
+          offer, closed, with -1 for a stage it never reached. No names or employers are needed.
+        </p>
+<pre>{
+  "title": "A job search",
+  "start": "2026-01-05",
+  "days": 120,
+  "captured": [12, 30, 0, 8],
+  "jobs": [[0, 1, 14, -1, -1], [2, -1, -1, -1, -1]],
+  "milestones": [[14, "The first interview."]]
+}</pre>
+        <p><code data-build-info></code></p>
+      </footer>
+    </main>
+
+    <script src="../shared/build-version.js"></script>
+    <script type="module" src="./fried-mango-sonification.js"></script>
+    <script src="../shared/build-footer.js"></script>
+  </body>
+</html>

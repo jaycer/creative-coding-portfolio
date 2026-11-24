@@ -1,8 +1,11 @@
 // zip.js — write and read a zip archive, in the browser, with no library.
 //
-// A project file is the original audio, the settings and a render, kept
-// together. A zip is the one container every system opens without help, so
-// the pieces stay usable when this app is not around.
+// A zip is the one container every system opens without help, so what an app
+// saves in one stays usable when the app is not around. Gain Stage keeps a
+// project in one (the original audio, the settings and a render); Fried Mango
+// Sonification writes a DAWproject session, which is a zip by definition.
+//
+// An ES module, unlike the classic scripts beside it: import it.
 //
 // Writing stores the files as they are, without compression. Audio that is
 // already compressed gains nothing from deflate, a WAV gains little, and

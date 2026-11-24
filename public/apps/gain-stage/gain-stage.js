@@ -22,7 +22,7 @@ import {
 } from './chain.js';
 import { PRESETS } from './presets.js';
 import { encodeWav, downloadBlob } from './wav.js';
-import { makeZip, readZip } from './zip.js';
+import { makeZip, readZip } from '../shared/zip.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
