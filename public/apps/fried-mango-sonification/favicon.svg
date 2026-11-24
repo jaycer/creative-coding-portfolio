@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#0b0d11"/>
+  <!-- a pulse wave, the chip's own shape -->
+  <path d="M4 20 H9 V10 H14 V20 H18 V13 H23 V20 H28" fill="none" stroke="#f6a821" stroke-width="2.6" stroke-linejoin="miter"/>
+  <rect x="5" y="24" width="3" height="3" fill="#3b8eea"/>
+  <rect x="14" y="24" width="3" height="3" fill="#f26b21"/>
+  <rect x="23" y="24" width="3" height="3" fill="#22c58b"/>
+</svg>
